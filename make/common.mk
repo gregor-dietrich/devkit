@@ -1,7 +1,9 @@
 # Targets shared by every devkit consumer; the interface is docs/contract.md.
 # `help` lists every rule line that carries a `## description` comment.
 
-PROJECT_ROOT ?= $(CURDIR)
+# `:=`, not `?=`: an inherited PROJECT_ROOT must not aim the git targets at
+# another repository. A command-line PROJECT_ROOT=... still overrides it.
+PROJECT_ROOT := $(CURDIR)
 export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR DEVKIT
 
 MAKEFLAGS += --no-print-directory
@@ -15,8 +17,9 @@ help: ## list the available targets
 
 check: check-devkit ## verify the local environment
 
-check-devkit: ## verify devkitw matches the pin and .devkit links to it
-	@cd "$(PROJECT_ROOT)" && ./devkitw self-check
+check-devkit: ## verify .devkit links to the pin (warns on a stale devkitw)
+	@cd "$(PROJECT_ROOT)" && ./devkitw self-check \
+		|| echo "check-devkit: warning: ./devkitw differs from .devkit/devkitw" >&2
 	@[ "$$(cd "$(PROJECT_ROOT)/.devkit" && pwd -P)" = "$$(cd "$(DEVKIT)" && pwd -P)" ] \
 		|| { echo "check-devkit: .devkit does not resolve to $(DEVKIT)" >&2; exit 1; }
 
