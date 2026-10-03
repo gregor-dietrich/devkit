@@ -28,7 +28,7 @@
         <property name="fileNamePattern" value="module\-info\.java$" />
     </module>
     <!-- https://checkstyle.org/config_filters.html#SuppressionFilter -->
-    <!-- optional=false: the file exists and is load-bearing (it carries the UlidUtil exemption), so
+    <!-- optional=false: the file exists and is load-bearing (it carries the project's own exemptions), so
          a rename or a move must fail the build rather than quietly widen the rule set. -->
     <module name="SuppressionFilter">
         <property name="file" value="${org.checkstyle.google.suppressionfilter.config}"
