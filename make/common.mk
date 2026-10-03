@@ -1,0 +1,33 @@
+# Targets shared by every devkit consumer; the interface is docs/contract.md.
+# `help` lists every rule line that carries a `## description` comment.
+
+PROJECT_ROOT ?= $(CURDIR)
+export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR DEVKIT
+
+MAKEFLAGS += --no-print-directory
+
+.PHONY: help check check-devkit branch rebase tag untag
+
+help: ## list the available targets
+	@echo "$(PROJECT) - Available commands:"
+	@awk -F':.*## ' '/^[A-Za-z0-9_.-]+:[^=].*## /{printf "  make %-16s - %s\n", $$1, $$2}' \
+		$(MAKEFILE_LIST) | LC_ALL=C sort
+
+check: check-devkit ## verify the local environment
+
+check-devkit: ## verify devkitw matches the pin and .devkit links to it
+	@cd "$(PROJECT_ROOT)" && ./devkitw self-check
+	@[ "$$(cd "$(PROJECT_ROOT)/.devkit" && pwd -P)" = "$$(cd "$(DEVKIT)" && pwd -P)" ] \
+		|| { echo "check-devkit: .devkit does not resolve to $(DEVKIT)" >&2; exit 1; }
+
+branch: ## create or reset a git branch from a source (prompts for names and pushes)
+	@"$(DEVKIT)/scripts/branch.sh"
+
+rebase: ## interactive git rebase against a target (defaults to origin/main)
+	@"$(DEVKIT)/scripts/rebase.sh"
+
+tag: ## create, sign and push a new git tag (auto-increments latest tag suggestion)
+	@"$(DEVKIT)/scripts/tag.sh"
+
+untag: ## delete a local and remote git tag (prompts for tag to delete)
+	@"$(DEVKIT)/scripts/untag.sh"
