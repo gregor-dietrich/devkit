@@ -29,8 +29,8 @@ DEVKIT := $(shell ./devkitw path)
 ifeq ($(DEVKIT),)
 $(error devkitw failed; see its message above)
 endif
-include $(DEVKIT)/make/common.mk
-include $(DEVKIT)/make/java-maven.mk
+include .devkit/make/common.mk
+include .devkit/make/java-maven.mk
 # project-only targets follow (dev, build, release, password, ...)
 ```
 
@@ -39,19 +39,26 @@ include $(DEVKIT)/make/java-maven.mk
 - `./devkitw path` (also the default with no argument) prints the absolute
   path of the pinned devkit checkout, fetching it on first use into
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/<commit>/`, and points the
-  project's `./.devkit` symlink at it. No network when cached.
+  project's `./.devkit` symlink at it. No network when cached. The cached
+  checkout is read-only, and the pinned `version` is recorded with it.
 - `./devkitw self-check` exits non-zero when the project's `devkitw` differs
-  from the pinned commit's copy.
+  from the pinned commit's copy. It is advisory: `make check` warns on it
+  and does not fail.
 - It fails closed, with one line naming the cause, on: missing or malformed
-  `devkit.toml`, fetched commit ≠ `commit`, every remote unreachable, and a
-  `.devkit` that exists and is not a symlink. It never falls back to another
-  version.
+  `devkit.toml`, fetched commit ≠ `commit`, a cache hit whose recorded
+  version ≠ `version`, every remote unreachable, and a `.devkit` that
+  exists and is not a symlink. It never falls back to another version.
 
 ## Make
 
-- `make/common.mk` sets `PROJECT_ROOT ?= $(CURDIR)` and exports
-  `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR DEVKIT` to every
-  recipe.
+- The consumer includes both files through the link, `.devkit/make/...`,
+  never as `$(DEVKIT)/make/...`: `include` splits on spaces, so a cache
+  path containing one would break. The `ifeq ($(DEVKIT),)` guard stays,
+  since it is what reports a failed `devkitw`.
+- `make/common.mk` sets `PROJECT_ROOT := $(CURDIR)`, so an inherited
+  environment value never wins (a command-line `PROJECT_ROOT=...` still
+  does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
+  FRONTEND_DIR DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `branch`,
   `rebase`, `tag`, `untag`. `java-maven.mk` owns `check-java`, `install`,
   `lint`, `format`, `test`, `coverage`, `audit`, `clean`, `kill`. Neither
@@ -59,6 +66,8 @@ include $(DEVKIT)/make/java-maven.mk
 - `check` is composed by prerequisites, never by two recipes:
   `common.mk` declares `check: check-devkit`, `java-maven.mk` adds
   `check: check-java`.
+- `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
+  only warns when `./devkitw self-check` fails.
 - `help` lists every target that carries a `## description` comment on its
   rule line, the consumer's own targets included.
 - Every target is `.PHONY`. Recipes call scripts as

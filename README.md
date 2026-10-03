@@ -17,9 +17,10 @@ configuration (a private repository) are per machine and live elsewhere.
 Only devkit decides whether a build passes, so only devkit is pinned.
 
 **Why a wrapper.** A consumer commits `devkitw` and a text pin,
-`devkit.toml`. Nothing is installed globally, nothing shared can be edited
-locally, a bump is a two-line text diff, and a cached checkout works
-offline. The wrapper fails closed: it never falls back to another version
+`devkit.toml`. Nothing is installed globally, a bump is a two-line text
+diff, and a cached checkout works offline. The cache is read-only: a change
+to shared tooling is made and released in devkit, never edited inside a
+project. The wrapper fails closed: it never falls back to another version
 and refuses a fetched commit that differs from the pin.
 
 **Rejected options:**
@@ -51,16 +52,18 @@ written against it. In short, a project:
    `commit`);
 3. adds `/.devkit` to `.gitignore`;
 4. shapes its `Makefile` as the contract shows: profile variables,
-   `DEVKIT := $(shell ./devkitw path)`, the includes, then its own targets;
-   a rule line ending in `## description` is listed by `make help`;
+   `DEVKIT := $(shell ./devkitw path)` and its empty-result guard,
+   `include .devkit/make/common.mk` and `.devkit/make/java-maven.mk`, then
+   its own targets; a rule line ending in `## description` is listed by
+   `make help`;
 5. points its pom at the shared configs through the link,
    `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`.
 
-`make check` then verifies, besides the language checks, the wrapper against
-the pin and the `.devkit` link against the checkout. Requirements: git, GNU
-make, bash and python3; Windows is not targeted. On a fresh clone, run any
-`make` target once: a bare `./mvnw` fails until the wrapper has created
-`.devkit`.
+`make check` then fails when `.devkit` does not resolve to the pinned
+checkout, warns when the committed `devkitw` is stale, and runs the language
+checks. Requirements: git, GNU make, bash and python3; Windows is not
+targeted. On a fresh clone, run any `make` target once: a bare `./mvnw`
+fails until the wrapper has created `.devkit`.
 
 ## Releasing
 
@@ -83,4 +86,4 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 ```
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
-`make check` reports the mismatch until it does.
+`make check` warns until it does.
