@@ -50,7 +50,8 @@ if ! command -v "${MVN_CMD}" &> /dev/null; then
     exit 5
 fi
 
-if ! MVN_VERSION_OUTPUT=$("${MVN_CMD}" -version); then
+# -B (batch mode) turns off the ANSI colour some builds put around the version.
+if ! MVN_VERSION_OUTPUT=$("${MVN_CMD}" -B -version); then
     echo "ERROR: '${MVN_CMD} -version' failed. Exiting."
     exit 6
 fi

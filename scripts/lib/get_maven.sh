@@ -23,7 +23,8 @@ if ! command -v "${MVN_CMD}" &> /dev/null; then
     echo "Please install Maven version ${REQUIRED_MAVEN_VERSION} or higher and add it to PATH."
     exit 1
 fi
-MAVEN_VERSION=$("${MVN_CMD}" -version | head -n 1 | awk '{print $3}') || true
+# -B (batch mode) turns off the ANSI colour some builds put around the version.
+MAVEN_VERSION=$("${MVN_CMD}" -B -version | head -n 1 | awk '{print $3}') || true
 if [[ -z "$MAVEN_VERSION" ]]; then
     echo "ERROR: Could not determine Maven version. Exiting."
     exit 2
@@ -33,7 +34,7 @@ printf -v versions '%s\n%s' "$REQUIRED_MAVEN_VERSION" "$MAVEN_VERSION"
 if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
     if [[ "${MVN_CMD}" != "./mvnw" && -x "./mvnw" ]]; then
         MVN_CMD="./mvnw"
-        MAVEN_VERSION=$("${MVN_CMD}" -version 2>/dev/null | head -n 1 | awk '{print $3}') || true
+        MAVEN_VERSION=$("${MVN_CMD}" -B -version 2>/dev/null | head -n 1 | awk '{print $3}') || true
         if [[ -z "$MAVEN_VERSION" ]]; then
             echo "ERROR: Could not determine Maven version using ${MVN_CMD}. Exiting."
             exit 3
