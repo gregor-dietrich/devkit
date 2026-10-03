@@ -15,8 +15,8 @@ REPO_ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 
 # Directory holding package.json, package-lock.json and the pom that declares
 # <vaadin.version>. Single-module projects leave this at the repo root; multi-module
-# ones pass the Vaadin module (e.g. "midas-gui") as the first argument. Keeping the
-# path a parameter is what lets this file stay byte-identical across both projects.
+# ones pass the Vaadin module (e.g. "gui") as the first argument. Keeping the path a
+# parameter is what lets one copy of this file serve both layouts.
 FRONTEND_DIR: Path = REPO_ROOT / (sys.argv[1] if len(sys.argv) > 1 else ".")
 
 # Security-sensitive Flow "default dependencies" that Vaadin's frontend generator

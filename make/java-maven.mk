@@ -7,7 +7,7 @@
 #
 # Module selection: ONLY=<module>[,<module>...] limits install, lint,
 # format, test, coverage and clean to those MODULES (passed to Maven as
-# -pl). Unset, the whole reactor runs. Example: make test ONLY=midas-api
+# -pl). Unset, the whole reactor runs. Example: make test ONLY=api
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
 # `audit` reads NVD_API_KEY from the environment, else from .env.build.

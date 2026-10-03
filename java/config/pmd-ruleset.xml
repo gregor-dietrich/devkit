@@ -3,8 +3,8 @@
     xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
-    <description>Minimal PMD rules shared by the Midas and AIMathTutor projects.
-        Focus on critical issues only; keep this file byte-identical across both.</description>
+    <description>Minimal PMD rules shared by every project that consumes devkit.
+        Focus on critical issues only.</description>
 
     <!-- Error Prone: Only critical rules -->
     <rule ref="category/java/errorprone.xml">
