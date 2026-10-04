@@ -7,9 +7,10 @@
 #          file://, through make help, check, lint, test, coverage and format;
 #          then break copies of the monolith (format, a shared checkstyle
 #          rule, coverage) and expect lint or test to fail for that reason.
-#          Not audit (needs an NVD key) and not kill (stops every Docker
-#          container). Needs JDK 25, Maven >= 3.9.9, python3 and the network
-#          (Maven Central, Eclipse P2); ~/.m2 is used as is.
+#          audit runs only without an NVD key, where it must refuse to
+#          start; kill not at all (stops every Docker container). Needs
+#          JDK 25, Maven >= 3.9.9, python3 and the network (Maven Central,
+#          Eclipse P2); ~/.m2 is used as is.
 set -euo pipefail
 shopt -s globstar
 
@@ -103,6 +104,8 @@ negatives() {
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
+  NVD_API_KEY= check "java-monolith: make audit fails without an NVD key" \
+    fails_with "$work/java-monolith" audit "NVD_API_KEY not set"
 }
 
 java_part() {
