@@ -32,5 +32,9 @@ expect "api gui" gui "app-api" "ERROR: ONLY entry 'app-api' is not one of MODULE
 expect "api gui" gui "api," "api|api|false"
 expect "api gui" gui ",api" "ERROR: ONLY entry '' is not one of MODULES (api gui). (exit 1)"
 expect "" "" "api" "ERROR: ONLY entry 'api' is not one of MODULES (empty: a monolith). (exit 1)"
+expect "api gui" gui "api gui" "ERROR: ONLY api\\ gui contains whitespace; separate MODULES entries with commas only. (exit 1)"
+expect "api gui" gui $'api\ngui' "ERROR: ONLY \$'api\\ngui' contains whitespace; separate MODULES entries with commas only. (exit 1)"
+expect "api gui" gui "api, gui" "ERROR: ONLY api\\,\\ gui contains whitespace; separate MODULES entries with commas only. (exit 1)"
+expect "api gui" gui "gui,gui/,api,:gui" "gui,api|gui api|true"
 
 [[ $fails == 0 ]]

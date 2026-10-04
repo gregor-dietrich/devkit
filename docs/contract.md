@@ -87,10 +87,11 @@ include .devkit/make/java-maven.mk
   document.
 - `ONLY` is read through `scripts/lib/select_modules.sh`, never parsed by
   hand. It normalizes each entry to its `MODULES` spelling (`./<dir>`,
-  `<dir>/` and `:<dir>` as Maven's `-pl` accepts them), fails on an entry
-  that names no module, and exports the normalized `ONLY`, `SELECTED` and
-  `FRONTEND_SELECTED`. A consumer's own scripts that act on `ONLY` source
-  it the same way.
+  `<dir>/` and `:<dir>` as Maven's `-pl` accepts them) and keeps each module
+  once, fails on an entry that names no module and on whitespace anywhere in
+  `ONLY` (entries are separated by commas only), and exports the normalized
+  `ONLY`, `SELECTED` and `FRONTEND_SELECTED`. A consumer's own scripts that
+  act on `ONLY` source it the same way.
 
 ## Maven configuration
 
