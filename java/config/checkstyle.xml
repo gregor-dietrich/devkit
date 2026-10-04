@@ -75,12 +75,12 @@
         Scope limit, so this rule is not over-trusted: it is defence in depth, not the control.
         At an ENABLED level a flood costs the same either way. The levers that actually bound
         flooding are sampling and rate limiting at the emit site, level discipline on hot paths,
-        and bounding attacker-controlled values before they are logged. See AiInteractionLogger,
-        which logs questionLen/answerLen rather than the question and answer text; no linter
-        enforces that, and it matters more than this rule does.
+        and bounding attacker-controlled values before they are logged, e.g. logging the length of
+        attacker-controlled text rather than the text; no linter enforces that, and it matters more
+        than this rule does.
 
         Checker-level (RegexpMultiline) rather than RegexpSinglelineJava so that calls wrapped
-        across lines are caught — 15% of log calls here span more than one line.
+        across lines are caught — a sizeable share of log calls span more than one line.
 
         The regex anchors on the FIRST argument of the call, which is what keeps it precise:
           - "msg " + value        -> flagged (literal, then +, then a non-literal)
@@ -123,23 +123,10 @@
             <message key="import.illegal"
                 value="Use jakarta.annotation.Nullable instead." />
         </module>
-        <module name="IllegalImport">
-            <property name="id" value="IllegalImport.UlidCreator" />
-            <property name="illegalClasses" value="com.github.f4b6a3.ulid.UlidCreator" />
-            <message key="import.illegal"
-                value="Import UlidCreator directly is not allowed — use UlidUtil instead." />
-        </module>
-        <!-- REST Assured is centralised behind TestUtil so that base URI, auth and
-             content-type defaults cannot drift per test class. -->
-        <module name="IllegalImport">
-            <property name="id" value="IllegalImport.RestAssured" />
-            <property name="illegalPkgs" value="io.restassured" />
-            <message key="import.illegal"
-                value="Importing from io.restassured directly is not allowed — use TestUtil instead to ensure consistent testing patterns." />
-        </module>
-        <!-- The logging facade is fixed by AGENTS.md: org.jboss.logging.Logger. SLF4J and
-             java.util.logging both resolve on the classpath through transitive Quarkus
-             dependencies, so nothing but this rule stops one from being imported by accident.
+        <!-- The logging facade is JBoss Logging (org.jboss.logging.Logger), which the LOG rules
+             below assume. SLF4J and java.util.logging both resolve on the classpath through
+             transitive Quarkus dependencies, so nothing but this rule stops one from being
+             imported by accident.
              The whole SLF4J package is banned, not just Logger/LoggerFactory: MDC is the class
              one imports next to the logger, and it resolves transitively just the same. -->
         <module name="IllegalImport">
@@ -182,20 +169,6 @@
             <property name="ignoreComments" value="true" />
             <property name="message"
                 value="Use LocalDateTime.now(ZoneId.systemDefault()) instead for explicit timezone handling." />
-        </module>
-        <!--
-            JOIN FETCH on a @OneToMany / @ManyToMany collection cannot coexist with
-            setMaxResults: Hibernate emits HHH000104 and paginates in memory, undoing the
-            LIMIT pushdown. List of collection field names matches the entity model; add
-            new collection fields here when they are introduced.
-        -->
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.JoinFetchCollection" />
-            <property name="format"
-                value="(?i)JOIN\s+FETCH\s+\w+\.(userAccountMetas|userGroupMetas|outgoingPayments|incomingPayments|commentFlags|interactions|exercises|sessions|comments|children|parents|payments|replies|members|metas|posts|flags|tags|users)\b" />
-            <property name="ignoreComments" value="true" />
-            <property name="message"
-                value="JOIN FETCH on a collection cannot coexist with pagination (HHH000104, in-memory paging). Use @BatchSize, a second 'WHERE id IN :ids' query, or drop the JOIN FETCH." />
         </module>
 
         <!--
@@ -547,9 +520,8 @@
             <property name="tokens" value="SINGLE_LINE_COMMENT, BLOCK_COMMENT_BEGIN" />
         </module>
         <!-- https://checkstyle.org/config_filters.html#SuppressionXpathFilter -->
-        <!-- Stays optional=true, unlike the SuppressionFilter above: no
-             checkstyle-xpath-suppressions.xml exists in this repository, so requiring one would
-             fail the build. Flip it to false if that file is ever added. -->
+        <!-- Stays optional=true, unlike the SuppressionFilter above: most projects have no
+             checkstyle-xpath-suppressions.xml, so requiring one would fail their build. -->
         <module name="SuppressionXpathFilter">
             <property name="file" value="${org.checkstyle.google.suppressionxpathfilter.config}"
                 default="checkstyle-xpath-suppressions.xml" />

@@ -141,6 +141,19 @@
             org.checkstyle.google.suppressionfilter.config=${maven.multiModuleProjectDirectory}/checkstyle-suppressions.xml</propertyExpansion>
           <includeTestSourceDirectory>true</includeTestSourceDirectory>
         </configuration>
+        <executions>
+          <execution>
+            <id>project</id>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <configLocation>${maven.multiModuleProjectDirectory}/checkstyle-project.xml</configLocation>
+              <cacheFile>${project.build.directory}/checkstyle-project-cachefile</cacheFile>
+              <outputFile>${project.build.directory}/checkstyle-project-result.xml</outputFile>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>com.github.spotbugs</groupId>

@@ -3,12 +3,13 @@
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh and
-#          tests/frontend_deps_test.sh.
+#          tests/check_frontend_deps_test.sh.
 #   java   tag the tree under test, committed or not, in a temp bare repo and
 #          run every tests/fixtures/java-* consumer, pinned to that tag over
 #          file://, through make help, check, lint, test, coverage and format;
-#          then break copies of the monolith (format, a shared checkstyle
-#          rule, coverage) and expect lint or test to fail for that reason.
+#          then break copies of the monolith (format, a shared and a project
+#          checkstyle rule, coverage) and expect lint or test to fail for that
+#          reason, and expect check to fail without checkstyle-project.xml.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3 and the network (Maven Central,
@@ -40,7 +41,7 @@ shell_part() {
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
-  check "frontend_deps tests" "$root/tests/frontend_deps_test.sh"
+  check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
@@ -106,9 +107,16 @@ negatives() {
   negative format lint "format violations" "$main" 's/^    public/  public/'
   negative checkstyle lint "Fully Qualified Class Names" "$main" \
     's/return name\./return java.util.Objects.requireNonNull(name)./'
+  negative project-checkstyle lint "Fixture project rule" "$main" \
+    's/^package .*/&\n\nimport java.util.Objects;/; s/return name\./return Objects.requireNonNull(name)./'
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
+  local proj=$work/no-project-checkstyle
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  rm "$proj/checkstyle-project.xml"
+  check "java-monolith: make check fails without checkstyle-project.xml" \
+    fails_with "$proj" check "checkstyle-project.xml"
   NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
     fails_with "$work/java-monolith" audit "NVD_API_KEY not set"
 }

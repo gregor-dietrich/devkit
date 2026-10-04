@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<!-- devkit test fixture: the project's own Checkstyle rules, run as the checkstyle plugin's
+     execution "project". One rule, which tests/run.sh breaks on purpose. -->
+<module name="Checker">
+    <property name="charset" value="UTF-8" />
+    <property name="severity" value="error" />
+
+    <module name="SuppressionFilter">
+        <property name="file" value="${org.checkstyle.google.suppressionfilter.config}"
+            default="checkstyle-suppressions.xml" />
+        <property name="optional" value="false" />
+    </module>
+
+    <module name="TreeWalker">
+        <module name="IllegalImport">
+            <property name="id" value="IllegalImport.FixtureObjects" />
+            <property name="illegalClasses" value="java.util.Objects" />
+            <message key="import.illegal"
+                value="Fixture project rule: java.util.Objects is banned here." />
+        </module>
+    </module>
+</module>

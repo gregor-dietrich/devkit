@@ -24,7 +24,7 @@ export ONLY
 
 check: check-java
 
-check-java: ## Verify the JDK, Maven >= 3.9.9 and the pom's version pins
+check-java: ## Verify the JDK, Maven >= 3.9.9, Python >= 3.11, checkstyle-project.xml and the pom's version pins
 	@"$(DEVKIT)/scripts/java/check.sh"
 
 install: check ## make check, then mvn clean install -DskipTests

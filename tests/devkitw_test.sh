@@ -63,6 +63,9 @@ $mirror
 # commit = "0000000000000000000000000000000000000000"
 version="$3"
 commit = "$4"  # the commit the tag resolves to
+
+[frontend.min-pins]
+mirror = "file://$bare"
 EOF
 }
 
@@ -124,6 +127,12 @@ case_mirror() {
 case_unreachable() {
   rm -rf "${cache:?}/$c1"
   pin "$nowhere" "$nowhere" v0.0.1 "$c1"
+  run path
+  one_line_error && [ ! -e "$cache/$c1" ] && no_temp_left
+}
+case_trailing_mirror() { # pin() puts a reachable mirror in a later table
+  rm -rf "${cache:?}/$c1"
+  pin "$nowhere" "" v0.0.1 "$c1"
   run path
   one_line_error && [ ! -e "$cache/$c1" ] && no_temp_left
 }
@@ -222,6 +231,7 @@ t "2 hit needs no remote and no git" case_hit_offline
 t "3 wrong commit fails and caches nothing" case_wrong_commit
 t "4 unreachable url falls back to the mirror" case_mirror
 t "4b both remotes unreachable fails and caches nothing" case_unreachable
+t "4c a mirror outside [devkit] is ignored" case_trailing_mirror
 t "5 new pin repoints the link" case_repoint
 t "6 .devkit that is a directory fails" case_not_a_link
 t "7a missing devkit.toml fails" case_no_toml

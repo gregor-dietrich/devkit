@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Verify committed frontend deps against pinned minimums and Vaadin's own version manifests."""
+"""Verify committed frontend deps against the project's minimums and Vaadin's own version manifests."""
 
 import json
 import os
 import re
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
@@ -20,14 +21,10 @@ REPO_ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 # parameter is what lets one copy of this file serve both layouts.
 FRONTEND_DIR: Path = REPO_ROOT / (sys.argv[1] if len(sys.argv) > 1 else ".")
 
-# Security-sensitive Flow "default dependencies" that Vaadin's frontend generator
-# can silently re-pin below a safe minimum on rebuild. One "<npm-package>": "<min>".
-MIN_PINS: Dict[str, str] = {"react-router": "7.15.0", "dompurify": "3.4.16"}
-
 # A concrete dotted version (e.g. "25.2.0"); excludes npm "$ref" overrides and "$var".
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+")
 
-# MIN_PINS accept stable releases only: a prerelease such as "3.4.16-rc.1" sorts below its release
+# Minimums accept stable releases only: a prerelease such as "3.4.16-rc.1" sorts below its release
 # and may lack the fix, but parse_version() would rank it at or above the minimum.
 STABLE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
@@ -49,6 +46,46 @@ REGEN_HINT = (
     "(scripts/regen-frontend.sh where present, otherwise a Vaadin build-frontend run), "
     "or move <vaadin.version> to the version the manifest was generated from."
 )
+
+
+def load_min_pins(toml_path: Path) -> Dict[str, str]:
+    """Read the project's npm minimums, "<npm-package>" = "<min>", from [frontend.min-pins].
+
+    The project names the security-sensitive packages that Vaadin's frontend generator can
+    silently re-pin below a safe minimum on rebuild. Fails closed: a missing file or table is
+    an error; an empty table declares none.
+    """
+    table = f"[frontend.min-pins] in {toml_path}"
+    remedy = (
+        "List the project's npm minimums there (an empty table declares none); "
+        "when upgrading from v0.1.x, see .devkit/README.md."
+    )
+    if not toml_path.is_file():
+        raise ValueError(f"Missing {table}: no such file. {remedy}")
+    try:
+        with toml_path.open("rb") as handle:
+            frontend = tomllib.load(handle).get("frontend")
+    except ValueError as exc:  # TOMLDecodeError and UnicodeDecodeError both subclass it
+        raise ValueError(f"{toml_path} is not valid TOML: {exc}") from exc
+    if not isinstance(frontend, dict) or "min-pins" not in frontend:
+        raise ValueError(f"Missing {table}. {remedy}")
+    frontend_map = cast(Dict[str, Any], frontend)
+    stray = sorted(key for key in frontend_map if key != "min-pins")
+    if stray:
+        raise ValueError(
+            f"Unknown key(s) under [frontend] in {toml_path}: {', '.join(stray)}; only [frontend.min-pins] is read."
+        )
+    pins = frontend_map["min-pins"]
+    if not isinstance(pins, dict):
+        raise ValueError(f"{table} must be a table.")
+    pins_map = cast(Dict[str, Any], pins)
+    for pkg, minimum in pins_map.items():
+        # An unquoted dotted name (chart.js = "1.2.3") parses as a TOML dotted key: a nested table.
+        if isinstance(minimum, dict):
+            raise ValueError(f'{pkg}.* in {table} is a table: quote package names that contain ".", "@" or "/".')
+        if not isinstance(minimum, str) or not STABLE.match(minimum):
+            raise ValueError(f"{pkg} = {json.dumps(minimum, default=str)} in {table} is not a stable x.y.z version.")
+    return cast(Dict[str, str], pins_map)
 
 
 def read_vaadin_version(pom_path: Path) -> str:
@@ -196,10 +233,12 @@ def parse_version(value: str) -> Tuple[int, ...]:
     return tuple(parts)
 
 
-def check_min_pins(pkg_json: Dict[str, Any], pkg_lock: Optional[Dict[str, Any]]) -> List[str]:
-    """Check that security-pinned packages meet their minimum version in both files."""
+def check_min_pins(
+    min_pins: Dict[str, str], pkg_json: Dict[str, Any], pkg_lock: Optional[Dict[str, Any]]
+) -> List[str]:
+    """Check that the project's pinned packages meet their minimum version in both files."""
     errors: List[str] = []
-    for pkg, minimum in MIN_PINS.items():
+    for pkg, minimum in min_pins.items():
         json_versions: Set[str] = set()
         collect_pkg_json_pin(pkg_json, pkg, json_versions)
         if not json_versions:
@@ -243,13 +282,20 @@ def main() -> None:
     pom_path = FRONTEND_DIR / "pom.xml"
 
     print("Checking pinned frontend dependencies...")
+    try:
+        min_pins = load_min_pins(REPO_ROOT / "devkit.toml")
+    except (ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print("Frontend dependency check FAILED.", file=sys.stderr)
+        sys.exit(1)
+
     pkg_json: Dict[str, Any] = json.loads(pkg_json_path.read_text(encoding="utf-8"))
     pkg_lock: Optional[Dict[str, Any]] = None
     if pkg_lock_path.is_file():
         pkg_lock = json.loads(pkg_lock_path.read_text(encoding="utf-8"))
 
-    # Check 1: security-sensitive minimum version pins.
-    errors.extend(check_min_pins(pkg_json, pkg_lock))
+    # Check 1: the project's security-sensitive minimum version pins.
+    errors.extend(check_min_pins(min_pins, pkg_json, pkg_lock))
 
     # Check 2: @vaadin/* components must match Vaadin's own version manifest.
     version = read_vaadin_version(pom_path)
@@ -257,7 +303,8 @@ def main() -> None:
     try:
         expected = load_expected_versions(maven_local_repo(), version)
     except (FileNotFoundError, KeyError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        for error in [*errors, str(exc)]:
+            print(f"ERROR: {error}", file=sys.stderr)
         print("Frontend dependency check FAILED.", file=sys.stderr)
         sys.exit(1)
 

@@ -59,7 +59,8 @@
           - resource tests that delegate the whole request-and-assert to a TestUtil
             test* helper
         Both really do assert; naming them here keeps the rule live for tests that
-        genuinely assert nothing. Add new shared assertion helpers to this list.
+        genuinely assert nothing. This list is the known exception to the contract's
+        no-project-values rule; it moves to the project once PMD offers a way.
     -->
     <rule ref="category/java/bestpractices.xml/UnitTestShouldIncludeAssert">
         <properties>
