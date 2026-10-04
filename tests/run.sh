@@ -104,7 +104,7 @@ negatives() {
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
-  NVD_API_KEY= check "java-monolith: make audit fails without an NVD key" \
+  NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
     fails_with "$work/java-monolith" audit "NVD_API_KEY not set"
 }
 
