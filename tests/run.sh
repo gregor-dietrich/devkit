@@ -2,7 +2,8 @@
 # devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [java]
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
-#          tests/select_modules_test.sh and tests/kill_test.sh.
+#          tests/select_modules_test.sh, tests/kill_test.sh and
+#          tests/frontend_deps_test.sh.
 #   java   tag the tree under test, committed or not, in a temp bare repo and
 #          run every tests/fixtures/java-* consumer, pinned to that tag over
 #          file://, through make help, check, lint, test, coverage and format;
@@ -39,6 +40,7 @@ shell_part() {
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
+  check "frontend_deps tests" "$root/tests/frontend_deps_test.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
