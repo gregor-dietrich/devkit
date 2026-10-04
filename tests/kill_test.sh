@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/java/kill.sh: stand-in processes, run as "java" with a
 # Maven-like command line, and kill.sh with PROJECT_ROOT at a temp project.
-# Only the project's own JVM may die. Prints PASS/FAIL per process.
+# Only the project's own JVM may die, and one it cannot signal must be
+# reported, not passed over. Prints PASS/FAIL per process.
 set -euo pipefail
 
 kill_sh=$(cd "$(dirname "$0")/.." && pwd)/scripts/java/kill.sh
@@ -39,5 +40,34 @@ for i in "${!pids[@]}"; do
     fails=$((fails + 1))
   fi
 done
+
+# A JVM kill.sh cannot signal, as the kernel refuses (EPERM) another user's
+# process: bash imports an exported function, and a function named kill
+# shadows the builtin in kill.sh. The subshell keeps it out of this shell.
+spawn "an unsignalable JVM of this project is reported" "$work/bin/java" "$work/proj"
+sleep 0.5
+rc=0
+(
+  # shellcheck disable=SC2317 # called by kill.sh, through export -f
+  kill() { # refuses $KILL_REFUSES and signals the rest
+    local arg args=() rc=0
+    for arg; do
+      if [[ $arg == "$KILL_REFUSES" ]]; then rc=1; else args+=("$arg"); fi
+    done
+    builtin kill ${args[@]+"${args[@]}"} || rc=$?
+    return "$rc"
+  }
+  export -f kill
+  KILL_REFUSES=${pids[-1]} PROJECT_ROOT=$work/proj exec "$kill_sh"
+) > "$work/kill.log" 2>&1 || rc=$?
+if [[ $rc == 1 ]] && grep -q "survived SIGKILL" "$work/kill.log" &&
+  grep -qw "${pids[-1]}" "$work/kill.log" && grep -q "No compose file" "$work/kill.log" &&
+  kill -0 "${pids[-1]}"; then
+  echo "PASS ${labels[-1]}, and the compose step still runs"
+else
+  echo "FAIL ${labels[-1]} (exit $rc)"
+  cat "$work/kill.log"
+  fails=$((fails + 1))
+fi
 
 [[ $fails == 0 ]]
