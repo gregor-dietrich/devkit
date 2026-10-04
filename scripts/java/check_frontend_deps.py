@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -36,6 +37,10 @@ CORE_MANIFEST_MEMBERS: Tuple[str, ...] = (
     "META-INF/VAADIN/versions/vaadin-core-versions.json",
     "vaadin-core-versions.json",
 )
+
+# Bundle jars that carry the versions vaadin-core-versions.json omits, preferred first. Vaadin's
+# dev mode resolves the dev bundle, but no gate's build does, so the check resolves it itself.
+BUNDLE_ARTIFACTS: Tuple[str, ...] = ("vaadin-dev-bundle", "vaadin-prod-bundle")
 
 # Remedy printed when a @vaadin/* component has drifted off its manifest version.
 REGEN_HINT = (
@@ -115,12 +120,32 @@ def load_expected_versions(repo: Path, version: str) -> Dict[str, str]:
     # A few @vaadin/* packages (e.g. common-frontend, vaadin-themable-mixin) are shipped
     # by Vaadin but omitted from vaadin-core-versions.json. Vaadin's pre-built bundle jar
     # carries their resolved versions; use it to fill the gaps (core manifest still wins).
-    for artifact in ("vaadin-dev-bundle", "vaadin-prod-bundle"):
-        bundle_jar = repo / "com" / "vaadin" / artifact / version / f"{artifact}-{version}.jar"
-        if bundle_jar.is_file():
-            load_bundle_versions(bundle_jar, expected)
-            break
+    load_bundle_versions(find_bundle_jar(repo, version), expected)
     return expected
+
+
+def bundle_jar_path(repo: Path, artifact: str, version: str) -> Path:
+    """Path of a com.vaadin bundle jar in the Maven local repository."""
+    return repo / "com" / "vaadin" / artifact / version / f"{artifact}-{version}.jar"
+
+
+def find_bundle_jar(repo: Path, version: str) -> Path:
+    """Return a resolved Vaadin bundle jar, resolving the dev bundle through Maven (MVN_CMD) if none is."""
+    jars = [bundle_jar_path(repo, artifact, version) for artifact in BUNDLE_ARTIFACTS]
+    found = next((jar for jar in jars if jar.is_file()), None)
+    if found:
+        return found
+    resolve = ["dependency:get", f"-Dartifact=com.vaadin:{BUNDLE_ARTIFACTS[0]}:{version}", "-Dtransitive=false"]
+    mvn = os.environ.get("MVN_CMD")
+    if mvn:
+        print(f"Resolving {BUNDLE_ARTIFACTS[0]} {version}...")
+        subprocess.run([mvn, "-q", *resolve], check=False)
+    if not jars[0].is_file():
+        raise FileNotFoundError(
+            f"Vaadin bundle jar not found: {jars[0]}\n"
+            f"It carries the @vaadin/* versions the core manifest omits. Resolve it with 'mvn {' '.join(resolve)}'."
+        )
+    return jars[0]
 
 
 def collect_pkg_json_vaadin(obj: Any, out: Dict[str, Set[str]]) -> None:
