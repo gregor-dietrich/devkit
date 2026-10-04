@@ -1,68 +1,49 @@
 #!/bin/bash
-# Splitting `docker ps -q` into one argument per container ID is intended.
-# shellcheck disable=SC2046
 
 set -euo pipefail
 
-cd "$PROJECT_ROOT"
+# An empty PROJECT_ROOT would match every process below.
+cd "${PROJECT_ROOT:?}"
 
-# Check if docker is available
-docker_available() {
-    command -v docker &> /dev/null && docker ps &> /dev/null
-    return $?
+# pids of this project's Quarkus and Maven processes: JVMs whose command line names the project
+# directory or a path inside it (-Dmaven.multiModuleProjectDirectory, target/ jars, ...). JVMs
+# only, so an editor or shell with the project open survives.
+project_pids() {
+    local pid comm
+    for pid in $(pgrep -f 'quarkus|maven' || :); do
+        comm=$(ps -o comm= -p "$pid" || :)
+        [[ ${comm##*/} == java && "$(ps -o args= -p "$pid" || :) " == *"$PROJECT_ROOT"[/\ ]* ]] && echo "$pid"
+    done
+    return 0
 }
 
-if pgrep -f "quarkus" > /dev/null; then
-    echo "Killing Quarkus processes..."
-    sudo pkill -f "quarkus" > /dev/null || true
+pids=$(project_pids)
+if [[ -n $pids ]]; then
+    echo "Stopping this project's Quarkus/Maven processes..."
+    # shellcheck disable=SC2086 # one argument per pid
+    kill $pids 2> /dev/null || :
     sleep 2
-    if pgrep -f "quarkus" > /dev/null; then
-        echo "Force killing remaining Quarkus processes..."
-        sudo pkill -f -9 "quarkus" > /dev/null || true
+    pids=$(project_pids)
+    if [[ -n $pids ]]; then
+        echo "Force killing the remaining ones..."
+        # shellcheck disable=SC2086
+        kill -9 $pids 2> /dev/null || :
     fi
-    echo "Quarkus processes killed."
+    echo "Quarkus/Maven processes stopped."
 else
-    echo "No Quarkus processes found."
+    echo "No Quarkus/Maven processes of this project found."
 fi
 
-if pgrep -f "maven" > /dev/null; then
-    echo "Killing Maven processes..."
-    sudo pkill -f "maven" > /dev/null || true
-    sleep 1
-    echo "Maven processes killed."
+# The project's own compose services only: `docker compose down` finds the compose file and the
+# compose project name in this directory, and leaves every other container alone.
+# The file check keeps compose from walking up to a parent directory's compose file.
+if [[ ! -e compose.yaml && ! -e compose.yml && ! -e docker-compose.yaml && ! -e docker-compose.yml ]]; then
+    echo "No compose file; no containers to stop."
+elif command -v docker &> /dev/null && docker info &> /dev/null; then
+    echo "Running docker compose down..."
+    docker compose down --remove-orphans || :
 else
-    echo "No Maven processes found."
-fi
-
-if docker_available; then
-    if [ "$(docker ps -q)" ]; then
-        echo "Stopping all Docker containers..."
-        docker stop $(docker ps -q) > /dev/null || true
-        sleep 3
-
-        if [ "$(docker ps -q)" ]; then
-            echo "Force killing remaining Docker containers..."
-            docker kill $(docker ps -q) > /dev/null || true
-        fi
-
-        echo "Docker containers stopped."
-    else
-        echo "No running Docker containers found."
-    fi
-
-    if [ "$(docker ps -a -q)" ]; then
-        echo "Removing all Docker containers..."
-        docker rm $(docker ps -a -q) > /dev/null || true
-        echo "All Docker containers removed."
-    fi
-
-    # Also handle docker-compose if exists
-    if [ -f docker-compose.yml ]; then
-        echo "Running docker compose down..."
-        docker compose -f docker-compose.yml down || true
-    fi
-else
-    echo "Docker is not installed or not running. Skipping Docker cleanup."
+    echo "Docker is not installed or not running. Skipping docker compose down."
 fi
 
 echo "Process cleanup complete."
