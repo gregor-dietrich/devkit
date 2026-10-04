@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- devkit's parent POM: the shared Maven gate configuration (compiler with Error Prone and
+     NullAway, surefire, failsafe, license, dependency-check, SpotBugs, PMD, Checkstyle, JaCoCo,
+     Spotless) with every gate tool's version. A consumer's root pom declares it as its <parent>
+     with <relativePath>.devkit/java/parent/pom.xml</relativePath>, so Maven reads it through the
+     link devkitw creates. Its version is the devkit release tag without the "v"; it is published
+     to no repository. The interface is docs/contract.md ("Parent POM").
+
+     The version stays literal, never ${revision}: devkit's build scripts pass -Drevision for the
+     consumer's own version. No description, url, licenses, scm, organization or developers:
+     those would be inherited into the consumer's metadata. dependency-check is configured but
+     not activated: make audit runs it by its coordinates. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>de.vptr.devkit</groupId>
+  <artifactId>devkit-parent</artifactId>
+  <version>0.2.0</version>
+  <packaging>pom</packaging>
+
+  <properties>
+    <checkstyle.version>14.3.0</checkstyle.version>
+    <checkstyle-plugin.version>3.6.0</checkstyle-plugin.version>
+    <compiler-plugin.version>3.16.0</compiler-plugin.version>
+    <dependency-check-plugin.version>13.0.0</dependency-check-plugin.version>
+    <eclipse-formatter.version>4.40</eclipse-formatter.version>
+    <error-prone.version>2.50.0</error-prone.version>
+    <!-- Also drives the org.jacoco artifacts quarkus-jacoco uses. See dependencyManagement. -->
+    <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
+    <license-plugin.version>2.7.1</license-plugin.version>
+    <nullaway.version>0.14.2</nullaway.version>
+    <pmd-plugin.version>3.28.0</pmd-plugin.version>
+    <spotbugs-plugin.version>4.10.4.1</spotbugs-plugin.version>
+    <spotless-plugin.version>3.10.3</spotless-plugin.version>
+    <surefire-plugin.version>3.6.0</surefire-plugin.version>
+
+    <!-- Defaults a consumer overrides in its own <properties>. -->
+    <jacoco.check.lineMinimum>0.90</jacoco.check.lineMinimum>
+    <jacoco.check.branchMinimum>0.80</jacoco.check.branchMinimum>
+    <jacoco.check.skip>false</jacoco.check.skip>
+    <pmd-cpd.minTokens>65</pmd-cpd.minTokens>
+    <skipITs>true</skipITs>
+    <nullaway.annotated.packages>${project.groupId}</nullaway.annotated.packages>
+    <!-- Appended to the Error Prone argument, e.g. -XepExcludedPaths:.*/generated-sources/.* -->
+    <error-prone.extra.args></error-prone.extra.args>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Align the org.jacoco artifacts of io.quarkus:quarkus-jacoco with jacoco-maven-plugin.
+      quarkus-jacoco offline-instruments the app classes with its own org.jacoco, which is what
+      records @QuarkusTest coverage; if that version differs from the plugin's, the plugin cannot
+      map the exec data and coverage collapses. Managing them here lets JaCoCo update
+      independently of the version the Quarkus BOM bundles. -->
+      <dependency>
+        <groupId>org.jacoco</groupId>
+        <artifactId>org.jacoco.core</artifactId>
+        <version>${jacoco-plugin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jacoco</groupId>
+        <artifactId>org.jacoco.report</artifactId>
+        <version>${jacoco-plugin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jacoco</groupId>
+        <artifactId>org.jacoco.agent</artifactId>
+        <version>${jacoco-plugin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jacoco</groupId>
+        <artifactId>org.jacoco.agent</artifactId>
+        <version>${jacoco-plugin.version}</version>
+        <classifier>runtime</classifier>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${compiler-plugin.version}</version>
+          <configuration>
+            <parameters>true</parameters>
+            <!-- A consumer that adds arguments or processor paths declares
+                 combine.children="append" on the list; without it Maven merges the lists by
+                 position and silently drops these. -->
+            <compilerArgs>
+              <!--
+                -Werror: any compiler warning (javac lint or Error Prone) fails the build.
+                -Xlint:all with three deliberate exclusions:
+                  -serial: Vaadin components are Serializable by inheritance; a
+                           serialVersionUID in every view and component is boilerplate
+                  -this-escape: flags the standard Vaadin constructor-builds-UI idiom,
+                           not actual bugs
+                  -classfile: noise from third-party jars referencing optional annotations
+                           (e.g. OSGi metadata in microprofile-config); not fixable here
+                Error Prone needs the jdk.compiler exports and opens in the consumer's
+                .mvn/jvm.config.
+              -->
+              <arg>-Werror</arg>
+              <arg>-Xlint:all,-serial,-this-escape,-classfile</arg>
+              <arg>-XDcompilePolicy=simple</arg>
+              <arg>-Xplugin:ErrorProne -Xep:NullAway:ERROR
+                -XepOpt:NullAway:AnnotatedPackages=${nullaway.annotated.packages}
+                -Xep:FutureReturnValueIgnored:ERROR
+                -Xep:NullablePrimitive:ERROR
+                -Xep:NonApiType:ERROR
+                -Xep:MultipleNullnessAnnotations:ERROR
+                -Xep:JavaDurationGetSecondsToToSeconds:ERROR
+                -Xep:JavaTimeDefaultTimeZone:ERROR
+                -Xep:StringSplitter:ERROR
+                -Xep:StringConcatToTextBlock:ERROR
+                -Xep:StatementSwitchToExpressionSwitch:ERROR
+                -Xep:UnnecessaryAssignment:ERROR
+                -Xep:UnnecessaryMethodReference:ERROR
+                -Xep:UnusedVariable:ERROR
+                -Xep:EffectivelyPrivate:ERROR
+                ${error-prone.extra.args}</arg>
+              <arg>--should-stop=ifError=FLOW</arg>
+            </compilerArgs>
+            <annotationProcessorPaths>
+              <path>
+                <groupId>com.google.errorprone</groupId>
+                <artifactId>error_prone_core</artifactId>
+                <version>${error-prone.version}</version>
+              </path>
+              <path>
+                <groupId>com.uber.nullaway</groupId>
+                <artifactId>nullaway</artifactId>
+                <version>${nullaway.version}</version>
+              </path>
+            </annotationProcessorPaths>
+          </configuration>
+        </plugin>
+        <plugin>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${surefire-plugin.version}</version>
+          <configuration>
+            <argLine>-Xshare:off -XX:+EnableDynamicAgentLoading @{argLine}</argLine>
+            <systemPropertyVariables>
+              <!-- Quarkus logs through the JBoss LogManager. A project without it on the test
+                   classpath gets a harmless ClassNotFoundException trace on stderr, after
+                   which JUL falls back to its default manager. -->
+              <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <maven.home>${maven.home}</maven.home>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+        <plugin>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${surefire-plugin.version}</version>
+          <executions>
+            <execution>
+              <goals>
+                <goal>integration-test</goal>
+                <goal>verify</goal>
+              </goals>
+            </execution>
+          </executions>
+          <configuration>
+            <!-- Mirrors surefire. @{argLine} carries the JaCoCo agent, which failsafe would
+            otherwise inherit only implicitly via the argLine property, and would lose
+            silently the moment any explicit argLine is added here. -->
+            <argLine>-Xshare:off -XX:+EnableDynamicAgentLoading @{argLine}</argLine>
+            <systemPropertyVariables>
+              <!-- Where a Quarkus native build puts the runner that @QuarkusIntegrationTest
+                   starts. -->
+              <native.image.path>
+                ${project.build.directory}/${project.build.finalName}-runner</native.image.path>
+              <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <maven.home>${maven.home}</maven.home>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>license-maven-plugin</artifactId>
+          <version>${license-plugin.version}</version>
+          <executions>
+            <execution>
+              <id>add-third-party</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>add-third-party</goal>
+              </goals>
+              <configuration>
+                <failOnMissing>true</failOnMissing>
+                <failOnBlacklist>true</failOnBlacklist>
+                <excludedLicenses>
+                  Commercial||Proprietary||SSPL||Elastic License||Business Source
+                  License||Commons Clause||Elastic License 2.0||Server Side Public
+                  License||BUSL-1.1||Polyform||PolyForm
+                </excludedLicenses>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.owasp</groupId>
+          <artifactId>dependency-check-maven</artifactId>
+          <version>${dependency-check-plugin.version}</version>
+          <configuration>
+            <failBuildOnCVSS>7</failBuildOnCVSS>
+            <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+            <suppressionFiles>
+              <suppressionFile>${maven.multiModuleProjectDirectory}/dependency-check-suppression.xml</suppressionFile>
+            </suppressionFiles>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>com.github.spotbugs</groupId>
+          <artifactId>spotbugs-maven-plugin</artifactId>
+          <version>${spotbugs-plugin.version}</version>
+          <configuration>
+            <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+            <effort>Max</effort>
+            <threshold>Low</threshold>
+          </configuration>
+          <executions>
+            <execution>
+              <id>spotbugs-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-pmd-plugin</artifactId>
+          <version>${pmd-plugin.version}</version>
+          <configuration>
+            <minimumTokens>${pmd-cpd.minTokens}</minimumTokens>
+            <targetJdk>${maven.compiler.release}</targetJdk>
+            <includeTests>true</includeTests>
+            <linkXRef>false</linkXRef>
+            <rulesets>
+              <ruleset>${maven.multiModuleProjectDirectory}/.devkit/java/config/pmd-ruleset.xml</ruleset>
+            </rulesets>
+            <failOnViolation>true</failOnViolation>
+          </configuration>
+          <executions>
+            <execution>
+              <id>pmd-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+            <execution>
+              <id>cpd-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>cpd-check</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-checkstyle-plugin</artifactId>
+          <version>${checkstyle-plugin.version}</version>
+          <dependencies>
+            <!-- Pin the Checkstyle engine itself; the plugin otherwise runs whatever
+                 (much older) version it bundles, and checkstyle.version would be dead. -->
+            <dependency>
+              <groupId>com.puppycrawl.tools</groupId>
+              <artifactId>checkstyle</artifactId>
+              <version>${checkstyle.version}</version>
+            </dependency>
+          </dependencies>
+          <executions>
+            <!-- The shared rules, from the plugin-level configuration below. -->
+            <execution>
+              <id>checkstyle</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+            <!-- The project's own rules, from checkstyle-project.xml at the project root. It
+                 inherits the plugin-level propertyExpansion, so a SuppressionFilter there
+                 reuses the project's checkstyle-suppressions.xml. Its check goal binds to
+                 verify by default. -->
+            <execution>
+              <id>project</id>
+              <goals>
+                <goal>check</goal>
+              </goals>
+              <configuration>
+                <configLocation>${maven.multiModuleProjectDirectory}/checkstyle-project.xml</configLocation>
+                <cacheFile>${project.build.directory}/checkstyle-project-cachefile</cacheFile>
+                <outputFile>${project.build.directory}/checkstyle-project-result.xml</outputFile>
+              </configuration>
+            </execution>
+          </executions>
+          <configuration>
+            <configLocation>${maven.multiModuleProjectDirectory}/.devkit/java/config/checkstyle.xml</configLocation>
+            <propertyExpansion>
+              org.checkstyle.google.suppressionfilter.config=${project.basedir}/checkstyle-suppressions.xml</propertyExpansion>
+            <consoleOutput>true</consoleOutput>
+            <!-- No failsOnError: it stops Checkstyle before the plugin logs the violation, so
+                 under make lint's -q only "There is 1 error reported" would show. failOnViolation
+                 (the default) still fails the build, naming the rule and the line. -->
+            <includeTestSourceDirectory>true</includeTestSourceDirectory>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco-plugin.version}</version>
+          <executions>
+            <execution>
+              <id>prepare-agent</id>
+              <goals>
+                <goal>prepare-agent</goal>
+              </goals>
+              <configuration>
+                <excludes>
+                  <exclude>org/jboss/**</exclude>
+                  <exclude>io/netty/**</exclude>
+                </excludes>
+              </configuration>
+            </execution>
+            <!-- Bound to post-integration-test, not test: failsafe runs the *IT tests at
+            integration-test and appends to the same jacoco.exec, so a report generated at
+            test would omit all integration-test coverage. Still runs when ITs are skipped. -->
+            <execution>
+              <id>report</id>
+              <phase>post-integration-test</phase>
+              <goals>
+                <goal>report</goal>
+              </goals>
+            </execution>
+            <execution>
+              <id>check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+              <configuration>
+                <skip>${jacoco.check.skip}</skip>
+                <rules>
+                  <rule>
+                    <element>BUNDLE</element>
+                    <limits>
+                      <limit>
+                        <counter>LINE</counter>
+                        <value>COVEREDRATIO</value>
+                        <minimum>${jacoco.check.lineMinimum}</minimum>
+                      </limit>
+                      <limit>
+                        <counter>BRANCH</counter>
+                        <value>COVEREDRATIO</value>
+                        <minimum>${jacoco.check.branchMinimum}</minimum>
+                      </limit>
+                    </limits>
+                  </rule>
+                </rules>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>com.diffplug.spotless</groupId>
+          <artifactId>spotless-maven-plugin</artifactId>
+          <version>${spotless-plugin.version}</version>
+          <configuration>
+            <java>
+              <eclipse>
+                <file>${maven.multiModuleProjectDirectory}/.devkit/java/config/eclipse-formatter.xml</file>
+                <version>${eclipse-formatter.version}</version>
+                <!-- download.eclipse.org suffers recurring outages; provision P2 from a mirror -->
+                <p2Mirrors>
+                  <p2Mirror>
+                    <prefix>https://download.eclipse.org/</prefix>
+                    <url>https://ftp.halifax.rwth-aachen.de/eclipse/</url>
+                  </p2Mirror>
+                </p2Mirrors>
+              </eclipse>
+              <importOrder>
+                <order>java,javax,org,com,#</order>
+              </importOrder>
+              <removeUnusedImports />
+            </java>
+          </configuration>
+          <executions>
+            <execution>
+              <id>spotless-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <!-- Compiler and surefire run by default; the gates are activated here. -->
+    <plugins>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

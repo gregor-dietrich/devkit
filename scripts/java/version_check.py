@@ -166,7 +166,7 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
 
             raw_version = child_text(element, "version")
             if raw_version is None:
-                managed += 1  # version comes from an imported BOM; nothing to bump here
+                managed += 1  # version comes from an imported BOM or the parent; nothing to bump here
                 continue
 
             raw_group = child_text(element, "groupId")
@@ -208,7 +208,7 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
                 artifacts += 1
 
     if managed:
-        notes.append(f"{managed} artifact(s) without an explicit version (managed by a BOM), skipped")
+        notes.append(f"{managed} artifact(s) without an explicit version (managed by a BOM or the parent), skipped")
     if internal:
         notes.append(f"{internal} dependency declaration(s) on the project's own modules, skipped")
 

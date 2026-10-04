@@ -2,7 +2,8 @@
 
 devkit is the build and quality-gate tooling that projects would otherwise
 copy between each other: shared Make targets (`make/`), the scripts behind
-them (`scripts/`), and the shared Maven gate configurations (`java/config/`).
+them (`scripts/`), the shared Maven gate configurations (`java/config/`) and
+a parent POM that applies them (`java/parent/`).
 A project consumes one pinned release of it through a small committed
 wrapper, `devkitw`, on the pattern of the Maven wrapper: the wrapper fetches
 the pinned commit once per machine into a cache and links it into the
@@ -17,12 +18,28 @@ configuration (a private repository) are per machine and live elsewhere.
 Only devkit decides whether a build passes, so only devkit is pinned.
 
 **Why a wrapper.** A consumer commits `devkitw` and a text pin,
-`devkit.toml`. Nothing is installed globally, a bump is usually a two-line
-text diff (a release whose contract changes lists its upgrade steps under
-[Releasing](#releasing)), and a cached checkout works offline. The cache is
+`devkit.toml`. Nothing is installed globally, a bump is usually a
+three-line text diff, `version` and `commit` in `devkit.toml` and the root
+pom's `<parent><version>` (a release whose contract changes lists its
+upgrade steps under [Releasing](#releasing)), and a cached checkout works
+offline. The cache is
 read-only: a change to shared tooling is made and released in devkit, never
 edited inside a project. The wrapper fails closed: it never falls back to
 another version and refuses a fetched commit that differs from the pin.
+
+**Why a parent POM.** The Maven gate configuration lives in one place,
+`java/parent/pom.xml`, which a consumer's root pom inherits through the
+link. It activates the gate plugins, not just manages them, so a consumer
+cannot drop a gate without noticing. It also carries the gate tools'
+versions, because the shared configs depend on them: the formatter
+version decides the formatting, the PMD and Checkstyle versions decide
+which rules exist. Error Prone with NullAway is always on, not an opt-in
+profile, so the fixtures test what consumers run. Its version is literal,
+the release tag without the `v`, so a consumer's `-Drevision` never
+touches it. Once consumers adopt it, some things are hard to change: its
+coordinates, its path, the tag-to-version mapping, and the property names
+and execution ids consumers override, since a renamed one silently
+ignores the override.
 
 **Rejected options:**
 
@@ -59,31 +76,56 @@ written against it. In short, a project:
    `include .devkit/make/common.mk` and `.devkit/make/java-maven.mk`, then
    its own targets; a rule line ending in `## description` is listed by
    `make help`;
-5. points its pom at the shared configs through the link,
-   `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`, and
-   runs its own `checkstyle-project.xml` as checkstyle execution `project`.
+5. inherits devkit's parent POM in its root pom, as
+   [the contract](docs/contract.md#parent-pom) shows, with a `<groupId>` of
+   its own, and keeps only its own values there: overrides of the parent's
+   properties, exclusions and its own plugins. The parent runs every gate,
+   with the project's `checkstyle-project.xml` as checkstyle execution
+   `project`.
 
 `make check` then fails when `.devkit` does not resolve to the pinned
 checkout, warns when the committed `devkitw` is stale, and runs the language
-checks. Requirements: git, GNU make, bash and python3 (3.11 or later);
-Windows is not targeted. On a fresh clone, run any `make` target once: a
-bare `./mvnw` fails until the wrapper has created `.devkit`.
+checks; every target that runs Maven fails while the root pom does not
+inherit the parent as the contract requires. Requirements: git, GNU make,
+bash and python3 (3.11 or later); Windows is not targeted.
+
+On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
+Maven import fails until the wrapper has created `.devkit`.
+"Non-resolvable parent POM … devkit-parent" means `.devkit` is missing or
+points at another pin: run `make check`.
 
 ## Releasing
 
-A release is an annotated tag on `main`:
+A release is an annotated tag on `main`. The release commit sets the
+version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
+`tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
+`version` and the `<parent>` snippet's version; the tag is `v` + that
+version, and `tests/run.sh` tags the tree under test under the same name.
+Before
+tagging, review the parent's pins against Maven Central (advisory, needs the
+network):
 
 ```sh
-git tag -a vX.Y.Z -m "devkit vX.Y.Z"
-git push origin vX.Y.Z
+PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
+```
+
+Then tag:
+
+```sh
+tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
+version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
+print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
+  git tag -a "$tag" -m "devkit $tag" &&
+  git push origin "$tag"
 ```
 
 Tags are never moved or reused. Were one moved, the wrapper would refuse the
 fetched commit rather than build with it.
 
-A consumer bumps by editing `version` and `commit` in `devkit.toml`, which
-is usually the whole diff; a release whose contract changes lists its
-upgrade steps below. The commit is the one the tag points at, which for an
+A consumer bumps by editing `version` and `commit` in `devkit.toml` and
+the root pom's `<parent><version>` (the version without the `v`), which is
+usually the whole diff; a release whose contract changes lists its upgrade
+steps below. The commit is the one the tag points at, which for an
 annotated tag is the peeled `^{}` entry:
 
 ```sh
@@ -96,10 +138,12 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 ### Upgrading from v0.1.x
 
 v0.2.0 moves the values v0.1.x hardcoded for its first consumers into the
-project. Following only the error messages can turn CI green with those
-values silently dropped, so take every step:
+project, and the Maven gate configuration into devkit's parent POM.
+Following only the error messages can turn CI green with those values
+silently dropped, so take every step:
 
-1. Bump `version` and `commit` in `devkit.toml`.
+1. Bump `version` and `commit` in `devkit.toml`; the root pom's
+   `<parent><version>` follows in step 4.
 2. A project with a frontend adds `[frontend.min-pins]` to `devkit.toml`.
    v0.1.x enforced `react-router = "7.15.0"` and `dompurify = "3.4.16"`
    itself; carry those over unless the project has decided otherwise. An
@@ -114,11 +158,46 @@ values silently dropped, so take every step:
    `${org.checkstyle.google.suppressionfilter.config}`, as
    `tests/fixtures/java-monolith/checkstyle-project.xml` does. A project
    without such rules commits an empty `<module name="Checker"/>`.
-4. Add the `project` execution to the pom's checkstyle plugin, as
-   [the contract's snippet](docs/contract.md#maven-configuration) shows.
-   Without it the project's rules never run, and nothing fails.
-5. Make sure `python3` is 3.11 or later.
+4. Adopt the [parent POM](docs/contract.md#parent-pom); v0.2.0 requires
+   it, and every target that runs Maven fails until the root pom inherits
+   it as the contract shows.
+   - Root pom: add the `<parent>` block and keep the pom's own `<groupId>`.
+     Delete the gate plugins' configuration and activation (compiler,
+     surefire, failsafe, license, dependency-check, SpotBugs, PMD,
+     Checkstyle, JaCoCo, Spotless), their tool-version properties (the
+     parent check fails while any remain), `pmd-cpd.minTokens` if it is
+     65, and the four `org.jacoco` entries in `<dependencyManagement>`.
+     Keep the project's own plugins, BOMs, profiles and dependencies.
+   - Modules: JaCoCo keeps only its `<excludes>`; its executions come from
+     the parent, and coverage minima other than the defaults become
+     `jacoco.check.lineMinimum` and `jacoco.check.branchMinimum`. Keep
+     `nullaway.annotated.packages`.
+   - An Error Prone exclusion inside the old `<compilerArgs>` (e.g.
+     `-XepExcludedPaths:.*/generated-sources/.*`) moves to
+     `<error-prone.extra.args>`; checkstyle `<sourceDirectories>` and PMD
+     `<excludeRoots>` stay as they are.
+   - Keep `checkstyle-suppressions.xml` in every module, the root included,
+     and `spotbugs-exclude.xml` in every module with classes; or, for one
+     suppressions file at the root, override checkstyle's
+     `<propertyExpansion>` as `tests/fixtures/java-multimodule/pom.xml`
+     does.
+   - Add the `jdk.compiler` lines to `.mvn/jvm.config` if they are missing.
 
-To roll back, restore the previous `version` and `commit`: the cached old
-checkout is relinked offline, v0.1.x ignores the extra TOML table, and a
-kept `project` execution just runs those rules a second time.
+   The parent runs `checkstyle-project.xml` as execution `project`, so the
+   pom declares none. Checkstyle's `failsOnError` is gone, so `make lint`
+   now prints the violation itself.
+5. Diff `mvn help:effective-pom` before and after, with `NVD_API_KEY` not
+   exported: the effective pom would print it. Besides path spellings,
+   expect only these differences: the `<parent>`; the parent's new
+   properties; the checkstyle execution `project`; SpotBugs' execution id
+   `default` → `spotbugs-check` (both present means a partial migration);
+   no `failsOnError`; dependency-check no longer under `<build><plugins>`;
+   the JaCoCo executions also on a pom-packaged root; and surefire's
+   `<includes>` gone, so its defaults (`Test*`, `*Test`, `*Tests`,
+   `*TestCase`) apply.
+6. Make sure `python3` is 3.11 or later.
+
+To roll back, restore the previous `version` and `commit`, and the poms'
+previous build configuration, since v0.1.x has no parent POM for Maven to
+read: the cached old checkout is relinked offline, and v0.1.x ignores the
+extra TOML table.

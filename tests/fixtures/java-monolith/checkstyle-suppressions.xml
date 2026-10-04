@@ -1,4 +1,8 @@
 <?xml version="1.0"?>
 <!DOCTYPE suppressions PUBLIC "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN" "https://checkstyle.org/dtds/suppressions_1_2.dtd">
 <!-- Required: the shared checkstyle.xml loads this file with optional=false. -->
-<suppressions />
+<suppressions>
+    <!-- GreeterTest imports java.util.Objects, which checkstyle-project.xml bans. That lint
+         passes proves the execution "project" inherits the parent's propertyExpansion. -->
+    <suppress id="IllegalImport.FixtureObjects" files="GreeterTest\.java$" />
+</suppressions>

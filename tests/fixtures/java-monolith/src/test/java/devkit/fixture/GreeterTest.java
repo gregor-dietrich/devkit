@@ -2,6 +2,8 @@ package devkit.fixture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.Objects;
+
 import org.junit.jupiter.api.Test;
 
 class GreeterTest {
@@ -10,7 +12,7 @@ class GreeterTest {
 
     @Test
     void greetsByName() {
-        assertEquals("Hello, Ada", greeter.greet("Ada"));
+        assertEquals("Hello, Ada", Objects.requireNonNull(greeter.greet("Ada")));
     }
 
     @Test

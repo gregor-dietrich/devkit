@@ -7,16 +7,27 @@ cd "$PROJECT_ROOT"
 
 if [[ ! -f checkstyle-project.xml ]]; then
     echo "ERROR: checkstyle-project.xml not found at the project root. Exiting."
-    echo "Please add checkstyle-project.xml with the project's own Checkstyle rules (an empty <module name=\"Checker\"/> for a project without rules of its own) and run it as the pom's checkstyle execution 'project'; see .devkit/docs/contract.md, and .devkit/README.md when upgrading from v0.1.x."
+    echo "Please add checkstyle-project.xml with the project's own Checkstyle rules (an empty <module name=\"Checker\"/> for a project without rules of its own), which devkit's parent POM runs as checkstyle execution 'project'; see .devkit/docs/contract.md, and .devkit/README.md when upgrading from v0.1.x."
     exit 12
 fi
-
-# shellcheck source=SCRIPTDIR/../lib/get_maven.sh
-. "$DEVKIT/scripts/lib/get_maven.sh"
 
 REQUIRED_JDK_VERSION="${JAVA_VERSION:?set JAVA_VERSION in the project Makefile}"
 
 echo "Running environment checks..."
+
+# Before get_maven.sh, whose parent POM check needs Python 3.11 (tomllib).
+echo "Checking version of $(command -v python3)..."
+
+PYTHON_VERSION=$(python3 -c 'import platform; print(platform.python_version())' 2> /dev/null) || true
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2> /dev/null; then
+    echo "ERROR: Python version ${PYTHON_VERSION:-(python3 not found)} is below the required version 3.11. Exiting."
+    echo "Please install Python 3.11 or higher and make it python3 on PATH."
+    exit 13
+fi
+echo "Python version check passed. (>= 3.11)"
+
+# shellcheck source=SCRIPTDIR/../lib/get_maven.sh
+. "$DEVKIT/scripts/lib/get_maven.sh"
 
 echo "Checking version of $(command -v java)..."
 
@@ -104,16 +115,6 @@ if [[ $MVN_JAVA_MAJOR_VERSION -ne $REQUIRED_JDK_VERSION ]]; then
     exit 11
 fi
 echo "Maven JDK version check passed. (== ${REQUIRED_JDK_VERSION})"
-
-echo "Checking version of $(command -v python3)..."
-
-PYTHON_VERSION=$(python3 -c 'import platform; print(platform.python_version())' 2> /dev/null) || true
-if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2> /dev/null; then
-    echo "ERROR: Python version ${PYTHON_VERSION:-(python3 not found)} is below the required version 3.11. Exiting."
-    echo "Please install Python 3.11 or higher and make it python3 on PATH."
-    exit 13
-fi
-echo "Python version check passed. (>= 3.11)"
 
 echo "Environment checks completed."
 

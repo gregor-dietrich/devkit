@@ -2,14 +2,18 @@
 # devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [java]
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
-#          tests/select_modules_test.sh, tests/kill_test.sh and
-#          tests/check_frontend_deps_test.sh.
-#   java   tag the tree under test, committed or not, in a temp bare repo and
-#          run every tests/fixtures/java-* consumer, pinned to that tag over
-#          file://, through make help, check, lint, test, coverage and format;
-#          then break copies of the monolith (format, a shared and a project
-#          checkstyle rule, coverage) and expect lint or test to fail for that
-#          reason, and expect check to fail without checkstyle-project.xml.
+#          tests/select_modules_test.sh, tests/kill_test.sh,
+#          tests/check_frontend_deps_test.sh and tests/parent_check_test.sh.
+#   java   tag the tree under test, committed or not, as v<the version of
+#          java/parent/pom.xml> in a temp bare repo and run every
+#          tests/fixtures/java-* consumer, pinned to that tag over file://,
+#          through make help, check, lint, test, coverage and format; then
+#          break copies of the monolith (format, a shared and a project
+#          checkstyle rule, the project rule's suppression, coverage) and
+#          expect lint or test to fail for that reason; expect check to fail
+#          without checkstyle-project.xml, without devkit's parent and on a
+#          parent version that differs from the pin, and lint to fail on the
+#          latter too, before Maven runs.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3 and the network (Maven Central,
@@ -42,6 +46,7 @@ shell_part() {
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
+  check "parent_check tests" "$root/tests/parent_check_test.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
@@ -85,20 +90,24 @@ run_fixture() { # run_fixture DIR
     -x .devkit -x devkitw -x devkit.toml -x .coverage.md "$1" "$proj"
 }
 
-fails_with() { # fails_with DIR TARGET TEXT: make TARGET fails, saying TEXT
-  local out rc=0
-  out=$(make --no-print-directory -C "$1" "$2" 2>&1) || rc=$?
-  [[ $rc != 0 && $out == *"$3"* ]] || {
+make_says() { # make_says pass|fail DIR TARGET TEXT: make TARGET ends so, saying TEXT
+  local out ended=pass
+  out=$(make --no-print-directory -C "$2" "$3" 2>&1) || ended=fail
+  [[ $ended == "$1" && $out == *"$4"* ]] || {
     printf '%s\n' "$out"
     return 1
   }
 }
 
+edited() { # edited DIR FILE SED: a monolith copy in DIR with FILE run through SED
+  setup "$root/tests/fixtures/java-monolith" "$1"
+  sed "$3" "$1/$2" >"$1/$2.new" && mv "$1/$2.new" "$1/$2"
+}
+
 negative() { # negative NAME TARGET TEXT FILE SED: break FILE in a monolith copy
-  local proj=$work/negative-$1
-  setup "$root/tests/fixtures/java-monolith" "$proj"
-  sed "$5" "$proj/$4" >"$proj/$4.new" && mv "$proj/$4.new" "$proj/$4"
-  check "java-monolith: a $1 break fails make $2" fails_with "$proj" "$2" "$3"
+  edited "$work/negative-$1" "$4" "$5"
+  check "java-monolith: a $1 break fails make $2" \
+    make_says fail "$work/negative-$1" "$2" "$3"
 }
 
 negatives() {
@@ -109,20 +118,33 @@ negatives() {
     's/return name\./return java.util.Objects.requireNonNull(name)./'
   negative project-checkstyle lint "Fixture project rule" "$main" \
     's/^package .*/&\n\nimport java.util.Objects;/; s/return name\./return Objects.requireNonNull(name)./'
+  # GreeterTest imports the banned class too; only its suppression lets lint pass.
+  negative suppression lint "Fixture project rule" checkstyle-suppressions.xml '/FixtureObjects/d'
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
+  local parent_off_pin='/<parent>/,/<\/parent>/s|<version>[^<]*</version>|<version>0.0.0</version>|'
+  negative parent-version check "devkit.toml pins" pom.xml "$parent_off_pin"
+  negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"
+  negative no-parent check "which devkit requires since v0.2.0" pom.xml '/<parent>/,/<\/parent>/d'
   local proj=$work/no-project-checkstyle
   setup "$root/tests/fixtures/java-monolith" "$proj"
   rm "$proj/checkstyle-project.xml"
   check "java-monolith: make check fails without checkstyle-project.xml" \
-    fails_with "$proj" check "checkstyle-project.xml"
+    make_says fail "$proj" check "checkstyle-project.xml"
   NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
-    fails_with "$work/java-monolith" audit "NVD_API_KEY not set"
+    make_says fail "$work/java-monolith" audit "NVD_API_KEY not set"
+}
+
+parent_version() { # the literal <version> of devkit's parent POM
+  python3 -c 'import sys, xml.etree.ElementTree as ET
+version = ET.parse(sys.argv[1]).getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
+sys.exit("java/parent/pom.xml declares no <version>") if not version else print(version.strip())' \
+    "$root/java/parent/pom.xml"
 }
 
 java_part() {
-  work=$(mktemp -d) tag=v0.0.0-test bare=$work/devkit.git
+  work=$(mktemp -d) tag=v$(parent_version) bare=$work/devkit.git
   trap 'rm -rf "$work"' EXIT
   # shellcheck disable=SC2046 # one argument per variable name
   unset $(git rev-parse --local-env-vars) ONLY PROJECT_ROOT REVISION

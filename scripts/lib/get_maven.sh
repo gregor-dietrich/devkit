@@ -53,3 +53,7 @@ if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
 fi
 # check_frontend_deps.py resolves the jars it reads through the same Maven.
 export MVN_CMD
+
+# Maven reads devkit's parent POM only through the .devkit link; fail before any build whose pom
+# would make it look the parent up remotely. Its ERROR lines reach stderr.
+python3 "$DEVKIT/scripts/java/parent_check.py" > /dev/null || exit
