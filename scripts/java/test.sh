@@ -3,6 +3,8 @@
 set -euo pipefail
 
 cd "$PROJECT_ROOT"
+# shellcheck source=SCRIPTDIR/../lib/select_modules.sh
+. "$DEVKIT/scripts/lib/select_modules.sh"
 # shellcheck source=SCRIPTDIR/../lib/get_maven.sh
 . "$DEVKIT/scripts/lib/get_maven.sh"
 

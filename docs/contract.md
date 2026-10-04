@@ -1,4 +1,4 @@
-# devkit consumer contract (v0.1.0)
+# devkit consumer contract (v0.1.1)
 
 The interface between devkit and a project that uses it. Every file in
 devkit is written against this page; change it here first.
@@ -16,7 +16,7 @@ devkit is written against this page; change it here first.
 [devkit]
 url = "https://git.vptr.de/gregor/devkit.git"
 # mirror = "https://github.com/<owner>/devkit.git"   # optional fallback
-version = "v0.1.0"
+version = "v0.1.1"
 commit = "<40-hex commit the tag resolves to>"
 ```
 
@@ -85,6 +85,12 @@ include .devkit/make/java-maven.mk
 - `MODULES` empty means a single-module (monolith) build; otherwise Maven
   module selection maps each listed module to `-pl` as the Java scripts
   document.
+- `ONLY` is read through `scripts/lib/select_modules.sh`, never parsed by
+  hand. It normalizes each entry to its `MODULES` spelling (`./<dir>`,
+  `<dir>/` and `:<dir>` as Maven's `-pl` accepts them), fails on an entry
+  that names no module, and exports the normalized `ONLY`, `SELECTED` and
+  `FRONTEND_SELECTED`. A consumer's own scripts that act on `ONLY` source
+  it the same way.
 
 ## Maven configuration
 
