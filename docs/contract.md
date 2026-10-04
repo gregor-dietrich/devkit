@@ -29,6 +29,10 @@ commit = "<40-hex commit the tag resolves to>"
 [frontend.min-pins]
 "some-package" = "1.2.3"
 # quote names containing @, / or .: "@scope/name" = "1.2.3"
+
+# Optional: the image namespaces the project publishes (Repository gates).
+[pins]
+first-party = ["registry.example/my-team"]
 ```
 
 ```make
@@ -72,13 +76,15 @@ include .devkit/make/java-maven.mk
   environment value never wins (a command-line `PROJECT_ROOT=...` still
   does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
   FRONTEND_DIR DEVKIT` to every recipe.
-- Targets: `common.mk` owns `help`, `check`, `check-devkit`, `branch`,
-  `rebase`, `tag`, `untag`. `java-maven.mk` owns `check-java`, `install`,
-  `lint`, `format`, `test`, `coverage`, `audit`, `clean`, `kill`. Neither
-  defines project-only targets.
-- `check` is composed by prerequisites, never by two recipes:
-  `common.mk` declares `check: check-devkit`, `java-maven.mk` adds
-  `check: check-java`.
+- Targets: `common.mk` owns `help`, `check`, `check-devkit`, `lint-repo`,
+  `lint-pins`, `branch`, `rebase`, `tag`, `untag`. `java-maven.mk` owns
+  `check-java`, `install`, `lint`, `format`, `test`, `coverage`, `audit`,
+  `clean`, `kill`. Neither defines project-only targets.
+- `check` and `lint` are composed by prerequisites, never by two recipes:
+  `common.mk` declares `check: check-devkit` and `lint: lint-repo`;
+  `java-maven.mk` adds `check: check-java` and carries the `lint` recipe,
+  which runs after the prerequisite. Only one rule line per target carries
+  a `## description`.
 - `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
   only warns when `./devkitw self-check` fails.
 - `help` lists every target that carries a `## description` comment on its
@@ -117,6 +123,80 @@ include .devkit/make/java-maven.mk
   for that it asks Maven (`MVN_CMD`, which `scripts/lib/get_maven.sh`
   exports) for the local repository and the frontend module's
   `vaadin.version` and resolves the dev bundle. It fails without `MVN_CMD`.
+
+## Repository gates
+
+`lint-repo` runs the language-neutral gates over the whole repository,
+before the language gates of `make lint`; `ONLY` does not narrow it. Each
+gate reads the files git lists in `$PROJECT_ROOT` (tracked, plus untracked
+files that are not ignored), fails when git cannot list them, and passes
+when none match.
+
+- `lint-pins` reads four families of files; a file belongs to the first
+  that matches:
+  - workflows: `.yml`/`.yaml` files under `.gitea/workflows/` or
+    `.github/workflows/`, at any depth;
+  - actions: every `action.yml` and `action.yaml`;
+  - compose files: a basename `compose*.y{a,}ml` or
+    `docker-compose*.y{a,}ml`;
+  - Dockerfiles: a basename, in any case, that is `Dockerfile` or
+    `Containerfile`, alone or followed by `.`, `-` or `_` and a suffix,
+    or that ends in `.dockerfile` or `.containerfile`; the
+    `.dockerignore` and `.containerignore` files are not.
+
+  It requires every action as
+  `owner/repo[/path]@<40 lowercase hex> # vX.Y.Z`, and every container
+  image (Dockerfile `FROM`, `COPY --from=` and `# syntax=`; YAML `image:`,
+  `container:` and a service's scalar value; `docker://`) as
+  `<repository>:<tag>@sha256:<64 hex>`. Exempt: build stages and
+  `scratch`; a `./` action whose `action.y{a,}ml`, or the reusable
+  workflow it names, git lists, since that file is read itself; an
+  action's `image:` that is a relative path to a Dockerfile, read itself
+  too; and images under a namespace listed in `devkit.toml`'s optional
+  `[pins] first-party = ["<namespace>", ...]`.
+
+  Files a file names must be ones it reads: an action's Dockerfile
+  `image:`, resolved against the action's directory, must be a Dockerfile
+  git lists; a compose `include:` path and an `extends:` `file:`,
+  resolved against the compose file's directory, must be compose files
+  git lists, so a remote `include:` fails; a compose `dockerfile:` must be
+  named as a Dockerfile (never a `.y{a,}ml` name) and stay inside the
+  repository. It resolves against the build context, which is not
+  followed.
+
+  A reference it cannot read fails:
+  - in YAML, a key in a position or spelling it cannot place (`services`
+    included, unless a plain `services:` line), a value continued on a
+    deeper line, a quoted value that does not close on its own line, a
+    flow collection over several lines that holds anything but scalars
+    in sequences, and a backslash escape in a double-quoted value;
+  - in compose, `dockerfile_inline:`, `BUILDKIT_SYNTAX`,
+    `additional_contexts`, a build argument whose list-form name holds
+    `${`, a flow or aliased `args:`, `include:` or `extends:`, and an
+    `include:` or `extends:` entry other than a path, `path:`, `file:`
+    or `service:`;
+  - in a Dockerfile, a line that is not a plain instruction (a heredoc,
+    another frontend's syntax, `# escape=`, a lone trailing `\`).
+- A `first-party` entry is a lowercase image name without tag or digest,
+  and a prefix: every image under `<entry>/` is exempt, so a registry
+  host alone (`ghcr.io`) exempts every image on it. Name the images the
+  project builds itself (compose `build:` beside `image:`) under a
+  declared, host-qualified namespace, with `pull_policy: build`, so that
+  name is never pulled from a registry.
+- It stops with one `ERROR` line when `devkit.toml` is not valid TOML,
+  `pins` is not a table, `[pins]` holds another key, `first-party` is not
+  a list or holds an entry that is not such a name, and when git cannot
+  list `$PROJECT_ROOT` (not a work tree, such as an unpacked source
+  archive, or one git refuses for dubious ownership). A family file that
+  is a symlink, or is not UTF-8, is a violation.
+- An action with no exact `vX.Y.Z` release (only `v1`, `1.2.3`, a
+  prerelease or a branch) cannot pass: vendor it as a `./` action, or tag
+  a fork and pin that.
+- Limits: the check is one level deep. Images pulled by `run:` steps,
+  `RUN` commands or code, and the references inside a pinned action or
+  reusable workflow, are not read. Remote build contexts are not read,
+  nor are files named only through `COMPOSE_FILE` or `-f`. Submodule
+  content, and anything above `$PROJECT_ROOT`, is not listed.
 
 ## Maven configuration
 

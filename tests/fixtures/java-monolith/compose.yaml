@@ -1,0 +1,4 @@
+# The digest is well-formed and never pulled: the repository gates read it.
+services:
+  db:
+    image: postgres:18.6@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

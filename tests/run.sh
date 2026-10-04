@@ -3,14 +3,17 @@
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh,
-#          tests/check_frontend_deps_test.sh and tests/parent_check_test.sh.
-#          Needs git, shellcheck, procps (pgrep, ps) and python3 >= 3.11.
+#          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh
+#          and tests/check_pins_test.sh; then run lint-pins over devkit
+#          itself. Needs git, shellcheck, procps (pgrep, ps) and
+#          python3 >= 3.11.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
-#          tests/fixtures/java-* consumer, pinned to that tag over file://,
-#          through make help, check, lint, test, coverage and format; then
-#          break copies of the monolith (format, a shared and a project
-#          checkstyle rule, the project rule's suppression, coverage) and
+#          tests/fixtures/java-* consumer, pinned to that tag over file://
+#          and committed as a git repository of its own, through make help,
+#          check, lint, test, coverage and format; then break copies of the
+#          monolith (format, a shared and a project checkstyle rule, the
+#          project rule's suppression, coverage, an image digest) and
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
@@ -48,6 +51,9 @@ shell_part() {
   check "kill tests" "$root/tests/kill_test.sh"
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
   check "parent_check tests" "$root/tests/parent_check_test.sh"
+  check "check_pins tests" "$root/tests/check_pins_test.sh"
+  check "devkit's own tree passes lint-pins" \
+    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
@@ -67,17 +73,20 @@ publish() {
   commit=$(git -C "$src" rev-parse HEAD)
 }
 
-help_lists() { # make help names a devkit target and the fixture's own one
+help_lists() { # make help lists lint once, the repository gates and the fixture's own target
   local out
   out=$(make --no-print-directory -C "$1" help) && printf '%s\n' "$out" &&
-    [[ $out == *"make lint "* && $out == *"make hello "* ]]
+    [[ $(grep -c '^  make lint ' <<<"$out") == 1 && $out == *"make lint-repo "* &&
+      $out == *"make lint-pins "* && $out == *"make hello "* ]]
 }
 
-setup() { # setup FIXTURE DIR: copy FIXTURE to DIR, pinned to the tag
+setup() { # setup FIXTURE DIR: copy FIXTURE to DIR, pinned to the tag, as a git repo
   cp -R "$1" "$2"
   cp "$root/devkitw" "$2/"
   printf '[devkit]\nurl = "file://%s"\nversion = "%s"\ncommit = "%s"\n' \
     "$bare" "$tag" "$commit" >"$2/devkit.toml"
+  # The repository gates read the files git lists.
+  git -C "$2" init -q -b main && git -C "$2" add -A && git -C "$2" commit -q -m fixture
 }
 
 run_fixture() { # run_fixture DIR
@@ -88,7 +97,7 @@ run_fixture() { # run_fixture DIR
     check "$name: make $target" make --no-print-directory -C "$proj" "$target"
   done
   check "$name: no source changed (format included)" diff -r -x target \
-    -x .devkit -x devkitw -x devkit.toml -x .coverage.md "$1" "$proj"
+    -x .git -x .devkit -x devkitw -x devkit.toml -x .coverage.md "$1" "$proj"
 }
 
 make_says() { # make_says pass|fail DIR TARGET TEXT: make TARGET ends so, saying TEXT
@@ -124,6 +133,7 @@ negatives() {
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
+  negative digest lint "it carries no digest" compose.yaml 's/@sha256:[0-9a-f]*//'
   local parent_off_pin='/<parent>/,/<\/parent>/s|<version>[^<]*</version>|<version>0.0.0</version>|'
   negative parent-version check "devkit.toml pins" pom.xml "$parent_off_pin"
   negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"

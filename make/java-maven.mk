@@ -8,7 +8,8 @@
 # Module selection: ONLY=<module>[,<module>...] limits install, lint,
 # format, test, coverage and clean to those MODULES (passed to Maven as
 # -pl). Each entry is a module directory as MODULES lists it, not an
-# artifactId. Unset, the whole reactor runs.
+# artifactId. Unset, the whole reactor runs. lint's repository gates
+# (lint-repo, from common.mk) always cover the whole repository.
 # Example: make test ONLY=<module-dir>
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
@@ -30,7 +31,7 @@ check-java: ## Verify the JDK, Maven >= 3.9.9, Python >= 3.11, checkstyle-projec
 install: check ## make check, then mvn clean install -DskipTests
 	@"$(DEVKIT)/scripts/java/install.sh"
 
-lint: ## Run the quality-gate plugins and the frontend pin check
+lint: ## Run lint-repo, then the quality-gate plugins and the frontend pin check
 	@"$(DEVKIT)/scripts/java/lint.sh"
 
 format: ## Format Java sources with spotless

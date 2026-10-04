@@ -67,9 +67,10 @@ written against it. In short, a project:
 1. copies `devkitw` from the release tag into its root, verbatim and
    executable, and never edits it;
 2. adds `devkit.toml` with the pin (`url`, optional `mirror`, `version`,
-   `commit`) and, when it has a frontend, its npm minimums in
+   `commit`); when it has a frontend, its npm minimums in
    `[frontend.min-pins]`, which a project with a frontend requires (an
-   empty table when it has no minimums);
+   empty table when it has no minimums); and, optionally, the image
+   namespaces it publishes itself in `[pins] first-party`;
 3. adds `/.devkit` to `.gitignore`;
 4. shapes its `Makefile` as the contract shows: profile variables,
    `DEVKIT := $(shell ./devkitw path)` and its empty-result guard,
@@ -86,7 +87,9 @@ written against it. In short, a project:
 `make check` then fails when `.devkit` does not resolve to the pinned
 checkout, warns when the committed `devkitw` is stale, and runs the language
 checks; every target that runs Maven fails while the root pom does not
-inherit the parent as the contract requires. Requirements: git, GNU make,
+inherit the parent as the contract requires. `make lint` runs the
+[repository gates](docs/contract.md#repository-gates) first, over the
+whole repository, then the language gates. Requirements: git, GNU make,
 bash and python3 (3.11 or later); Windows is not targeted.
 
 On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
@@ -134,6 +137,25 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make check` warns until it does.
+
+### Upgrading from v0.2.x
+
+The next release adds the repository gate `lint-pins` to `make lint`
+(see [Repository gates](docs/contract.md#repository-gates)). Besides the
+version bump, make `make lint` pass it:
+
+1. Add a digest to every container image the project names, as
+   `<repository>:<tag>@sha256:<64 hex>`. To find one, run
+   `docker buildx imagetools inspect <image>:<tag>`, or `docker pull
+   <image>:<tag>` and then
+   `docker inspect --format '{{index .RepoDigests 0}}' <image>:<tag>`.
+2. Pin every workflow action to its full commit SHA with the release as a
+   comment: `uses: owner/repo[/path]@<40 lowercase hex> # vX.Y.Z`. An
+   action with no `vX.Y.Z` release is vendored as a `./` action or
+   pinned through a tagged fork.
+3. Declare the namespaces of the images the project publishes itself in
+   `devkit.toml`, as `[pins] first-party = ["<namespace>", ...]`; their
+   tags may stay unpinned.
 
 ### Upgrading from v0.1.x
 
