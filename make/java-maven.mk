@@ -7,7 +7,9 @@
 #
 # Module selection: ONLY=<module>[,<module>...] limits install, lint,
 # format, test, coverage and clean to those MODULES (passed to Maven as
-# -pl). Unset, the whole reactor runs. Example: make test ONLY=api
+# -pl). Each entry is a module directory as MODULES lists it, not an
+# artifactId. Unset, the whole reactor runs.
+# Example: make test ONLY=<module-dir>
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
 # `audit` reads NVD_API_KEY from the environment, else from .env.build.
