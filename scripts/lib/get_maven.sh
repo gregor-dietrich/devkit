@@ -51,3 +51,5 @@ if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
         exit 5
     fi
 fi
+# check_frontend_deps.py resolves the jars it reads through the same Maven.
+export MVN_CMD

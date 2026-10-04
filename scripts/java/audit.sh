@@ -3,8 +3,6 @@
 set -euo pipefail
 
 cd "$PROJECT_ROOT"
-# shellcheck source=SCRIPTDIR/../lib/get_maven.sh
-. "$DEVKIT/scripts/lib/get_maven.sh"
 
 # NVD API key: environment first, else the gitignored .env.build (kept out of .env, which docker-compose
 # hands to the app container). Sourced, so `export`, quotes and comments behave as in any shell file.
@@ -15,7 +13,14 @@ fi
 NVD_API_KEY=${NVD_API_KEY:-}
 NVD_API_KEY=${NVD_API_KEY%$'\r'}
 export NVD_API_KEY
-[[ -n "$NVD_API_KEY" ]] || echo "WARNING: NVD_API_KEY not set (environment or .env.build); the NVD download will be very slow."
+# dependency-check rejects an empty key ("Invalid API Key, length of 0"), so fail before Maven starts.
+[[ -n "$NVD_API_KEY" ]] || {
+    echo "ERROR: NVD_API_KEY not set (environment or .env.build); request one at https://nvd.nist.gov/developers/request-an-api-key" >&2
+    exit 1
+}
+
+# shellcheck source=SCRIPTDIR/../lib/get_maven.sh
+. "$DEVKIT/scripts/lib/get_maven.sh"
 
 echo "Running OWASP dependency-check..."
 
