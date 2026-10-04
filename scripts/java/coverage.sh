@@ -3,6 +3,8 @@
 set -euo pipefail
 
 cd "$PROJECT_ROOT"
+# shellcheck source=SCRIPTDIR/../lib/select_modules.sh
+. "$DEVKIT/scripts/lib/select_modules.sh"
 # shellcheck source=SCRIPTDIR/../lib/get_maven.sh
 . "$DEVKIT/scripts/lib/get_maven.sh"
 
@@ -15,7 +17,6 @@ while getopts "o" opt; do
 done
 
 REVISION=${REVISION:-1.0.0-SNAPSHOT}
-SELECTED=${ONLY:-${MODULES:-.}}
 REPORT=".coverage.md"
 maven_status=0
 
@@ -29,7 +30,7 @@ echo "Generating coverage report..."
 # One JaCoCo CSV per selected module (the project root for a monolith); coverage.py
 # warns about missing ones and fails when none exists.
 set --
-for module in ${SELECTED//,/ }; do
+for module in $SELECTED; do
     set -- "$@" "$module/target/site/jacoco/jacoco.csv"
 done
 python3 "$DEVKIT/scripts/java/coverage.py" "$REPORT" "$@"
