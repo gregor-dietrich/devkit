@@ -4,6 +4,7 @@
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh and tests/parent_check_test.sh.
+#          Needs git, shellcheck, procps (pgrep, ps) and python3 >= 3.11.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://,

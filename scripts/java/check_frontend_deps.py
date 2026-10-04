@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Verify committed frontend deps against the project's minimums and Vaadin's own version manifests."""
+"""Verify committed frontend deps against the project's minimums and Vaadin's own version manifests.
+
+Meant to run under make (lint.sh, install.sh), which sets MVN_CMD: the check asks that Maven for
+the local repository and the frontend module's vaadin.version, and resolves the dev bundle with it.
+"""
 
 import json
 import os
@@ -8,17 +12,18 @@ import subprocess
 import sys
 import tomllib
 import zipfile
+import zlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, NoReturn, Optional, Set, Tuple, cast
 
 # Repo root is the consuming project: $PROJECT_ROOT, which devkit's make includes
 # export to every recipe, else the current working directory.
 REPO_ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 
-# Directory holding package.json, package-lock.json and the pom that declares
-# <vaadin.version>. Single-module projects leave this at the repo root; multi-module
-# ones pass the Vaadin module (e.g. "gui") as the first argument. Keeping the path a
-# parameter is what lets one copy of this file serve both layouts.
+# Directory holding package.json, package-lock.json and the pom whose effective
+# vaadin.version Maven reports. Single-module projects leave this at the repo root;
+# multi-module ones pass the Vaadin module (e.g. "gui") as the first argument. Keeping
+# the path a parameter is what lets one copy of this file serve both layouts.
 FRONTEND_DIR: Path = REPO_ROOT / (sys.argv[1] if len(sys.argv) > 1 else ".")
 
 # A concrete dotted version (e.g. "25.2.0"); excludes npm "$ref" overrides and "$var".
@@ -37,14 +42,23 @@ CORE_MANIFEST_MEMBERS: Tuple[str, ...] = (
 
 # The bundle jar whose package-lock.json carries the versions vaadin-core-versions.json omits.
 # Vaadin's dev mode resolves it, but no gate's build does, so the check resolves it itself. The
-# prod bundle, which a build does resolve, carries no package-lock.json (only config/stats.json).
+# prod bundle, which a build does resolve, carries no package-lock.json (Vaadin 25.0–25.3: only
+# config/stats.json).
 BUNDLE_ARTIFACT = "vaadin-dev-bundle"
+
+# Pinned rather than "help:evaluate": the bare prefix resolves the plugin's latest release from
+# repository metadata, which floats and is re-fetched daily.
+HELP_EVALUATE = "org.apache.maven.plugins:maven-help-plugin:3.5.2:evaluate"
+# Pinned for the same reason: Maven 3.10's super POM no longer manages maven-dependency-plugin.
+DEPENDENCY_GET = "org.apache.maven.plugins:maven-dependency-plugin:3.11.0:get"
+
+# Upper bound for one Maven call; resolving the dev bundle downloads it on first use.
+MAVEN_TIMEOUT = 600
 
 # Remedy printed when a @vaadin/* component has drifted off its manifest version.
 REGEN_HINT = (
-    "Regenerate the committed frontend manifest at the pinned Vaadin version "
-    "(scripts/regen-frontend.sh where present, otherwise a Vaadin build-frontend run), "
-    "or move <vaadin.version> to the version the manifest was generated from."
+    "Regenerate the committed frontend files at the pinned Vaadin version (a Vaadin build-frontend run), "
+    "or move <vaadin.version> to the version they were generated from."
 )
 
 
@@ -88,23 +102,51 @@ def load_min_pins(toml_path: Path) -> Dict[str, str]:
     return cast(Dict[str, str], pins_map)
 
 
-def read_vaadin_version(pom_path: Path) -> str:
-    """Extract <vaadin.version> from the root pom.xml properties block."""
-    text = pom_path.read_text(encoding="utf-8")
-    match = re.search(r"<vaadin\.version>\s*([0-9]+\.[0-9]+\.[0-9]+)\s*</vaadin\.version>", text)
-    if not match:
-        raise ValueError(f"Could not read <vaadin.version> from {pom_path}.")
-    return match.group(1)
+def maven_cmd() -> str:
+    """Return the Maven command make's scripts export as MVN_CMD (get_maven.sh)."""
+    mvn = os.environ.get("MVN_CMD")
+    if not mvn:
+        raise LookupError("MVN_CMD is not set: run this check through make (make lint or make install).")
+    return mvn
+
+
+def maven_evaluate(expression: str, *args: str) -> str:
+    """Ask Maven, run from REPO_ROOT without recursing into modules, for an expression's effective value.
+
+    -B keeps ANSI colour out of the answer and of the error lines -q still prints.
+    """
+    command = [maven_cmd(), "-B", "-q", "-N", HELP_EVALUATE, f"-Dexpression={expression}", "-DforceStdout", *args]
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, timeout=MAVEN_TIMEOUT, check=False)
+    if result.returncode != 0:
+        output = (result.stdout + result.stderr).strip()
+        raise ValueError(f"Maven failed to evaluate {expression} (exit {result.returncode}):\n{output}")
+    return result.stdout.strip()
+
+
+def read_vaadin_version() -> str:
+    """Return the frontend module's effective vaadin.version as Maven reports it."""
+    pom = FRONTEND_DIR / "pom.xml"
+    version = maven_evaluate("vaadin.version", "-f", str(pom))
+    if not STABLE.match(version):
+        raise ValueError(f'Maven reports vaadin.version as "{version}" for {pom}, not an x.y.z version.')
+    return version
 
 
 def maven_local_repo() -> Path:
-    """Resolve the Maven local repository path from ~/.m2/settings.xml or the default."""
-    settings = Path.home() / ".m2" / "settings.xml"
-    if settings.is_file():
-        match = re.search(r"<localRepository>\s*([^<]+?)\s*</localRepository>", settings.read_text(encoding="utf-8"))
-        if match:
-            return Path(os.path.expanduser(match.group(1).strip()))
-    return Path.home() / ".m2" / "repository"
+    """Return Maven's effective local repository (settings, -Dmaven.repo.local, .mvn/maven.config)."""
+    repo = maven_evaluate("settings.localRepository")
+    path = REPO_ROOT / repo
+    if not repo or not path.is_dir():
+        raise ValueError(f'Maven reports the local repository as "{repo}", which is not a directory.')
+    return path
+
+
+def load_json(path: Path) -> Any:
+    """Read a JSON file, naming it when it does not parse."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError both subclass it
+        raise ValueError(f"{path} is not valid JSON: {exc}") from exc
 
 
 def collect_manifest_versions(obj: Any, out: Dict[str, str]) -> None:
@@ -127,21 +169,31 @@ def load_bundle_versions(jar_path: Path, out: Dict[str, str]) -> None:
     with zipfile.ZipFile(jar_path) as jar:
         members = [n for n in jar.namelist() if n.endswith("/package-lock.json") and "node_modules" not in n]
         if not members:
-            raise KeyError(f"No package-lock.json found in {jar_path}.")
-        lock = cast(Dict[str, Any], json.loads(jar.read(members[0])))
-    packages = cast(Dict[str, Any], lock.get("packages", {}))
-    for key, raw_entry in packages.items():
-        name = key.split("node_modules/")[-1]
-        if name.startswith("@vaadin/") and isinstance(raw_entry, dict):
-            entry = cast(Dict[str, Any], raw_entry)
-            version = entry.get("version")
-            if isinstance(version, str):
-                out.setdefault(name, version)
+            raise LookupError(f"No package-lock.json found in {jar_path}.")
+        lock = json.loads(jar.read(members[0]))
+    packages = lock.get("packages") if isinstance(lock, dict) else None
+    seen = 0
+    if isinstance(packages, dict):
+        for key, raw_entry in cast(Dict[str, Any], packages).items():
+            name = key.split("node_modules/")[-1]
+            if name.startswith("@vaadin/") and isinstance(raw_entry, dict):
+                version = cast(Dict[str, Any], raw_entry).get("version")
+                if isinstance(version, str):
+                    out.setdefault(name, version)
+                    seen += 1
+    # A lock without one @vaadin/ entry means the bundle's format changed under the check.
+    if not seen:
+        raise LookupError(f"The package-lock.json in {jar_path} lists no @vaadin/ package.")
+
+
+def vaadin_jar(repo: Path, artifact: str, version: str) -> Path:
+    """Return where the local repository keeps com.vaadin:<artifact>:<version>."""
+    return repo / "com" / "vaadin" / artifact / version / f"{artifact}-{version}.jar"
 
 
 def load_expected_versions(repo: Path, version: str) -> Dict[str, str]:
     """Build the authoritative npmName -> version map from resolved Vaadin jars."""
-    core_jar = repo / "com" / "vaadin" / "vaadin-core-internal" / version / f"vaadin-core-internal-{version}.jar"
+    core_jar = vaadin_jar(repo, "vaadin-core-internal", version)
     if not core_jar.is_file():
         raise FileNotFoundError(
             f"Vaadin manifest jar not found: {core_jar}\n"
@@ -152,7 +204,7 @@ def load_expected_versions(repo: Path, version: str) -> Dict[str, str]:
         names = set(jar.namelist())
         member = next((m for m in CORE_MANIFEST_MEMBERS if m in names), None)
         if member is None:
-            raise KeyError(f"None of {list(CORE_MANIFEST_MEMBERS)} found in {core_jar}.")
+            raise LookupError(f"None of {list(CORE_MANIFEST_MEMBERS)} found in {core_jar}.")
         collect_manifest_versions(json.loads(jar.read(member)), expected)
 
     # A few @vaadin/* packages (e.g. common-frontend, vaadin-themable-mixin) are shipped
@@ -164,14 +216,12 @@ def load_expected_versions(repo: Path, version: str) -> Dict[str, str]:
 
 def find_bundle_jar(repo: Path, version: str) -> Path:
     """Return the Vaadin dev bundle jar, resolving it through Maven (MVN_CMD) if it is missing."""
-    jar = repo / "com" / "vaadin" / BUNDLE_ARTIFACT / version / f"{BUNDLE_ARTIFACT}-{version}.jar"
+    jar = vaadin_jar(repo, BUNDLE_ARTIFACT, version)
     if jar.is_file():
         return jar
-    resolve = ["dependency:get", f"-Dartifact=com.vaadin:{BUNDLE_ARTIFACT}:{version}", "-Dtransitive=false"]
-    mvn = os.environ.get("MVN_CMD")
-    if mvn:
-        print(f"Resolving {BUNDLE_ARTIFACT} {version}...")
-        subprocess.run([mvn, "-q", *resolve], check=False)
+    resolve = ["-N", DEPENDENCY_GET, f"-Dartifact=com.vaadin:{BUNDLE_ARTIFACT}:{version}", "-Dtransitive=false"]
+    print(f"Resolving {BUNDLE_ARTIFACT} {version}...", flush=True)
+    subprocess.run([maven_cmd(), "-q", *resolve], cwd=REPO_ROOT, timeout=MAVEN_TIMEOUT, check=False)
     if not jar.is_file():
         raise FileNotFoundError(
             f"Vaadin bundle jar not found: {jar}\n"
@@ -273,40 +323,60 @@ def check_vaadin_versions(
     return errors, drift
 
 
+def fail(errors: List[str], drift: bool = False) -> NoReturn:
+    """Print each error (and the regeneration remedy on drift), then exit 1."""
+    for error in errors:
+        print(f"ERROR: {error}", file=sys.stderr)
+    if drift:
+        print(f"       {REGEN_HINT}", file=sys.stderr)
+    print("Frontend dependency check FAILED.", file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     errors: List[str] = []
     drift = False
 
     pkg_json_path = FRONTEND_DIR / "package.json"
     pkg_lock_path = FRONTEND_DIR / "package-lock.json"
-    pom_path = FRONTEND_DIR / "pom.xml"
 
-    print("Checking pinned frontend dependencies...")
+    print("Checking pinned frontend dependencies...", flush=True)
     try:
         min_pins = load_min_pins(REPO_ROOT / "devkit.toml")
     except (ValueError, OSError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        print("Frontend dependency check FAILED.", file=sys.stderr)
-        sys.exit(1)
+        fail([str(exc)])
 
-    pkg_json: Dict[str, Any] = json.loads(pkg_json_path.read_text(encoding="utf-8"))
-    pkg_lock: Optional[Dict[str, Any]] = None
-    if pkg_lock_path.is_file():
-        pkg_lock = json.loads(pkg_lock_path.read_text(encoding="utf-8"))
+    try:
+        pkg_json: Dict[str, Any] = load_json(pkg_json_path)
+        pkg_lock: Optional[Dict[str, Any]] = None
+        if pkg_lock_path.is_file():
+            pkg_lock = load_json(pkg_lock_path)
+            if not isinstance(pkg_lock, dict):
+                raise ValueError(f"{pkg_lock_path} is not a JSON object.")
+    except (OSError, ValueError) as exc:
+        fail([*errors, str(exc)])
 
     # Check 1: the project's security-sensitive minimum version pins.
     errors.extend(check_min_pins(min_pins, pkg_json, pkg_lock))
 
     # Check 2: @vaadin/* components must match Vaadin's own version manifest.
-    version = read_vaadin_version(pom_path)
-    print(f"Verifying @vaadin/* components against Vaadin {version} manifest...")
     try:
+        # Two help:evaluate calls, ~10 s on a real multi-module consumer. One joined expression
+        # took ~6 s, but works only because Maven interpolates -Dexpression twice: undocumented.
+        version = read_vaadin_version()
+        print(f"Verifying @vaadin/* components against Vaadin {version} manifest...", flush=True)
         expected = load_expected_versions(maven_local_repo(), version)
-    except (FileNotFoundError, KeyError) as exc:
-        for error in [*errors, str(exc)]:
-            print(f"ERROR: {error}", file=sys.stderr)
-        print("Frontend dependency check FAILED.", file=sys.stderr)
-        sys.exit(1)
+    except (
+        OSError,
+        ValueError,
+        LookupError,
+        EOFError,
+        RuntimeError,  # NotImplementedError among them: a jar member compressed in an unsupported way
+        zipfile.BadZipFile,
+        zlib.error,
+        subprocess.SubprocessError,
+    ) as exc:
+        fail([*errors, str(exc)])
 
     json_vaadin: Dict[str, Set[str]] = {}
     collect_pkg_json_vaadin(pkg_json, json_vaadin)
@@ -321,12 +391,7 @@ def main() -> None:
         drift = drift or lock_drift
 
     if errors:
-        for error in errors:
-            print(f"ERROR: {error}", file=sys.stderr)
-        if drift:
-            print(f"       {REGEN_HINT}", file=sys.stderr)
-        print("Frontend dependency check FAILED.", file=sys.stderr)
-        sys.exit(1)
+        fail(errors, drift)
 
     print("Frontend dependency check passed.")
 

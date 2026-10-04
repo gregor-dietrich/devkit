@@ -111,7 +111,12 @@ include .devkit/make/java-maven.mk
   `package.json` and, when the project commits one, in `package-lock.json`.
   It fails when the table is absent, when a minimum is not a stable
   `x.y.z`, and on any other key under `[frontend]`; an empty table checks
-  nothing. devkit itself names no package.
+  nothing. devkit itself names no package. It also checks every `@vaadin/*`
+  version in `package.json` and `package-lock.json` against the Vaadin
+  release's manifests (the core manifest, gaps filled from the dev bundle);
+  for that it asks Maven (`MVN_CMD`, which `scripts/lib/get_maven.sh`
+  exports) for the local repository and the frontend module's
+  `vaadin.version` and resolves the dev bundle. It fails without `MVN_CMD`.
 
 ## Maven configuration
 

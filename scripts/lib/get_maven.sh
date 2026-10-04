@@ -51,7 +51,8 @@ if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
         exit 5
     fi
 fi
-# check_frontend_deps.py resolves the jars it reads through the same Maven.
+# check_frontend_deps.py asks the same Maven for its values and resolves the
+# Vaadin dev bundle with it (the build resolves the core jar).
 export MVN_CMD
 
 # Maven reads devkit's parent POM only through the .devkit link; fail before any build whose pom
