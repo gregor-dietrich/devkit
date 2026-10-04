@@ -12,7 +12,8 @@
 # Example: make test ONLY=<module-dir>
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
-# `audit` reads NVD_API_KEY from the environment, else from .env.build.
+# `audit` reads NVD_API_KEY from the environment, else from .env.build, and
+# fails without one.
 
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
 MODULES := $(strip $(MODULES))
