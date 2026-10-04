@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [java]
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
-#   shell  shellcheck every script, then tests/devkitw_test.sh.
+#   shell  shellcheck every script, then tests/devkitw_test.sh and
+#          tests/kill_test.sh.
 #   java   tag the tree under test, committed or not, in a temp bare repo and
 #          run every tests/fixtures/java-* consumer, pinned to that tag over
 #          file://, through make help, check, lint, test, coverage and format;
 #          then break copies of the monolith (format, a shared checkstyle
 #          rule, coverage) and expect lint or test to fail for that reason.
-#          Not audit (needs an NVD key) and not kill (stops every Docker
-#          container). Needs JDK 25, Maven >= 3.9.9, python3 and the network
+#          Not audit (needs an NVD key) and not kill (the shell part tests
+#          it). Needs JDK 25, Maven >= 3.9.9, python3 and the network
 #          (Maven Central, Eclipse P2); ~/.m2 is used as is.
 set -euo pipefail
 shopt -s globstar
@@ -35,6 +36,7 @@ shellcheck_all() {
 shell_part() {
   check "shellcheck" shellcheck_all
   check "devkitw tests" "$root/tests/devkitw_test.sh"
+  check "kill tests" "$root/tests/kill_test.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.

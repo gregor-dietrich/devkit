@@ -45,5 +45,5 @@ audit: ## Run OWASP dependency-check (NVD_API_KEY or .env.build)
 clean: ## mvn clean, plus logs and frontend build output
 	@"$(DEVKIT)/scripts/java/clean.sh"
 
-kill: ## Kill Quarkus/Maven processes; stop and remove ALL Docker containers
+kill: ## Stop this project's Quarkus/Maven JVMs and its docker compose services
 	@"$(DEVKIT)/scripts/java/kill.sh"
