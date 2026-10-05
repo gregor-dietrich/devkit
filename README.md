@@ -148,7 +148,7 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 
 ### Upgrading from v0.2.x
 
-The next release adds the repository gates `lint-pins`, `lint-decisions`,
+v0.3.0 adds the repository gates `lint-pins`, `lint-decisions`,
 `lint-secrets` and `lint-md` to `make lint`, and `format-md` to `make format`
 (see [Repository gates](docs/contract.md#repository-gates)). Besides the
 version bump, make `make lint` pass them:
