@@ -1,0 +1,24 @@
+// devkit's default markdownlint profile, which `make lint-md` passes with
+// --config when the project has no .markdownlint.jsonc of its own. A
+// project's file may start with
+// "extends": ".devkit/markdown/markdownlint.jsonc" and override from there.
+{
+  "default": true,
+
+  // Tables, fenced code and headings cannot be wrapped without breaking them.
+  "MD013": {
+    "line_length": 80,
+    "tables": false,
+    "code_blocks": false,
+    "headings": false
+  },
+
+  // Off: a heading ends a list, so --fix would renumber an ordered list that
+  // a heading splits and that deliberately continues its numbering.
+  "MD029": false,
+
+  // Pinned rather than "consistent", which infers the style from the first
+  // marker in each file: pinned, --fix is deterministic.
+  "MD049": { "style": "underscore" },
+  "MD050": { "style": "asterisk" }
+}

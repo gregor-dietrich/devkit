@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "dependencies": {
+    "markdownlint-cli": "0.49.1"
+  },
+  "engines": {
+    "node": ">=22.22.2"
+  }
+}

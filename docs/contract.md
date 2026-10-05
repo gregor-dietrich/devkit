@@ -20,6 +20,8 @@ devkit is written against this page; change it here first.
 | `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
 | `.gitleaks.toml` | Optional: the project's gitleaks configuration, read by `lint-secrets` (see Repository gates) |
 | `.gitleaksignore` | Optional: the fingerprints of gitleaks findings the project has triaged, read by `lint-secrets` |
+| `.markdownlint.jsonc` | Optional: the project's markdownlint configuration, at the root (see Repository gates) |
+| `.markdownlintignore` | Optional: the Markdown files `lint-md` skips, at the root |
 
 ```toml
 [devkit]
@@ -80,15 +82,15 @@ include .devkit/make/java-maven.mk
   does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
   FRONTEND_DIR DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `lint-repo`,
-  `lint-pins`, `lint-decisions`, `lint-secrets`, `branch`, `rebase`, `tag`,
-  `untag`. `java-maven.mk` owns `check-java`, `install`, `lint`, `format`,
-  `test`, `coverage`, `audit`, `clean`, `kill`. Neither defines project-only
-  targets.
-- `check` and `lint` are composed by prerequisites, never by two recipes:
-  `common.mk` declares `check: check-devkit` and `lint: lint-repo`;
-  `java-maven.mk` adds `check: check-java` and carries the `lint` recipe,
-  which runs after the prerequisite. Only one rule line per target carries
-  a `## description`.
+  `lint-pins`, `lint-decisions`, `lint-secrets`, `lint-md`, `format-md`,
+  `branch`, `rebase`, `tag`, `untag`. `java-maven.mk` owns `check-java`,
+  `install`, `lint`, `format`, `test`, `coverage`, `audit`, `clean`, `kill`.
+  Neither defines project-only targets.
+- `check`, `lint` and `format` are composed by prerequisites, never by two
+  recipes: `common.mk` declares `check: check-devkit`, `lint: lint-repo`
+  and `format: format-md`; `java-maven.mk` adds `check: check-java` and
+  carries the `lint` and `format` recipes, which run after the
+  prerequisites. Only one rule line per target carries a `## description`.
 - `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
   only warns when `./devkitw self-check` fails.
 - `help` lists every target that carries a `## description` comment on its
@@ -204,17 +206,19 @@ git's history and changes instead.
   nor are files named only through `COMPOSE_FILE` or `-f`. Submodule
   content, and anything above `$PROJECT_ROOT`, is not listed.
 - `lint-decisions` checks `docs/decisions.md` when it exists. An entry is
-  a `## ADR-<digits>` heading and the lines up to the next `## ` heading
+  a `## ADR-<digits>` heading and the lines up to the next heading starting
+  with `##` followed by a space
   (a `###` heading does not end it); entries below a `## Superseded`
   heading are retired. Any other `##`-or-deeper heading naming `ADR-<digit>`
   fails, so a malformed heading cannot hide an entry. Fenced code blocks
   are not read, and a fence that never closes fails. Each entry carries
-  exactly one `**Status:** ` marker, whose value is `Accepted` or
-  `Proposed` on an active entry. An entry with a line starting
+  exactly one `**Status:**` marker followed by a space, whose value is
+  `Accepted` or `Proposed` on an active entry. An entry with a line starting
   `**Premise:**` carries one line starting `**Guard:**` whose first word is
   `watcher`, `cascade` or `memory-only`; an entry has at most
-  one of each, and a line leading with `- ` quotes either label without
-  being read as one. A `cascade` guard names `trigger: tag:<tag>`, read
+  one of each, and a line leading with `-` followed by a space quotes
+  either label without being read as one. A `cascade` guard names
+  `trigger: tag:<tag>`, read
   from the guard's paragraph up to the next blank line (backticks around
   the value are dropped; one left inside it fails), and an active entry
   whose tag exists fails as spent. It reads the repository's tags, so a
@@ -262,6 +266,30 @@ git's history and changes instead.
     only, and a rewritten commit no longer matches it, so the finding comes
     back for triage. Prefer it to a path allowlist in `.gitleaks.toml`,
     which applies to every commit in history as well.
+- `lint-md` checks every listed `*.md` file that is not a symlink with
+  markdownlint-cli at the closure `markdown/package-lock.json` pins,
+  installed with `npm ci --ignore-scripts` into
+  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/` on first use (the only
+  run that needs the network). `format-md`, part of `make format`, runs its
+  `--fix` over the same files and rewrites without judging: it prints what
+  markdownlint cannot fix with a `NOTE`, since `make lint` fails on those,
+  and passes, so `make format` goes on to the language formatter (an error
+  of markdownlint's own still fails it). Both need `node` at or above
+  `engines.node` in `markdown/package.json` and `npm` on `PATH`. The
+  configuration is the project's `.markdownlint.jsonc` when it has one,
+  else `markdown/markdownlint.jsonc`; a project's file may start with
+  `"extends": ".devkit/markdown/markdownlint.jsonc"`. `.markdownlintignore`
+  excludes files. Each first runs markdownlint on devkit's control files and
+  fails unless they pass and fail as expected.
+
+  markdownlint runs without `markdownlint_*` variables and with an empty
+  `HOME`, so the files it reads from `HOME` (`~/.markdownlintrc`,
+  `~/.config/markdownlint`) do not apply. It still merges, beneath the
+  configuration, the nearest `.markdownlintrc` in the project root or a
+  directory above it (`~/.markdownlintrc` for a project under the home
+  directory), `/etc/markdownlintrc` and `/etc/markdownlint/config`, and,
+  when the project has no `.markdownlint.jsonc`, its `.markdownlint.json`,
+  `.yaml` or `.yml`.
 
 ## Maven configuration
 

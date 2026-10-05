@@ -3,7 +3,10 @@
 # The java job downloads gitleaks for lint-secrets, verifying the linux_x64 pin.
 name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   shell:
@@ -12,6 +15,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22" # the newest 22.x, at or above markdown/package.json's engines.node
+          check-latest: true # not an older 22.x the runner has cached
       - run: apt-get update -qq && apt-get install -y -qq shellcheck procps # procps: pgrep, ps for kill_test
       - run: tests/run.sh shell
 
@@ -30,6 +37,10 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven # ~/.m2/repository, keyed on the fixtures' poms
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22" # the newest 22.x, at or above markdown/package.json's engines.node
+          check-latest: true # not an older 22.x the runner has cached
       - name: Install Maven
         run: |
           curl -fsSLo /tmp/maven.tar.gz "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$MAVEN_VERSION/apache-maven-$MAVEN_VERSION-bin.tar.gz"

@@ -43,19 +43,19 @@ ignores the override.
 
 **Rejected options:**
 
-- *Keep the Makefile and scripts in each project.* The two source projects
+- _Keep the Makefile and scripts in each project._ The two source projects
   drifted under a written by-hand sync policy; the same Quarkus/JaCoCo
   change had to land twice in one day.
-- *git submodule.* Needs `git submodule update` after every checkout and
+- _git submodule._ Needs `git submodule update` after every checkout and
   rebase, recursive clones, and a dedicated submodule manager in dependency
   bots instead of a text edit. (The per-bump commit in the consumer is common
   to every pinned option and did not decide.)
-- *A project template (Copier).* It allows local edits, which is the drift
+- _A project template (Copier)._ It allows local edits, which is the drift
   path, and turns scripts into templates tested only through rendered
   samples.
-- *An installed CLI.* `uv tool` is Python tooling and an odd prerequisite for
+- _An installed CLI._ `uv tool` is Python tooling and an odd prerequisite for
   a Java build; a custom CLI is a product with a publish step per change.
-- *A Claude Code plugin for everything.* Plugins update themselves per
+- _A Claude Code plugin for everything._ Plugins update themselves per
   machine, but gates must be pinned per project for reproducible CI. A
   plugin carries agent tooling only.
 
@@ -90,8 +90,9 @@ checks; every target that runs Maven fails while the root pom does not
 inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
-bash and python3 (3.11 or later), and for `make lint` curl, tar and
-`sha256sum` or `shasum`, which fetch and verify the pinned gitleaks once;
+bash and python3 (3.11 or later); `make lint` and `make format` also need
+node (22.22.2 or later) with npm. `make lint` also needs curl, tar and
+`sha256sum` or `shasum`, which fetch and verify the pinned gitleaks once.
 Windows is not targeted.
 
 On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
@@ -142,9 +143,9 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 
 ### Upgrading from v0.2.x
 
-The next release adds the repository gates `lint-pins`, `lint-decisions`
-and `lint-secrets` to `make lint` (see
-[Repository gates](docs/contract.md#repository-gates)). Besides the
+The next release adds the repository gates `lint-pins`, `lint-decisions`,
+`lint-secrets` and `lint-md` to `make lint`, and `format-md` to `make format`
+(see [Repository gates](docs/contract.md#repository-gates)). Besides the
 version bump, make `make lint` pass them:
 
 1. Add a digest to every container image the project names, as
@@ -171,6 +172,13 @@ version bump, make `make lint` pass them:
 6. Run `make lint-secrets` and triage what it finds in the history: remove
    and rotate a real secret, then record its fingerprint, like a false
    positive's, in `.gitleaksignore`.
+7. Make `make lint-md` pass: `make format-md` fixes what markdownlint can;
+   wrap long lines by hand, exclude files in `.markdownlintignore`, or add
+   a `.markdownlint.jsonc` that extends devkit's profile.
+8. Provide Node.js 22.22.2 or later with npm in CI, e.g.
+   `actions/setup-node` with `node-version: "22"` and `check-latest: true`
+   (without it, an older cached 22.x can win), pinned like every other
+   action.
 
 ### Upgrading from v0.1.x
 

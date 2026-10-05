@@ -4,19 +4,22 @@
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
-#          tests/check_pins_test.sh, tests/check_decisions_test.sh and
-#          tests/secrets_test.sh; then run lint-pins over devkit itself,
-#          and lint-secrets when the pinned gitleaks is already in the tools
-#          cache (no download here). Needs git, shellcheck, procps (pgrep, ps),
-#          tar, sha256sum or shasum, and python3 >= 3.11.
+#          tests/check_pins_test.sh, tests/check_decisions_test.sh,
+#          tests/secrets_test.sh and tests/markdown_test.sh; then run lint-pins
+#          and lint-md over devkit itself, and lint-secrets when the pinned
+#          gitleaks is already in the tools cache (no download here). Needs
+#          git, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
+#          python3 >= 3.11, and node (at or above engines.node in
+#          markdown/package.json) with npm, which installs markdownlint-cli
+#          from the npm registry on first use.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
 #          and committed as a git repository of its own, through make help,
 #          check, lint, test, coverage and format; then break copies of the
 #          monolith (format, a shared and a project checkstyle rule, the
-#          project rule's suppression, coverage, an image digest, a secret
-#          committed, staged or unstaged, a missing git object) and
+#          project rule's suppression, coverage, an image digest, Markdown,
+#          a secret committed, staged or unstaged, a missing git object) and
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
@@ -24,8 +27,9 @@
 #          itself with the gitleaks that make lint downloaded and verified.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
-#          JDK 25, Maven >= 3.9.9, python3, curl, tar and the network (Maven
-#          Central, Eclipse P2, github.com); ~/.m2 is used as is.
+#          JDK 25, Maven >= 3.9.9, python3, curl, tar, node with npm and the
+#          network (Maven Central, Eclipse P2, github.com, the npm registry);
+#          ~/.m2 is used as is.
 set -euo pipefail
 shopt -s globstar
 
@@ -57,9 +61,12 @@ shell_part() {
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
+  check "markdown tests" "$root/tests/markdown_test.sh"
   check "secrets tests" "$root/tests/secrets_test.sh"
   check "devkit's own tree passes lint-pins" \
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
+  check "devkit's own tree passes lint-md" \
+    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/markdown.sh"
   local version
   version=$(sed -n 's/^version=//p' "$root/scripts/secrets.sh")
   if compgen -G "${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-$version-*/gitleaks" >/dev/null; then
@@ -91,12 +98,12 @@ publish() {
   commit=$(git -C "$src" rev-parse HEAD)
 }
 
-help_lists() { # make help lists lint once, the repository gates and the fixture's own target
+help_lists() { # make help lists lint and format once, the repository gates and the fixture's own target
   local out
   out=$(make --no-print-directory -C "$1" help) && printf '%s\n' "$out" &&
-    [[ $(grep -c '^  make lint ' <<<"$out") == 1 && $out == *"make lint-repo "* &&
-      $out == *"make lint-pins "* && $out == *"make lint-secrets "* &&
-      $out == *"make hello "* ]]
+    [[ $(grep -c '^  make lint ' <<<"$out") == 1 && $(grep -c '^  make format ' <<<"$out") == 1 &&
+      $out == *"make lint-repo "* && $out == *"make lint-pins "* && $out == *"make lint-secrets "* &&
+      $out == *"make lint-md "* && $out == *"make format-md "* && $out == *"make hello "* ]]
 }
 
 setup() { # setup FIXTURE DIR: copy FIXTURE to DIR, pinned to the tag, as a git repo
@@ -156,6 +163,7 @@ negatives() {
   negative digest lint "it carries no digest" compose.yaml 's/@sha256:[0-9a-f]*//'
   # Built here, so this file holds no token; edited() leaves the change unstaged.
   secret_negatives
+  negative markdown lint "MD018" README.md 's/^# /#/'
   local parent_off_pin='/<parent>/,/<\/parent>/s|<version>[^<]*</version>|<version>0.0.0</version>|'
   negative parent-version check "devkit.toml pins" pom.xml "$parent_off_pin"
   negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"

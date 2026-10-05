@@ -9,7 +9,8 @@
 # format, test, coverage and clean to those MODULES (passed to Maven as
 # -pl). Each entry is a module directory as MODULES lists it, not an
 # artifactId. Unset, the whole reactor runs. lint's repository gates
-# (lint-repo, from common.mk) always cover the whole repository.
+# (lint-repo) and format's format-md, from common.mk, always cover the whole
+# repository.
 # Example: make test ONLY=<module-dir>
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
@@ -34,7 +35,7 @@ install: check ## make check, then mvn clean install -DskipTests
 lint: ## Run lint-repo, then the quality-gate plugins and the frontend pin check
 	@"$(DEVKIT)/scripts/java/lint.sh"
 
-format: ## Format Java sources with spotless
+format: ## Run format-md, then format Java sources with spotless
 	@"$(DEVKIT)/scripts/java/format.sh"
 
 test: ## Run the Maven test suite (mvn verify)
