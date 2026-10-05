@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: "22" # the newest 22.x, at or above markdown/package.json's engines.node
           check-latest: true # not an older 22.x the runner has cached
-      - run: apt-get update -qq && apt-get install -y -qq shellcheck procps # procps: pgrep, ps for kill_test
+      - run: apt-get update -qq && apt-get install -y -qq make shellcheck procps # make: hooks_test; procps: pgrep, ps for kill_test
       - run: tests/run.sh shell
 
   java:

@@ -81,16 +81,17 @@ include .devkit/make/java-maven.mk
   environment value never wins (a command-line `PROJECT_ROOT=...` still
   does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
   FRONTEND_DIR DEVKIT` to every recipe.
-- Targets: `common.mk` owns `help`, `check`, `check-devkit`, `lint-repo`,
-  `lint-pins`, `lint-decisions`, `lint-secrets`, `lint-md`, `format-md`,
-  `branch`, `rebase`, `tag`, `untag`. `java-maven.mk` owns `check-java`,
-  `install`, `lint`, `format`, `test`, `coverage`, `audit`, `clean`, `kill`.
-  Neither defines project-only targets.
+- Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
+  `hooks`, `lint-repo`, `lint-pins`, `lint-decisions`, `lint-secrets`,
+  `lint-md`, `format-md`, `branch`, `rebase`, `tag`, `untag`.
+  `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
+  `coverage`, `audit`, `clean`, `kill`. Neither defines project-only targets.
 - `check`, `lint` and `format` are composed by prerequisites, never by two
-  recipes: `common.mk` declares `check: check-devkit`, `lint: lint-repo`
-  and `format: format-md`; `java-maven.mk` adds `check: check-java` and
-  carries the `lint` and `format` recipes, which run after the
-  prerequisites. Only one rule line per target carries a `## description`.
+  recipes: `common.mk` declares `check: check-devkit check-hooks`,
+  `lint: lint-repo` and `format: format-md`; `java-maven.mk` adds
+  `check: check-java` and carries the `lint` and `format` recipes, which run
+  after the prerequisites. Only one rule line per target carries a
+  `## description`.
 - `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
   only warns when `./devkitw self-check` fails.
 - `help` lists every target that carries a `## description` comment on its
@@ -290,6 +291,42 @@ git's history and changes instead.
   directory), `/etc/markdownlintrc` and `/etc/markdownlint/config`, and,
   when the project has no `.markdownlint.jsonc`, its `.markdownlint.json`,
   `.yaml` or `.yml`.
+
+## Git hooks
+
+`make hooks` installs, into the clone's own hooks directory, `pre-commit`
+(`make lint-repo`), `pre-push` (`make lint-repo test`) and notices on
+checkout, merge and rewrite (the devkit pin moved; the branch is behind its
+base). Each hook is a self-contained copy of the pinned devkit's
+`scripts/hooks/`, never a call into the work tree; `make check` warns when
+one is missing or stale. A hook it did not write is never overwritten.
+
+- The project must be the git top level: the hooks act only where
+  `devkit.toml` and the `Makefile` sit there, so `make hooks` refuses a
+  project in a subdirectory, and `make check` says so once.
+- The hooks directory is `git rev-parse --git-path hooks`, so
+  `core.hooksPath` is honoured, but only inside the clone's git directory:
+  `make hooks` refuses one in a work tree, where a branch could supply the
+  hooks, or outside the clone, where other repositories would run them, and
+  prints the `git config core.hooksPath` that points the clone back. A
+  symlinked hooks directory is judged by where it leads.
+- Beside a hook of someone else's, the copy is written as `<hook>.devkit`
+  and `make hooks` prints the line that runs it from that hook; it refuses
+  a `<hook>.devkit` it did not write. A copy that a hook manager moved to
+  `<hook>.legacy` or `<hook>.old` is refreshed there. A copy is always a
+  regular file: a symlink in its place is replaced, never written through,
+  and `make check` reports it as stale.
+- The notices run no make target and nothing the work tree supplies: they
+  read `devkit.toml` as data, and of `.devkit` only the link, so a
+  checkout, merge or rewrite runs no code the branch brings. The gates run
+  the work tree's make targets, as a `make` there would. `pre-push` gates
+  the work tree at HEAD, not the pushed commits, and says so when they
+  differ or the tree is dirty.
+- `check-hooks` never fails and is silent with `CI=true`. Every worktree of
+  a clone shares one hooks directory, so worktrees pinned to different
+  devkit versions report each other's copies as stale.
+- `git commit --no-verify` and `git push --no-verify` skip the gates once;
+  CI stays the backstop.
 
 ## Maven configuration
 

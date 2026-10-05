@@ -84,10 +84,15 @@ written against it. In short, a project:
    with the project's `checkstyle-project.xml` as checkstyle execution
    `project`.
 
+Then run `make hooks` once per clone: it installs the
+[git hooks](docs/contract.md#git-hooks) that run `make lint-repo` before a
+commit and `make lint-repo test` before a push.
+
 `make check` then fails when `.devkit` does not resolve to the pinned
-checkout, warns when the committed `devkitw` is stale, and runs the language
-checks; every target that runs Maven fails while the root pom does not
-inherit the parent as the contract requires. `make lint` runs the
+checkout, warns when the committed `devkitw` is stale or a git hook is
+missing or stale, and runs the language checks; every target that runs
+Maven fails while the root pom does not inherit the parent as the contract
+requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
 bash and python3 (3.11 or later); `make lint` and `make format` also need
@@ -179,6 +184,9 @@ version bump, make `make lint` pass them:
    `actions/setup-node` with `node-version: "22"` and `check-latest: true`
    (without it, an older cached 22.x can win), pinned like every other
    action.
+
+It also adds the [git hooks](docs/contract.md#git-hooks): run `make hooks`
+once per clone; `make check` notes it until then.
 
 ### Upgrading from v0.1.x
 

@@ -8,21 +8,29 @@ export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR DEVKIT
 
 MAKEFLAGS += --no-print-directory
 
-.PHONY: help check check-devkit lint lint-repo lint-pins lint-decisions \
-	lint-secrets lint-md format format-md branch rebase tag untag
+.PHONY: help check check-devkit check-hooks hooks lint lint-repo lint-pins \
+	lint-decisions lint-secrets lint-md format format-md branch rebase tag untag
 
 help: ## list the available targets
 	@echo "$(PROJECT) - Available commands:"
 	@awk -F':.*## ' '/^[A-Za-z0-9_.-]+:[^=].*## /{printf "  make %-16s - %s\n", $$1, $$2}' \
 		$(MAKEFILE_LIST) | LC_ALL=C sort
 
-check: check-devkit ## verify the local environment
+check: check-devkit check-hooks ## verify the local environment
 
 check-devkit: ## verify .devkit links to the pin (warns on a stale devkitw)
 	@cd "$(PROJECT_ROOT)" && ./devkitw self-check \
 		|| echo "check-devkit: warning: ./devkitw differs from .devkit/devkitw" >&2
 	@[ "$$(cd "$(PROJECT_ROOT)/.devkit" && pwd -P)" = "$$(cd "$(DEVKIT)" && pwd -P)" ] \
 		|| { echo "check-devkit: .devkit does not resolve to $(DEVKIT)" >&2; exit 1; }
+
+# Advisory: says when a hook is missing or differs from what `make hooks`
+# installs from the pinned devkit, and never fails.
+check-hooks:
+	@"$(DEVKIT)/scripts/hooks.sh" status
+
+hooks: ## install the git hooks (pre-commit: lint-repo; pre-push: lint-repo and test)
+	@"$(DEVKIT)/scripts/hooks.sh" install
 
 # No `##` here: the language profile's `lint` and `format` rules carry the
 # descriptions and the recipes, which run after these prerequisites.

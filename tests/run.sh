@@ -5,13 +5,13 @@
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
 #          tests/check_pins_test.sh, tests/check_decisions_test.sh,
-#          tests/secrets_test.sh and tests/markdown_test.sh; then run lint-pins
-#          and lint-md over devkit itself, and lint-secrets when the pinned
-#          gitleaks is already in the tools cache (no download here). Needs
-#          git, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
-#          python3 >= 3.11, and node (at or above engines.node in
-#          markdown/package.json) with npm, which installs markdownlint-cli
-#          from the npm registry on first use.
+#          tests/secrets_test.sh, tests/markdown_test.sh and tests/hooks_test.sh;
+#          then run lint-pins and lint-md over devkit itself, and lint-secrets
+#          when the pinned gitleaks is already in the tools cache (no download
+#          here). Needs git, make, shellcheck, procps (pgrep, ps), tar,
+#          sha256sum or shasum, python3 >= 3.11, and node (at or above
+#          engines.node in markdown/package.json) with npm, which installs
+#          markdownlint-cli from the npm registry on first use.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
@@ -63,6 +63,7 @@ shell_part() {
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
   check "markdown tests" "$root/tests/markdown_test.sh"
   check "secrets tests" "$root/tests/secrets_test.sh"
+  check "hooks tests" "$root/tests/hooks_test.sh"
   check "devkit's own tree passes lint-pins" \
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
   check "devkit's own tree passes lint-md" \
