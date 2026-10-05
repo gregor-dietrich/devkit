@@ -3,10 +3,10 @@
 # (no argument runs both). Prints PASS/FAIL per check with its time and status.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh,
-#          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh
-#          and tests/check_pins_test.sh; then run lint-pins over devkit
-#          itself. Needs git, shellcheck, procps (pgrep, ps) and
-#          python3 >= 3.11.
+#          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
+#          tests/check_pins_test.sh and tests/check_decisions_test.sh; then
+#          run lint-pins over devkit itself. Needs git, shellcheck, procps
+#          (pgrep, ps) and python3 >= 3.11.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
@@ -52,6 +52,7 @@ shell_part() {
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
+  check "check_decisions tests" "$root/tests/check_decisions_test.sh"
   check "devkit's own tree passes lint-pins" \
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
 }

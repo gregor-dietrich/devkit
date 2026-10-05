@@ -140,9 +140,10 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 
 ### Upgrading from v0.2.x
 
-The next release adds the repository gate `lint-pins` to `make lint`
-(see [Repository gates](docs/contract.md#repository-gates)). Besides the
-version bump, make `make lint` pass it:
+The next release adds the repository gates `lint-pins` and
+`lint-decisions` to `make lint` (see
+[Repository gates](docs/contract.md#repository-gates)). Besides the
+version bump, make `make lint` pass them:
 
 1. Add a digest to every container image the project names, as
    `<repository>:<tag>@sha256:<64 hex>`. To find one, run
@@ -156,6 +157,12 @@ version bump, make `make lint` pass it:
 3. Declare the namespaces of the images the project publishes itself in
    `devkit.toml`, as `[pins] first-party = ["<namespace>", ...]`; their
    tags may stay unpinned.
+4. A project that keeps `docs/decisions.md` now has to follow its entry
+   format: `## ADR-<digits>` headings, one `**Status:** Accepted` or
+   `Proposed` per active entry, retired entries under `## Superseded`, and
+   a `**Guard:**` for every `**Premise:**`. Once an active `cascade` guard
+   names a `trigger: tag:<tag>`, CI checks out the full history with its
+   tags (`fetch-depth: 0`), since a shallow clone fails.
 
 ### Upgrading from v0.1.x
 

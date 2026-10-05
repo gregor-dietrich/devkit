@@ -17,6 +17,7 @@ devkit is written against this page; change it here first.
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
 | `.gitignore` entry `/.devkit` | The link `devkitw` creates |
+| `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
 
 ```toml
 [devkit]
@@ -77,9 +78,10 @@ include .devkit/make/java-maven.mk
   does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
   FRONTEND_DIR DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `lint-repo`,
-  `lint-pins`, `branch`, `rebase`, `tag`, `untag`. `java-maven.mk` owns
-  `check-java`, `install`, `lint`, `format`, `test`, `coverage`, `audit`,
-  `clean`, `kill`. Neither defines project-only targets.
+  `lint-pins`, `lint-decisions`, `branch`, `rebase`, `tag`, `untag`.
+  `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
+  `coverage`, `audit`, `clean`, `kill`. Neither defines project-only
+  targets.
 - `check` and `lint` are composed by prerequisites, never by two recipes:
   `common.mk` declares `check: check-devkit` and `lint: lint-repo`;
   `java-maven.mk` adds `check: check-java` and carries the `lint` recipe,
@@ -127,10 +129,11 @@ include .devkit/make/java-maven.mk
 ## Repository gates
 
 `lint-repo` runs the language-neutral gates over the whole repository,
-before the language gates of `make lint`; `ONLY` does not narrow it. Each
-gate reads the files git lists in `$PROJECT_ROOT` (tracked, plus untracked
-files that are not ignored), fails when git cannot list them, and passes
-when none match.
+before the language gates of `make lint`; `ONLY` does not narrow it.
+`lint-pins`, like every gate that reads a family of files, reads the files
+git lists in `$PROJECT_ROOT` (tracked, plus untracked files that are not
+ignored), fails when git cannot list them, and passes when none match.
+`lint-decisions` reads `docs/decisions.md` directly.
 
 - `lint-pins` reads four families of files; a file belongs to the first
   that matches:
@@ -197,6 +200,25 @@ when none match.
   reusable workflow, are not read. Remote build contexts are not read,
   nor are files named only through `COMPOSE_FILE` or `-f`. Submodule
   content, and anything above `$PROJECT_ROOT`, is not listed.
+- `lint-decisions` checks `docs/decisions.md` when it exists. An entry is
+  a `## ADR-<digits>` heading and the lines up to the next `## ` heading
+  (a `###` heading does not end it); entries below a `## Superseded`
+  heading are retired. Any other `##`-or-deeper heading naming `ADR-<digit>`
+  fails, so a malformed heading cannot hide an entry. Fenced code blocks
+  are not read, and a fence that never closes fails. Each entry carries
+  exactly one `**Status:** ` marker, whose value is `Accepted` or
+  `Proposed` on an active entry. An entry with a line starting
+  `**Premise:**` carries one line starting `**Guard:**` whose first word is
+  `watcher`, `cascade` or `memory-only`; an entry has at most
+  one of each, and a line leading with `- ` quotes either label without
+  being read as one. A `cascade` guard names `trigger: tag:<tag>`, read
+  from the guard's paragraph up to the next blank line (backticks around
+  the value are dropped; one left inside it fails), and an active entry
+  whose tag exists fails as spent. It reads the repository's tags, so a
+  shallow clone fails when an active cascade names a trigger. It stops
+  with one `ERROR` line when the log cannot be read or is not UTF-8, and
+  when git fails. Limit: a full clone made with `--no-tags` is not
+  shallow, so it reads every trigger as unfired.
 
 ## Maven configuration
 
