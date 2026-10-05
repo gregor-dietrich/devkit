@@ -90,7 +90,9 @@ checks; every target that runs Maven fails while the root pom does not
 inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
-bash and python3 (3.11 or later); Windows is not targeted.
+bash and python3 (3.11 or later), and for `make lint` curl, tar and
+`sha256sum` or `shasum`, which fetch and verify the pinned gitleaks once;
+Windows is not targeted.
 
 On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
 Maven import fails until the wrapper has created `.devkit`.
@@ -140,8 +142,8 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 
 ### Upgrading from v0.2.x
 
-The next release adds the repository gates `lint-pins` and
-`lint-decisions` to `make lint` (see
+The next release adds the repository gates `lint-pins`, `lint-decisions`
+and `lint-secrets` to `make lint` (see
 [Repository gates](docs/contract.md#repository-gates)). Besides the
 version bump, make `make lint` pass them:
 
@@ -163,6 +165,12 @@ version bump, make `make lint` pass them:
    a `**Guard:**` for every `**Premise:**`. Once an active `cascade` guard
    names a `trigger: tag:<tag>`, CI checks out the full history with its
    tags (`fetch-depth: 0`), since a shallow clone fails.
+5. Check out with full history in every CI job that runs `make lint`
+   (`actions/checkout` with `fetch-depth: 0`): `lint-secrets` fails on a
+   shallow clone.
+6. Run `make lint-secrets` and triage what it finds in the history: remove
+   and rotate a real secret, then record its fingerprint, like a false
+   positive's, in `.gitleaksignore`.
 
 ### Upgrading from v0.1.x
 

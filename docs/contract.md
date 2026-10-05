@@ -18,6 +18,8 @@ devkit is written against this page; change it here first.
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
 | `.gitignore` entry `/.devkit` | The link `devkitw` creates |
 | `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
+| `.gitleaks.toml` | Optional: the project's gitleaks configuration, read by `lint-secrets` (see Repository gates) |
+| `.gitleaksignore` | Optional: the fingerprints of gitleaks findings the project has triaged, read by `lint-secrets` |
 
 ```toml
 [devkit]
@@ -78,9 +80,9 @@ include .devkit/make/java-maven.mk
   does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
   FRONTEND_DIR DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `lint-repo`,
-  `lint-pins`, `lint-decisions`, `branch`, `rebase`, `tag`, `untag`.
-  `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
-  `coverage`, `audit`, `clean`, `kill`. Neither defines project-only
+  `lint-pins`, `lint-decisions`, `lint-secrets`, `branch`, `rebase`, `tag`,
+  `untag`. `java-maven.mk` owns `check-java`, `install`, `lint`, `format`,
+  `test`, `coverage`, `audit`, `clean`, `kill`. Neither defines project-only
   targets.
 - `check` and `lint` are composed by prerequisites, never by two recipes:
   `common.mk` declares `check: check-devkit` and `lint: lint-repo`;
@@ -133,7 +135,8 @@ before the language gates of `make lint`; `ONLY` does not narrow it.
 `lint-pins`, like every gate that reads a family of files, reads the files
 git lists in `$PROJECT_ROOT` (tracked, plus untracked files that are not
 ignored), fails when git cannot list them, and passes when none match.
-`lint-decisions` reads `docs/decisions.md` directly.
+`lint-decisions` reads `docs/decisions.md` directly; `lint-secrets` reads
+git's history and changes instead.
 
 - `lint-pins` reads four families of files; a file belongs to the first
   that matches:
@@ -219,6 +222,46 @@ ignored), fails when git cannot list them, and passes when none match.
   with one `ERROR` line when the log cannot be read or is not UTF-8, and
   when git fails. Limit: a full clone made with `--no-tags` is not
   shallow, so it reads every trigger as unfired.
+- `lint-secrets` runs gitleaks, at the version and per-platform sha256
+  `scripts/secrets.sh` pins (downloaded once into the tools cache, verified
+  before it is unpacked), over the history reachable from HEAD and over
+  staged and unstaged changes to tracked files; it never scans ignored
+  files. A shallow clone fails: CI checks out with full history. gitleaks
+  reads the project's `.gitleaks.toml` and `.gitleaksignore`.
+  - All three scans run, and the gate fails at the end if any failed. A
+    scan also fails when git fails or warns under it: gitleaks logs that
+    at level `ERR` with `[git]`, then exits 0 having scanned only part of
+    it, or none. A line-ending warning (`LF will be replaced by CRLF`) is
+    one: normalize the file's line endings, or commit it.
+  - It stops with one `ERROR` line, before any scan, when `$PROJECT_ROOT`
+    is not a git work tree, on a shallow clone, on a platform devkit pins
+    no gitleaks build for (Linux and macOS, x86-64 and arm64 are pinned),
+    when the download fails and when its sha256 differs from the pin.
+    Before the first commit it skips the history scan.
+  - `GITLEAKS_CONFIG` and `GITLEAKS_CONFIG_TOML` are ignored. git runs
+    with `log.showRoot=true`, `color.ui=never`, `color.diff=never`,
+    `diff.noprefix=false` and `core.quotePath=true` over the user's and
+    the repository's configuration, which could otherwise hide the root
+    commit or every line from gitleaks; git before 2.31 ignores these
+    overrides. The rest of the configuration, `safe.directory` included,
+    applies.
+  - It needs curl, tar, and `sha256sum` or `shasum`; the binary lands,
+    read-only, in
+    `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-<version>-<platform>/`.
+  - Limits: every scan reads git's diffs (`git log -p`, `git diff`), so
+    lines that only a merge commit introduces (a conflict resolution) are
+    not scanned, nor is any file git treats as binary, including one
+    `.gitattributes` marks `-diff` or `binary`. Untracked files are not
+    scanned until they are staged.
+  - A finding is either a secret, which is removed and rotated, or a false
+    positive. History keeps a committed secret: once it is rotated, or for a
+    false positive, copy the finding's `Fingerprint` from the gate's output
+    into `.gitleaksignore`, one per line. A history finding's is
+    `<commit>:<path>:<rule>:<line>`; a staged or unstaged one's has no
+    commit, `<path>:<rule>:<line>`. A fingerprint matches that one finding
+    only, and a rewritten commit no longer matches it, so the finding comes
+    back for triage. Prefer it to a path allowlist in `.gitleaks.toml`,
+    which applies to every commit in history as well.
 
 ## Maven configuration
 

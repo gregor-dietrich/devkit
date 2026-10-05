@@ -1,5 +1,6 @@
 # Both jobs call tests/run.sh, the entrypoint that also runs locally.
 # Actions are pinned by commit SHA; the comment names the tag it resolved from.
+# The java job downloads gitleaks for lint-secrets, verifying the linux_x64 pin.
 name: ci
 
 on: [push, pull_request]
@@ -9,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
       - run: apt-get update -qq && apt-get install -y -qq shellcheck procps # procps: pgrep, ps for kill_test
       - run: tests/run.sh shell
 
@@ -20,6 +23,8 @@ jobs:
       MAVEN_SHA512: 908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin

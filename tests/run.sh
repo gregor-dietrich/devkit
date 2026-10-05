@@ -4,24 +4,28 @@
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
-#          tests/check_pins_test.sh and tests/check_decisions_test.sh; then
-#          run lint-pins over devkit itself. Needs git, shellcheck, procps
-#          (pgrep, ps) and python3 >= 3.11.
+#          tests/check_pins_test.sh, tests/check_decisions_test.sh and
+#          tests/secrets_test.sh; then run lint-pins over devkit itself,
+#          and lint-secrets when the pinned gitleaks is already in the tools
+#          cache (no download here). Needs git, shellcheck, procps (pgrep, ps),
+#          tar, sha256sum or shasum, and python3 >= 3.11.
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
 #          and committed as a git repository of its own, through make help,
 #          check, lint, test, coverage and format; then break copies of the
 #          monolith (format, a shared and a project checkstyle rule, the
-#          project rule's suppression, coverage, an image digest) and
+#          project rule's suppression, coverage, an image digest, a secret
+#          committed, staged or unstaged, a missing git object) and
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
-#          latter too, before Maven runs.
+#          latter too, before Maven runs; then run lint-secrets over devkit
+#          itself with the gitleaks that make lint downloaded and verified.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
-#          JDK 25, Maven >= 3.9.9, python3 and the network (Maven Central,
-#          Eclipse P2); ~/.m2 is used as is.
+#          JDK 25, Maven >= 3.9.9, python3, curl, tar and the network (Maven
+#          Central, Eclipse P2, github.com); ~/.m2 is used as is.
 set -euo pipefail
 shopt -s globstar
 
@@ -53,8 +57,21 @@ shell_part() {
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
+  check "secrets tests" "$root/tests/secrets_test.sh"
   check "devkit's own tree passes lint-pins" \
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
+  local version
+  version=$(sed -n 's/^version=//p' "$root/scripts/secrets.sh")
+  if compgen -G "${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-$version-*/gitleaks" >/dev/null; then
+    own_secrets
+  else
+    echo "PASS devkit's own repository passes lint-secrets (skipped: gitleaks $version is not cached; the java part runs it)"
+  fi
+}
+
+own_secrets() {
+  check "devkit's own repository passes lint-secrets" \
+    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/secrets.sh"
 }
 
 # The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
@@ -78,7 +95,8 @@ help_lists() { # make help lists lint once, the repository gates and the fixture
   local out
   out=$(make --no-print-directory -C "$1" help) && printf '%s\n' "$out" &&
     [[ $(grep -c '^  make lint ' <<<"$out") == 1 && $out == *"make lint-repo "* &&
-      $out == *"make lint-pins "* && $out == *"make hello "* ]]
+      $out == *"make lint-pins "* && $out == *"make lint-secrets "* &&
+      $out == *"make hello "* ]]
 }
 
 setup() { # setup FIXTURE DIR: copy FIXTURE to DIR, pinned to the tag, as a git repo
@@ -101,10 +119,11 @@ run_fixture() { # run_fixture DIR
     -x .git -x .devkit -x devkitw -x devkit.toml -x .coverage.md "$1" "$proj"
 }
 
-make_says() { # make_says pass|fail DIR TARGET TEXT: make TARGET ends so, saying TEXT
-  local out ended=pass
+make_says() { # make_says pass|fail DIR TARGET TEXT...: make TARGET ends so, saying each TEXT
+  local out ended=pass text
   out=$(make --no-print-directory -C "$2" "$3" 2>&1) || ended=fail
-  [[ $ended == "$1" && $out == *"$4"* ]] || {
+  for text in "${@:4}"; do [[ $out == *"$text"* ]] || ended="$ended, without '$text'"; done
+  [[ $ended == "$1" ]] || {
     printf '%s\n' "$out"
     return 1
   }
@@ -135,6 +154,8 @@ negatives() {
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
   negative digest lint "it carries no digest" compose.yaml 's/@sha256:[0-9a-f]*//'
+  # Built here, so this file holds no token; edited() leaves the change unstaged.
+  secret_negatives
   local parent_off_pin='/<parent>/,/<\/parent>/s|<version>[^<]*</version>|<version>0.0.0</version>|'
   negative parent-version check "devkit.toml pins" pom.xml "$parent_off_pin"
   negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"
@@ -146,6 +167,31 @@ negatives() {
     make_says fail "$proj" check "checkstyle-project.xml"
   NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
     make_says fail "$work/java-monolith" audit "NVD_API_KEY not set"
+}
+
+secret_negatives() { # each scan of the real gitleaks reads what it should
+  local leak proj blob
+  # Built here, so this file holds no token; edited() leaves the change unstaged.
+  leak="gh""p_$(printf '%s' {z..a} {9..0})"
+  negative secret lint "leaks found: 1" Makefile "\$a # $leak"
+  proj=$work/negative-secret-committed
+  edited "$proj" Makefile "\$a # $leak"
+  git -C "$proj" commit -q -am leak
+  check "java-monolith: a committed secret fails make lint, found in history" \
+    make_says fail "$proj" lint "leaks found: 1" \
+    "Fingerprint: $(git -C "$proj" rev-parse HEAD):Makefile:github-pat:"
+  proj=$work/negative-secret-staged
+  edited "$proj" Makefile "\$a # $leak"
+  git -C "$proj" add Makefile
+  check "java-monolith: a staged secret fails make lint" \
+    make_says fail "$proj" lint "leaks found: 1" "Fingerprint: Makefile:github-pat:"
+  # gitleaks itself passes a history scan whose git log fails.
+  proj=$work/negative-missing-object
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  blob=$(git -C "$proj" rev-parse HEAD:compose.yaml)
+  rm -f "$proj/.git/objects/${blob:0:2}/${blob:2}"
+  check "java-monolith: a missing object fails make lint" \
+    make_says fail "$proj" lint "git failed under gitleaks git --log-opts=HEAD"
 }
 
 parent_version() { # the literal <version> of devkit's parent POM
@@ -168,6 +214,7 @@ java_part() {
     run_fixture "${fixture%/}"
   done
   negatives
+  own_secrets # with the gitleaks the fixtures downloaded
 }
 
 [[ $# -gt 0 ]] || set -- shell java
