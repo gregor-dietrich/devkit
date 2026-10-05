@@ -5,7 +5,8 @@
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
 #          tests/check_pins_test.sh, tests/check_decisions_test.sh,
-#          tests/secrets_test.sh, tests/markdown_test.sh and tests/hooks_test.sh;
+#          tests/python_floor_test.sh, tests/secrets_test.sh,
+#          tests/markdown_test.sh and tests/hooks_test.sh;
 #          then run lint-pins and lint-md over devkit itself, and lint-secrets
 #          when the pinned gitleaks is already in the tools cache (no download
 #          here). Needs git, make, shellcheck, procps (pgrep, ps), tar,
@@ -61,6 +62,7 @@ shell_part() {
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
+  check "python floor tests" "$root/tests/python_floor_test.sh"
   check "markdown tests" "$root/tests/markdown_test.sh"
   check "secrets tests" "$root/tests/secrets_test.sh"
   check "hooks tests" "$root/tests/hooks_test.sh"

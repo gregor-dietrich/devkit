@@ -29,14 +29,10 @@ import posixpath
 import re
 import subprocess
 import sys
+import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # python3 before 3.11
-    sys.exit("ERROR: lint-pins needs python3 3.11 or later, whose standard library has tomllib.")
 
 # --- image references ------------------------------------------------------
 #

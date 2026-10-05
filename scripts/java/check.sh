@@ -15,15 +15,10 @@ REQUIRED_JDK_VERSION="${JAVA_VERSION:?set JAVA_VERSION in the project Makefile}"
 
 echo "Running environment checks..."
 
-# Before get_maven.sh, whose parent POM check needs Python 3.11 (tomllib).
 echo "Checking version of $(command -v python3)..."
-
-PYTHON_VERSION=$(python3 -c 'import platform; print(platform.python_version())' 2> /dev/null) || true
-if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2> /dev/null; then
-    echo "ERROR: Python version ${PYTHON_VERSION:-(python3 not found)} is below the required version 3.11. Exiting."
-    echo "Please install Python 3.11 or higher and make it python3 on PATH."
-    exit 13
-fi
+# shellcheck source=SCRIPTDIR/../lib/python.sh
+. "$DEVKIT/scripts/lib/python.sh"
+python3_floor || { echo "Please install Python 3.11 or higher and make it python3 on PATH."; exit 13; }
 echo "Python version check passed. (>= 3.11)"
 
 # shellcheck source=SCRIPTDIR/../lib/get_maven.sh

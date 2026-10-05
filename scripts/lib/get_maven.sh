@@ -55,6 +55,10 @@ fi
 # Vaadin dev bundle with it (the build resolves the core jar).
 export MVN_CMD
 
+# shellcheck source=SCRIPTDIR/python.sh
+. "$DEVKIT/scripts/lib/python.sh"
+python3_floor || exit 13
+
 # Maven reads devkit's parent POM only through the .devkit link; fail before any build whose pom
 # would make it look the parent up remotely. Its ERROR lines reach stderr.
 python3 "$DEVKIT/scripts/java/parent_check.py" > /dev/null || exit

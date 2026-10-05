@@ -103,7 +103,8 @@ include .devkit/make/java-maven.mk
 ## Scripts
 
 - Bash, `set -euo pipefail`, shellcheck-clean. Python helpers are
-  stdlib-only and run under `python3` 3.11 or later.
+  stdlib-only and run under `python3` 3.11 or later; a script checks that
+  floor with `python3_floor` from `scripts/lib/python.sh` before it runs one.
 - They act on the project, never on devkit: `cd "$PROJECT_ROOT"` first, and
   resolve project files from `$PROJECT_ROOT`, devkit files from `$DEVKIT`.
 - Shared helpers live in `scripts/lib/` and are sourced as
@@ -379,9 +380,9 @@ inherit it, and Maven reads it through the link:
   link is the only way to reach it.
 - Every target that runs Maven (`check`, `install`, `lint`, `format`,
   `test`, `coverage`, `audit`, `clean`, and a consumer's own script that
-  sources `scripts/lib/get_maven.sh`) first runs
-  `scripts/java/parent_check.py`. It fails, with one `ERROR` line and exit
-  status 14, when
+  sources `scripts/lib/get_maven.sh`) first runs `python3_floor`, which
+  exits 13 below python3 3.11, and then `scripts/java/parent_check.py`.
+  That fails, with one `ERROR` line and exit status 14, when
   - the root pom's `<parent>` is not devkit's;
   - its `<relativePath>` is not exactly `.devkit/java/parent/pom.xml`;
   - its `<version>` is not `devkit.toml`'s `version` without the `v`, or
