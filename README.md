@@ -1,9 +1,10 @@
 # devkit
 
-devkit is the build and quality-gate tooling that projects would otherwise
-copy between each other: shared Make targets (`make/`), the scripts behind
-them (`scripts/`), the shared Maven gate configurations (`java/config/`) and
-a parent POM that applies them (`java/parent/`).
+devkit is the build and quality-gate tooling that Maven and uv (Python)
+projects would otherwise copy between each other: shared Make targets
+(`make/`), the scripts behind them (`scripts/`), the shared Maven gate
+configurations (`java/config/`) and a parent POM that applies them
+(`java/parent/`).
 A project consumes one pinned release of it through a small committed
 wrapper, `devkitw`, on the pattern of the Maven wrapper: the wrapper fetches
 the pinned commit once per machine into a cache and links it into the
@@ -19,10 +20,10 @@ Only devkit decides whether a build passes, so only devkit is pinned.
 
 **Why a wrapper.** A consumer commits `devkitw` and a text pin,
 `devkit.toml`. Nothing is installed globally, a bump is usually a
-three-line text diff, `version` and `commit` in `devkit.toml` and the root
-pom's `<parent><version>` (a release whose contract changes lists its
-upgrade steps under [Releasing](#releasing)), and a cached checkout works
-offline. The cache is
+text diff of `version` and `commit` in `devkit.toml`, plus the root pom's
+`<parent><version>` in a Maven project (a release whose contract changes
+lists its upgrade steps under [Releasing](#releasing)), and a cached
+checkout works offline. The cache is
 read-only: a change to shared tooling is made and released in devkit, never
 edited inside a project. The wrapper fails closed: it never falls back to
 another version and refuses a fetched commit that differs from the pin.
@@ -69,15 +70,18 @@ written against it. In short, a project:
 2. adds `devkit.toml` with the pin (`url`, optional `mirror`, `version`,
    `commit`); when it has a frontend, its npm minimums in
    `[frontend.min-pins]`, which a project with a frontend requires (an
-   empty table when it has no minimums); and, optionally, the image
-   namespaces it publishes itself in `[pins] first-party`;
-3. adds `/.devkit` to `.gitignore`;
+   empty table when it has no minimums); a uv project, what its copy-paste
+   gate scans in `[python.duplication] paths`, and the duplicated file
+   pairs it accepts; and, optionally, the image namespaces it publishes
+   itself in `[pins] first-party`;
+3. adds `/.devkit` to `.gitignore` (a uv project also `/.venv`);
 4. shapes its `Makefile` as the contract shows: profile variables,
    `DEVKIT := $(shell ./devkitw path)` and its empty-result guard,
-   `include .devkit/make/common.mk` and `.devkit/make/java-maven.mk`, then
-   its own targets; a rule line ending in `## description` is listed by
+   `include .devkit/make/common.mk` and one language file,
+   `.devkit/make/java-maven.mk` or `.devkit/make/python-uv.mk`, then its
+   own targets; a rule line ending in `## description` is listed by
    `make help`;
-5. inherits devkit's parent POM in its root pom, as
+5. for Maven, inherits devkit's parent POM in its root pom, as
    [the contract](docs/contract.md#parent-pom) shows, with a `<groupId>` of
    its own, and keeps only its own values there: overrides of the parent's
    properties, exclusions and its own plugins. The parent runs every gate,
@@ -95,10 +99,13 @@ Maven fails while the root pom does not inherit the parent as the contract
 requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
-bash and python3 (3.11 or later); `make lint` and `make format` also need
-node (22.22.2 or later) with npm. `make lint` also needs curl, tar and
-`sha256sum` or `shasum`, which fetch and verify the pinned gitleaks once.
-Windows is not targeted.
+bash and python3 (3.11 or later); a uv project needs python3's venv and
+pip only when no uv of the pinned version is on `PATH` or in devkit's
+cache. `make lint` also needs node (22.22.2 or later) with npm, for
+markdownlint and a uv project's copy-paste gate (jscpd), and `make format`
+needs them for `format-md`, which fixes the Markdown.
+`make lint` also needs curl, tar and `sha256sum` or `shasum`, which fetch
+and verify the pinned gitleaks once. Windows is not targeted.
 
 On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
 Maven import fails until the wrapper has created `.devkit`.
@@ -133,11 +140,11 @@ print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <vers
 Tags are never moved or reused. Were one moved, the wrapper would refuse the
 fetched commit rather than build with it.
 
-A consumer bumps by editing `version` and `commit` in `devkit.toml` and
-the root pom's `<parent><version>` (the version without the `v`), which is
-usually the whole diff; a release whose contract changes lists its upgrade
-steps below. The commit is the one the tag points at, which for an
-annotated tag is the peeled `^{}` entry:
+A consumer bumps by editing `version` and `commit` in `devkit.toml` and,
+in a Maven project, the root pom's `<parent><version>` (the version without
+the `v`), which is usually the whole diff; a release whose contract changes
+lists its upgrade steps below. The commit is the one the tag points at,
+which for an annotated tag is the peeled `^{}` entry:
 
 ```sh
 git ls-remote <url> 'refs/tags/vX.Y.Z^{}'

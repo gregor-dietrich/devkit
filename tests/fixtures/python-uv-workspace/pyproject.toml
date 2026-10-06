@@ -1,0 +1,17 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = ["ruff", "pytest", "pytest-cov", "vulture", "pip-audit", "uv"]
+
+[tool.ruff]
+# The members' sources, so isort knows their packages as first-party.
+src = ["packages/*/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.vulture]
+paths = ["packages"]
+min_confidence = 60
+ignore_names = ["test_*"]

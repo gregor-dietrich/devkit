@@ -21,8 +21,8 @@ die() {
 }
 
 cd "$PROJECT_ROOT"
-tmp=$(mktemp -d) stage=
-trap 'rm -rf "$tmp" ${stage:+"$stage"}' EXIT
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 
 # The *.md files git lists (tracked, plus untracked ones not ignored), each
@@ -40,53 +40,9 @@ if [[ ${#files[@]} == 0 ]]; then
     exit 0
 fi
 
-# Node.js at or above the closure's floor, engines.node in package.json.
-floor=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["engines"]["node"])' \
-    "$DEVKIT/markdown/package.json" 2>/dev/null) || floor=
-[[ $floor =~ ^\>=([0-9]+\.[0-9]+\.[0-9]+)$ ]] ||
-    die "$DEVKIT/markdown/package.json has no engines.node of the form '>=X.Y.Z'"
-floor=${BASH_REMATCH[1]}
-command -v node >/dev/null || die "node not found; $label needs Node.js >= $floor and npm on PATH."
-found=$(node --version 2>/dev/null) || found=
-version=${found#v}
-version=${version%%-*} # a prerelease (-nightly..., -rc...) counts as its release
-[[ $version =~ ^[0-9]+(\.[0-9]+)*$ ]] ||
-    die "cannot read a version from 'node --version' ('$found'); $label needs Node.js >= $floor."
-printf -v versions '%s\n%s' "$floor" "$version"
-[[ $versions == "$(sort -V <<<"$versions")" ]] ||
-    die "Node.js $found on PATH is below $floor, which devkit's markdownlint closure requires."
-
-# The pinned closure, installed once per lockfile into the user's cache.
-root=${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools
-[[ $root == /* ]] || die "cache root $root is not an absolute path"
-if command -v sha256sum >/dev/null; then
-    sum=(sha256sum)
-elif command -v shasum >/dev/null; then
-    sum=(shasum -a 256)
-else
-    die "neither sha256sum nor shasum found; $label needs one to key its cache"
-fi
-key=$(cat "$DEVKIT/markdown/package.json" "$DEVKIT/markdown/package-lock.json" | "${sum[@]}")
-dir=$root/markdownlint-${key:0:16}
-bin=$dir/node_modules/.bin/markdownlint
-if [[ -e $dir || -L $dir ]]; then
-    [[ -x $bin ]] || die "$dir is incomplete; remove it and retry"
-else
-    command -v npm >/dev/null || die "npm not found; $label needs it on PATH to install markdownlint-cli once."
-    mkdir -p "$root"
-    stage=$(mktemp -d "$root/.tmp.XXXXXX")
-    cp "$DEVKIT/markdown/package.json" "$DEVKIT/markdown/package-lock.json" "$stage/"
-    echo "$label: installing markdownlint-cli into $dir..."
-    (cd "$stage" && NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --ignore-scripts --no-audit --no-fund --loglevel=error) ||
-        die "cannot install markdownlint-cli (npm ci failed; the first run needs the npm registry)"
-    [[ -x $stage/node_modules/.bin/markdownlint ]] ||
-        die "npm ci did not install markdownlint (check npm's bin-links setting)"
-    # Read-only, so an edit inside the cache cannot change every project's gate.
-    find "$stage" -type f -exec chmod a-w {} +
-    mv "$stage" "$dir"
-    rm -rf "${dir:?}/${stage##*/}" # a concurrent run won: mv nested ours in it
-    stage=
-fi
+# shellcheck source=SCRIPTDIR/lib/node_closure.sh
+. "$DEVKIT/scripts/lib/node_closure.sh"
+node_closure "$DEVKIT/markdown" markdownlint "$label"
 
 # mdl ARGS...: markdownlint without the user configuration it merges beneath
 # --config: markdownlint_* variables and the files it reads from $HOME. The
@@ -99,7 +55,7 @@ mdl() {
         name=${entry%%=*}
         [[ ${name,,} != markdownlint_* ]] || drop+=(-u "$name")
     done < <(env -0)
-    env ${drop[@]+"${drop[@]}"} HOME="$tmp/home" "$bin" "$@"
+    env ${drop[@]+"${drop[@]}"} HOME="$tmp/home" "$NODE_TOOL" "$@"
 }
 
 # Detector controls: devkit's profile must flag the invalid files and pass the

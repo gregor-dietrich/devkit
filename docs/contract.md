@@ -16,7 +16,10 @@ devkit is written against this page; change it here first.
 | `checkstyle-suppressions.xml` | Maven: the project's Checkstyle exemptions, in every module, the root included; required (`<suppressions/>` when none) |
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
-| `.gitignore` entry `/.devkit` | The link `devkitw` creates |
+| `pyproject.toml` | uv: the package, or a virtual workspace root (no `[project]` table) whose members are the packages; its `dev` dependency group lists ruff, pytest, pytest-cov, vulture, pip-audit and uv, and `[tool.vulture]` sets `paths` (see uv projects) |
+| `.python-version` | uv: the CPython version, `major.minor` or `major.minor.patch` |
+| `uv.lock` | uv: committed; `make install` syncs `.venv` from it and never rewrites it |
+| `.gitignore` entry `/.devkit` | The link `devkitw` creates; a uv project also ignores `/.venv` |
 | `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
 | `.gitleaks.toml` | Optional: the project's gitleaks configuration, read by `lint-secrets` (see Repository gates) |
 | `.gitleaksignore` | Optional: the fingerprints of gitleaks findings the project has triaged, read by `lint-secrets` |
@@ -38,6 +41,17 @@ commit = "<40-hex commit the tag resolves to>"
 # Optional: the image namespaces the project publishes (Repository gates).
 [pins]
 first-party = ["registry.example/my-team"]
+
+# Required in a uv project: what make lint's copy-paste gate scans (uv projects).
+[python.duplication]
+paths = ["src", "tests"]          # the Python files git lists under these
+# min-tokens = 50                 # optional, a positive integer
+# ignore = ["**/migrations/**"]   # optional jscpd --ignore globs, no commas
+
+# Optional, one per duplicated file pair the project accepts.
+[[python.duplication.accepted]]
+files = ["src/a.py", "src/b.py"]   # the same file twice for a clone within one file
+reason = "why this duplication is deliberate"
 ```
 
 ```make
@@ -73,32 +87,53 @@ include .devkit/make/java-maven.mk
 
 ## Make
 
-- The consumer includes both files through the link, `.devkit/make/...`,
+A uv project's `Makefile` has the same shape as the Maven one under
+[What a consumer commits](#what-a-consumer-commits):
+
+```make
+PROJECT        := my-tool
+MODULES        := packages/core packages/app   # uv workspace members; empty for a single package
+COVERAGE_FLOOR := 90                           # percent, required
+DEVKIT := $(shell ./devkitw path)
+ifeq ($(DEVKIT),)
+$(error devkitw failed; see its message above)
+endif
+include .devkit/make/common.mk
+include .devkit/make/python-uv.mk
+# project-only targets follow
+```
+
+- The consumer includes `common.mk` and exactly one language file,
+  `java-maven.mk` or `python-uv.mk`, through the link, `.devkit/make/...`,
   never as `$(DEVKIT)/make/...`: `include` splits on spaces, so a cache
   path containing one would break. The `ifeq ($(DEVKIT),)` guard stays,
   since it is what reports a failed `devkitw`.
 - `make/common.mk` sets `PROJECT_ROOT := $(CURDIR)`, so an inherited
   environment value never wins (a command-line `PROJECT_ROOT=...` still
-  does), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
-  FRONTEND_DIR DEVKIT` to every recipe.
+  does), strips `MODULES` of the blanks a trailing comment leaves, and
+  exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
+  COVERAGE_FLOOR ONLY DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
   `hooks`, `lint-repo`, `lint-pins`, `lint-decisions`, `lint-secrets`,
   `lint-md`, `format-md`, `branch`, `rebase`, `tag`, `untag`.
   `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
-  `coverage`, `audit`, `clean`, `kill`. Neither defines project-only targets.
+  `coverage`, `audit`, `clean`, `kill`. `python-uv.mk` owns
+  `check-python`, `install`, `lint`, `format`, `test`, `audit`, `clean`.
+  None defines project-only targets.
 - `check`, `lint` and `format` are composed by prerequisites, never by two
   recipes: `common.mk` declares `check: check-devkit check-hooks`,
-  `lint: lint-repo` and `format: format-md`; `java-maven.mk` adds
-  `check: check-java` and carries the `lint` and `format` recipes, which run
-  after the prerequisites. Only one rule line per target carries a
-  `## description`.
+  `lint: lint-repo` and `format: format-md`; the language file adds
+  `check: check-java` or `check: check-python` and carries the `lint` and
+  `format` recipes, which run after the prerequisites. Only one rule line
+  per target carries a `## description`.
 - `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
   only warns when `./devkitw self-check` fails.
 - `help` lists every target that carries a `## description` comment on its
   rule line, the consumer's own targets included.
 - Every target is `.PHONY`. Recipes call scripts as
-  `"$(DEVKIT)/scripts/<name>.sh"` (language-neutral) or
-  `"$(DEVKIT)/scripts/java/<name>.sh"`.
+  `"$(DEVKIT)/scripts/<name>.sh"` (language-neutral),
+  `"$(DEVKIT)/scripts/java/<name>.sh"` or
+  `"$(DEVKIT)/scripts/python/<name>.sh"`.
 
 ## Scripts
 
@@ -108,10 +143,15 @@ include .devkit/make/java-maven.mk
 - They act on the project, never on devkit: `cd "$PROJECT_ROOT"` first, and
   resolve project files from `$PROJECT_ROOT`, devkit files from `$DEVKIT`.
 - Shared helpers live in `scripts/lib/` and are sourced as
-  `"$DEVKIT/scripts/lib/<name>.sh"`.
-- `MODULES` empty means a single-module (monolith) build; otherwise Maven
-  module selection maps each listed module to `-pl` as the Java scripts
-  document.
+  `"$DEVKIT/scripts/lib/<name>.sh"`. `node_closure.sh` checks `node`
+  against a devkit directory's `package.json` `engines.node` and installs
+  that directory's `package-lock.json` closure once (see `lint-md`), for
+  markdownlint-cli (`markdown/`) and jscpd (`jscpd/`).
+- `MODULES` empty means a single module or package at the root (a Maven
+  monolith, a single uv package); otherwise Maven module selection maps
+  each listed module to `-pl` as the Java scripts document. For uv,
+  `MODULES` lists the workspace member directories as `uv.lock` records
+  them (e.g. `packages/core`), and `make check` fails when they differ.
 - `ONLY` is read through `scripts/lib/select_modules.sh`, never parsed by
   hand. It normalizes each entry to its `MODULES` spelling (`./<dir>`,
   `<dir>/` and `:<dir>` as Maven's `-pl` accepts them) and keeps each module
@@ -464,3 +504,101 @@ inherit it, and Maven reads it through the link:
   outside the reactor cannot resolve it, e.g. `-pl` of a module that
   depends on a sibling, or a downstream project depending on the
   consumer's artifacts. No current consumer is affected.
+
+## uv projects
+
+`python-uv.mk` drives a uv project: a single package at the root, or a
+virtual workspace root whose members are the packages. The project owns its
+tool versions, through its `dev` dependency group, hash-locked in `uv.lock`,
+and its tool configuration (ruff, vulture, pytest and coverage) in
+`pyproject.toml`; devkit ships none and never passes `--config`. Its scripts
+run the tools from `.venv`.
+
+- Pins and drift. `.python-version` pins CPython and the `uv` package in
+  `uv.lock` pins uv; neither is a profile variable. `make check` fails, one
+  `ERROR` line with its remedy each, when `python3` is older than 3.11,
+  when `COVERAGE_FLOOR` is unset or not a percent from 0 to 100, when
+  `.python-version` is missing or no `major.minor[.patch]`, when `MODULES`
+  holds a glob character or differs from the members `uv.lock` records,
+  when the root `pyproject.toml` sets no `[tool.vulture] paths`, when no uv
+  of the pinned version is found, when `.venv` is missing, when its Python's
+  version differs from the pin (`major.minor`, or the patch too when the
+  pin names one), when
+  `uv sync --check --frozen --offline` cannot confirm `.venv` matches
+  `uv.lock` (drift: run `make install`), and when a dev tool is missing
+  from `.venv`. Before uv, it validates `devkit.toml`'s
+  `[python.duplication]` (`duplication.py check-config`, see the
+  copy-paste gate below).
+- uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, the first of: `uv` on
+  `PATH` when it reports the pinned version and is not the one inside
+  `.venv` (each `uv` on `PATH` in turn; a link to that one, or any file
+  under `.venv`'s resolved path, counts as it); devkit's per-user copy,
+  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv/<version>/bin/uv`. Only
+  `make install` creates that copy, read-only, when it is missing: pip, in
+  a throwaway venv of `python3`, installs the uv wheel `uv.lock` pins,
+  verified against the lock's hashes. devkit never runs the uv inside
+  `.venv`, and its targets always use the project's `.venv`: `get_uv.sh`
+  unsets `UV_PROJECT_ENVIRONMENT`.
+- `make install` runs `uv sync --locked --all-packages --all-extras`: it
+  creates or repairs `.venv`, with the pinned CPython, which uv provisions
+  when it is missing. It fails when `uv.lock` is stale against
+  `pyproject.toml` (run `uv lock`), and never rewrites `uv.lock`. It has no
+  `check` prerequisite: a drifted `.venv` fails `check`, and `install` is
+  the repair.
+- `make lint` runs, stopping at the first failure, `ruff check`,
+  `ruff format --check`, vulture over the root `pyproject.toml`'s
+  `[tool.vulture] paths`, which must be set, then the copy-paste gate.
+  `ONLY` narrows the two ruff passes to the selected members; vulture and
+  the copy-paste gate always scan the whole project.
+- `make format` runs `ruff check --fix --exit-zero`, then `ruff format`, on
+  the project or the `ONLY` selection: it rewrites and never judges.
+- `make test` runs one pytest session per member of the selection, in the
+  member's directory, with branch coverage (`--cov-branch`). Each
+  session's combined statement and branch coverage must reach
+  `COVERAGE_FLOOR`: per package, never combined. The project's pytest
+  configuration activates coverage (e.g. `addopts = "--cov=src"`); a
+  session that writes no coverage report fails. With `JUNIT_DIR` set
+  (relative to the project root), each session writes
+  `JUNIT_DIR/<name>.xml`, `<name>` being the member directory's last path
+  component (for a single package, the project directory's name); two
+  members of one name fail. `make test` does not
+  lint; the full gate is `make lint test`.
+- `make audit` runs pip-audit on the third-party runtime dependencies
+  `uv.lock` pins (`uv export --no-default-groups`, the project's own
+  packages and its local path dependencies left out, what they depend on
+  kept), and passes, saying so, when there are none. It needs the network
+  and fails closed without it; neither `check` nor `test` runs it.
+- `make clean` removes `__pycache__`, `.pytest_cache`, `.ruff_cache`,
+  `*.egg-info`, `dist`, `.coverage` and `.coverage.*` below the project
+  root, skipping the root's `.git` and `.devkit`, every `.venv` and
+  `node_modules`, and any directory holding a `.git` (a nested checkout).
+- `ONLY` narrows `lint`'s ruff passes, `format` and `test`; `install`,
+  `check`, `audit` and `clean` act on the whole project.
+- The copy-paste gate, the last step of `make lint`, runs jscpd at the
+  closure `jscpd/package-lock.json` pins, installed like markdownlint-cli
+  (see `lint-md`) on first use, so it needs `node` at or above
+  `engines.node` in `jscpd/package.json` and `npm` on `PATH`. It scans the
+  Python files git lists (tracked, plus untracked ones the project does
+  not ignore; the user's global excludes do not apply) under
+  `devkit.toml`'s required `[python.duplication] paths`, project-relative
+  directories or files inside the project root, each file once and none
+  through a symlink, minus the optional `ignore` globs, which match
+  project-relative paths (`src/b.py`) as well as `**/` patterns; a clone
+  is a run of at least `min-tokens` tokens (default 50). jscpd gets the
+  files on its command line, so no `.ignore` file applies and a list
+  beyond the system's argument limit fails; it runs from an empty
+  directory with an empty `HOME` and every setting on its command line, so
+  no `.jscpd.json` applies. The accepted duplication is a ratchet: each
+  `[[python.duplication.accepted]]` entry names a file pair (`files`, in
+  any order) and a non-empty `reason`, and the gate fails, naming the pair
+  and the lines jscpd reported, on every pair it finds a clone of that no
+  entry accepts, and on every accepted pair it no longer finds. It first
+  runs jscpd, with the default `min-tokens` and no `ignore`, on devkit's
+  `jscpd/controls/`, and fails unless exactly the one duplicated pair there
+  is found, and fails when jscpd writes no report. `make check` fails, one
+  `ERROR` line with its remedy each, when the table or `paths` is missing,
+  a path is absolute, leaves the project root or does not exist, git lists
+  no Python file under `paths`, `min-tokens` is not a positive integer,
+  `ignore` is not a list of strings without commas (jscpd splits on them),
+  an entry has not exactly two `files` or no `reason`, a pair is accepted
+  twice, or the table or an entry holds another key.

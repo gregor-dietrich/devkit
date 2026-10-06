@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "dependencies": {
+    "jscpd": "5.1.2"
+  },
+  "engines": {
+    "node": ">=22.22.2"
+  }
+}

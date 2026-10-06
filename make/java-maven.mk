@@ -18,9 +18,7 @@
 # fails without one.
 
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
-MODULES := $(strip $(MODULES))
 FRONTEND_DIR := $(strip $(FRONTEND_DIR))
-export ONLY
 
 .PHONY: check check-java install lint format test coverage audit clean kill
 

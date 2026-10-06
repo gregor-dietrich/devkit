@@ -4,7 +4,9 @@
 # `:=`, not `?=`: an inherited PROJECT_ROOT must not aim the git targets at
 # another repository. A command-line PROJECT_ROOT=... still overrides it.
 PROJECT_ROOT := $(CURDIR)
-export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR DEVKIT
+# A trailing "# comment" on a profile line leaves trailing blanks in the value.
+MODULES := $(strip $(MODULES))
+export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR COVERAGE_FLOOR ONLY DEVKIT
 
 MAKEFLAGS += --no-print-directory
 

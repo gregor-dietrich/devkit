@@ -17,7 +17,7 @@ want="ERROR: devkit's Python helpers need python3 3.11 or later; found 3.10.12."
 # helper run instead ends in a traceback, as tomllib's import would.
 cat >"$work/bin/python3" <<'EOF'
 #!/bin/bash
-[[ $1 == -c ]] && { echo 3.10.12; exit 1; }
+[[ "$1 $2" == "-I -c" ]] && { echo 3.10.12; exit 1; }
 echo 'Traceback (most recent call last):' >&2
 exit 1
 EOF
@@ -48,6 +48,9 @@ expect "check stops at the floor" 13 "$root/scripts/java/check.sh"
 # shellcheck disable=SC2016 # expanded by the inner bash
 expect "get_maven.sh stops at the floor, before the parent POM check" 13 \
   bash -c 'cd "$PROJECT_ROOT" && . "$DEVKIT/scripts/lib/get_maven.sh"'
+for script in check install lint test audit; do
+  expect "uv $script stops at the floor" 1 "$root/scripts/python/$script.sh"
+done
 
 # A python3 that does not run at all: the floor says so instead of a version.
 printf '#!/bin/bash\nexit 127\n' >"$work/bin/python3"

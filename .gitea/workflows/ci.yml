@@ -1,6 +1,7 @@
-# Both jobs call tests/run.sh, the entrypoint that also runs locally.
+# Every job calls tests/run.sh, the entrypoint that also runs locally.
 # Actions are pinned by commit SHA; the comment names the tag it resolved from.
-# The java job downloads gitleaks for lint-secrets, verifying the linux_x64 pin.
+# The java and python jobs download gitleaks for lint-secrets, verifying the
+# linux_x64 pin.
 name: ci
 
 on:
@@ -17,7 +18,7 @@ jobs:
           fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22" # the newest 22.x, at or above markdown/package.json's engines.node
+          node-version: "22" # the newest 22.x, at or above engines.node in markdown/ and jscpd/package.json
           check-latest: true # not an older 22.x the runner has cached
       - run: apt-get update -qq && apt-get install -y -qq make shellcheck procps # make: hooks_test; procps: pgrep, ps for kill_test
       - run: tests/run.sh shell
@@ -48,3 +49,17 @@ jobs:
           tar -xzf /tmp/maven.tar.gz -C /opt
           echo "/opt/apache-maven-$MAVEN_VERSION/bin" >>"$GITHUB_PATH"
       - run: tests/run.sh java
+
+  python:
+    runs-on: ubuntu-latest
+    # No Python setup action: the first fixture's make install bootstraps the uv its uv.lock pins,
+    # hash-verified, and later installs find it in the cache; uv provisions the CPython
+    # .python-version pins. Node runs make lint's jscpd.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22" # the newest 22.x, at or above jscpd/package.json's engines.node
+          check-latest: true # not an older 22.x the runner has cached
+      - run: apt-get update -qq && apt-get install -y -qq python3-venv # the bootstrap's throwaway venv
+      - run: tests/run.sh python

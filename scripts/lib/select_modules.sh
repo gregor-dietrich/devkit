@@ -21,7 +21,7 @@ select_modules() {
     for entry in ${entries[@]+"${entries[@]}"}; do
         entry=${entry#./} entry=${entry#:} entry=${entry%/}
         [[ " ${MODULES:-} " == *" $entry "* ]] || {
-            echo "ERROR: ONLY entry '$entry' is not one of MODULES (${MODULES:-empty: a monolith})." >&2
+            echo "ERROR: ONLY entry '$entry' is not one of MODULES (${MODULES:-empty: a single module or package at the root})." >&2
             exit 1
         }
         [[ $kept == *",$entry,"* ]] || kept+="$entry,"
