@@ -38,9 +38,11 @@ commit = "<40-hex commit the tag resolves to>"
 "some-package" = "1.2.3"
 # quote names containing @, / or .: "@scope/name" = "1.2.3"
 
-# Optional: the image namespaces the project publishes (Repository gates).
+# Optional: the image namespaces the project publishes, and further YAML
+# files lint-pins reads as workflows (Repository gates).
 [pins]
 first-party = ["registry.example/my-team"]
+# extra = ["docs/probes/*.yml"]
 
 # Required in a uv project: what make lint's copy-paste gate scans (uv projects).
 [python.duplication]
@@ -194,15 +196,22 @@ git's history and changes instead.
     or that ends in `.dockerfile` or `.containerfile`; the
     `.dockerignore` and `.containerignore` files are not.
 
+  A file in none of them that a `devkit.toml` `[pins] extra` pattern
+  matches is read as a workflow. A pattern is a git glob pathspec
+  relative to `$PROJECT_ROOT` (`*` stops at `/`, `**/` crosses
+  directories) ending in `.yml` or `.yaml`, and matches the `.yml` and
+  `.yaml` files among those git lists.
+
   It requires every action as
   `owner/repo[/path]@<40 lowercase hex> # vX.Y.Z`, and every container
   image (Dockerfile `FROM`, `COPY --from=` and `# syntax=`; YAML `image:`,
   `container:` and a service's scalar value; `docker://`) as
   `<repository>:<tag>@sha256:<64 hex>`. Exempt: build stages and
   `scratch`; a `./` action whose `action.y{a,}ml`, or the reusable
-  workflow it names, git lists, since that file is read itself; an
-  action's `image:` that is a relative path to a Dockerfile, read itself
-  too; and images under a namespace listed in `devkit.toml`'s optional
+  workflow it names, is a file it reads itself (a workflow outside the
+  workflow directories is declared in `[pins] extra`); an action's
+  `image:` that is a relative path to a Dockerfile, read itself too; and
+  images under a namespace listed in `devkit.toml`'s optional
   `[pins] first-party = ["<namespace>", ...]`.
 
   Files a file names must be ones it reads: an action's Dockerfile
@@ -235,10 +244,14 @@ git's history and changes instead.
   name is never pulled from a registry.
 - It stops with one `ERROR` line when `devkit.toml` is not valid TOML,
   `pins` is not a table, `[pins]` holds another key, `first-party` is not
-  a list or holds an entry that is not such a name, and when git cannot
-  list `$PROJECT_ROOT` (not a work tree, such as an unpacked source
-  archive, or one git refuses for dubious ownership). A family file that
-  is a symlink, or is not UTF-8, is a violation.
+  a list or holds an entry that is not such a name, `extra` is not a list
+  or holds an entry that is not such a pattern, and when git cannot list
+  `$PROJECT_ROOT` (not a work tree, such as an unpacked source archive,
+  or one git refuses for dubious ownership). An `extra` entry that is not
+  a string, is absolute, has a `..` component, holds a NUL or does not
+  end in `.yml` or `.yaml` is not such a pattern; one that matches no
+  file stops it too, so a typo cannot drop the files it meant. A file it
+  reads that is a symlink, or is not UTF-8, is a violation.
 - An action with no exact `vX.Y.Z` release (only `v1`, `1.2.3`, a
   prerelease or a branch) cannot pass: vendor it as a `./` action, or tag
   a fork and pin that.

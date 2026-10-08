@@ -312,6 +312,50 @@ project elsewhere.yaml "image: postgres:18"
 ln -s elsewhere.yaml "$repo/compose.yaml"
 expect "a symlinked compose file fails" 1 "compose.yaml:0: is a symlink"
 
+# Files declared in [pins] extra, read as workflows.
+probe=docs/probe/ci.yml
+project "$probe" "jobs:" "  a:" "    steps:" "      - uses: actions/checkout@v4"
+expect "an undeclared YAML file is not read" 0 "0 workflows,"
+put devkit.toml "[pins]" 'extra = ["docs/probe/*.yml"]'
+expect "a declared file is read as a workflow" 1 "1 workflow," "$probe:4: action reference" "$not_sha"
+put "$probe" "jobs:" "  a:" "    container: node:22$digest" "    steps:" "      - uses: actions/checkout@$sha # v7.0.1"
+expect "a declared file with pinned references passes" 0 "1 workflow,"
+put docs/probe/sub/x.yml "image: node:22"
+expect "a declared '*' stops at '/'" 0 "1 workflow,"
+put devkit.toml "[pins]" 'extra = ["docs/**/*.yml"]'
+expect "a declared '**/' crosses directories" 1 "2 workflows," "docs/probe/sub/x.yml:1: image reference 'node:22'"
+project .gitea/workflows/ci.yml "jobs:" "  a:" "    uses: ./$probe"
+put "$probe" "image: node:22$digest"
+expect "a ./ reusable workflow that is not declared fails" 1 \
+  "ci.yml:3: local action './$probe' names no $probe that the pin check reads"
+put devkit.toml "[pins]" 'extra = ["docs/probe/*.yml"]'
+expect "a ./ reusable workflow that is declared is read itself" 0 "2 workflows,"
+project compose.yaml "include:" "  - other.yaml"
+put devkit.toml "[pins]" 'extra = ["*.yaml"]'
+expect "a declared file keeps its own family" 1 "0 workflows, 0 actions, 1 compose file," \
+  "compose.yaml:2: include file 'other.yaml' is not a compose file that git lists"
+project .gitignore "/docs/"
+put "$probe" "image: node:22"
+put devkit.toml "[pins]" 'extra = ["docs/probe/*.yml"]'
+expect "a declared pattern matching only ignored files fails" 1 \
+  "ERROR: devkit.toml: [pins] extra entry 'docs/probe/*.yml' matches no file git lists"
+project
+put "$probe" "image: node:22"
+put devkit.toml "[pins]" 'extra = ["docs/probe/*.yml"]'
+expect "an untracked declared file that is not ignored is read" 1 "$probe:1: image reference"
+GIT_LITERAL_PATHSPECS=1 expect "an inherited GIT_LITERAL_PATHSPECS does not stop the glob" 1 "$probe:1: image reference"
+put devkit.toml "[pins]" 'extra = ["docs/probe/*.yml", "docs/typo/*.yml"]'
+expect "each extra entry must match a file" 1 "ERROR: devkit.toml: [pins] extra entry 'docs/typo/*.yml' matches no file"
+project app/devkit.toml "[pins]" 'extra = ["**/*.yml"]'
+put app/docs/ci.yml "image: node:22"
+put top.yml "image: node:22"
+repo=$repo/app expect "a project below the git top level declares only its own files" 1 \
+  "docs/ci.yml:1: image reference" "1 workflow,"
+project docs/x.yml/notes.md "image: node:22"
+put devkit.toml "[pins]" 'extra = ["docs/x.yml"]'
+expect "a declared directory's non-YAML files are not read" 1 \
+  "ERROR: devkit.toml: [pins] extra entry 'docs/x.yml' matches no file"
+
 # devkit.toml.
 project devkit.toml "[devkit]" 'version = "v0.0.0"'
 expect "devkit.toml without [pins] passes" 0 "0 compose files"
@@ -329,6 +373,14 @@ project devkit.toml "[pins]" "first-party = [1]"
 expect "a first-party entry that is not a string fails" 1 "ERROR: devkit.toml: [pins] first-party entry 1"
 project devkit.toml "[pins"
 expect "an invalid devkit.toml fails" 1 "ERROR: cannot read devkit.toml"
+project devkit.toml "[pins]" 'extra = "docs/*.yml"'
+expect "an extra string, not a list, fails" 1 "ERROR: devkit.toml: [pins] extra must be a list"
+for entry in '"docs/*.md"' '"/docs/*.yml"' '"../x.yml"' '"docs/../x.yml"' '"docs/\u0000.yml"' '1'; do
+  project devkit.toml "[pins]" "extra = [$entry]"
+  expect "an extra entry $entry fails" 1 "ERROR: devkit.toml: [pins] extra entry" "is not a relative pattern"
+done
+project devkit.toml "[pins]" 'extra = ["docs/*.yml"]'
+expect "an extra entry matching no file fails" 1 "ERROR: devkit.toml: [pins] extra entry 'docs/*.yml' matches no file"
 
 # The table of reference shapes, over the pure check.
 PYTHONPATH=$root/scripts python3 "$root/tests/check_pins_corpus.py" || fails=$((fails + 1))

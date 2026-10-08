@@ -2,7 +2,8 @@
 """Check that every workflow action and container image the project names is pinned.
 
 `make lint-pins` runs this over the files git lists in $PROJECT_ROOT (tracked, plus
-untracked files that are not ignored), as docs/contract.md describes:
+untracked files that are not ignored), reading those among them that devkit.toml's
+`[pins] extra` declares as workflows, as docs/contract.md describes:
 
 - an action (`uses:` in a workflow or an action.y{a,}ml) must be
   `owner/repo[/path]@<40 lowercase hex>` followed by the comment `# vX.Y.Z`;
@@ -14,7 +15,7 @@ A tag or branch can move under the same name, so only a digest or a full commit 
 names fixed content; the tag or version comment beside it says which release that
 content is meant to be, so an update can be checked against it. Exempt: Dockerfile
 build stages, `scratch`, images under a namespace devkit.toml lists in
-`[pins] first-party`, `./` actions whose action file git lists (it is read itself),
+`[pins] first-party`, a `./` action or reusable workflow whose file this check reads,
 and a Docker container action's relative Dockerfile that git lists (read itself). A line
 or reference the readers below cannot read fails rather than being skipped. The
 readers are line-based, not YAML or Dockerfile parsers (stdlib only), and each one's
@@ -757,8 +758,9 @@ def _local_action_message(value: str, listed: set[str]) -> str | None:
     if listed.intersection(wanted):
         return None
     return (
-        f"local action {value!r} names no {' or '.join(wanted)} that git lists in the repository, "
-        "so the references it runs cannot be read; commit the action with the project"
+        f"local action {value!r} names no {' or '.join(wanted)} that the pin check reads, so the "
+        "references it runs cannot be read; commit the action with the project, and declare a "
+        "workflow outside the workflow directories in devkit.toml's [pins] extra"
     )
 
 
@@ -832,10 +834,12 @@ def _yaml_messages(
             yield lineno, message
 
 
-def check_files(files: dict[str, str], first_party: tuple[str, ...]) -> list[Violation]:
+def check_files(
+    files: dict[str, str], first_party: tuple[str, ...], declared: frozenset[str] = frozenset()
+) -> list[Violation]:
     """Every unpinned or unreadable reference in *files* ({path: text}).
 
-    Each file is read by its family (family): a Dockerfile with dockerfile_references,
+    Each file is read by its family (kind_of, with the *declared* paths): a Dockerfile with dockerfile_references,
     everything else as YAML, where every key is read in every file. A file another one
     names (a `./` action, an action's Dockerfile, a compose `include:` or `extends:`) is
     looked up among the paths of *files*.
@@ -843,7 +847,7 @@ def check_files(files: dict[str, str], first_party: tuple[str, ...]) -> list[Vio
     listed = set(files)
     violations: list[Violation] = []
     for path in sorted(files):
-        kind = family(path)
+        kind = kind_of(path, declared)
         if kind == _DOCKERFILE_FAMILY:
             sites = _dockerfile_messages(files[path], first_party)
         else:
@@ -854,7 +858,7 @@ def check_files(files: dict[str, str], first_party: tuple[str, ...]) -> list[Vio
 
 # --- the project: devkit.toml, git, the families ----------------------------
 
-PINS_KEYS = frozenset({"first-party"})
+PINS_KEYS = frozenset({"first-party", "extra"})
 _WORKFLOW_FAMILY = "workflow"
 _ACTION_FAMILY = "action"
 _COMPOSE_FAMILY = "compose file"
@@ -864,15 +868,17 @@ _WORKFLOW_DIRS = (".gitea/workflows/", ".github/workflows/")
 _COMPOSE_PREFIXES = ("compose", "docker-compose")
 
 
-def load_first_party(toml_path: Path) -> tuple[str, ...]:
-    """The namespaces `[pins] first-party` lists; none when the file or table is absent.
+def load_pins(toml_path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The namespaces `[pins] first-party` lists and the patterns `[pins] extra` lists;
+    both empty when the file or table is absent.
 
     Raises ValueError, naming devkit.toml, on invalid TOML, an unknown key under
-    [pins], a value that is not a list, and an entry that is not a lowercase image
-    name without tag or digest.
+    [pins], a value that is not a list, a first-party entry that is not a lowercase
+    image name without tag or digest, and an extra entry that is not a relative
+    `.yml`/`.yaml` pattern inside $PROJECT_ROOT.
     """
     if not toml_path.is_file():
-        return ()
+        return (), ()
     try:
         with toml_path.open("rb") as handle:
             pins = tomllib.load(handle).get("pins", {})
@@ -881,17 +887,32 @@ def load_first_party(toml_path: Path) -> tuple[str, ...]:
     if not isinstance(pins, dict):
         raise ValueError(f"{toml_path.name}: pins must be the table [pins]")
     if stray := sorted(set(pins) - PINS_KEYS):
-        raise ValueError(f"{toml_path.name}: unknown key(s) under [pins]: {', '.join(stray)}; only first-party is read")
-    entries = pins.get("first-party", [])
-    if not isinstance(entries, list):
-        raise ValueError(f'{toml_path.name}: [pins] first-party must be a list, e.g. ["registry.example/team"]')
-    for entry in entries:
+        raise ValueError(
+            f"{toml_path.name}: unknown key(s) under [pins]: {', '.join(stray)}; only first-party and extra are read"
+        )
+    first_party, extra = pins.get("first-party", []), pins.get("extra", [])
+    for key, value, example in (("first-party", first_party, "registry.example/team"), ("extra", extra, "docs/*.yml")):
+        if not isinstance(value, list):
+            raise ValueError(f'{toml_path.name}: [pins] {key} must be a list, e.g. ["{example}"]')
+    for entry in first_party:
         if not (isinstance(entry, str) and entry == entry.lower() and _IMAGE_NAME_RE.fullmatch(entry)):
             raise ValueError(
                 f"{toml_path.name}: [pins] first-party entry {entry!r} is not a lowercase image "
                 "namespace without tag or digest, e.g. \"registry.example/team\""
             )
-    return tuple(entries)
+    for entry in extra:
+        if not (
+            isinstance(entry, str)
+            and entry.endswith(_YAML_SUFFIXES)
+            and not entry.startswith("/")
+            and ".." not in entry.split("/")
+            and "\0" not in entry
+        ):
+            raise ValueError(
+                f"{toml_path.name}: [pins] extra entry {entry!r} is not a relative pattern of .yml or "
+                ".yaml files inside the project, e.g. \"docs/*.yml\""
+            )
+    return tuple(first_party), tuple(extra)
 
 
 def family(path: str) -> str | None:
@@ -909,13 +930,23 @@ def family(path: str) -> str | None:
     return _DOCKERFILE_FAMILY if is_dockerfile(path) else None
 
 
-def listed_files(root: Path) -> list[str]:
-    """The files git lists in *root*: tracked, plus untracked ones not ignored; tracked
-    files deleted from disk are skipped. Raises Failure when git cannot list them."""
+def kind_of(path: str, declared: frozenset[str]) -> str | None:
+    """The family a path is read with: its own, else the workflow family when `[pins]
+    extra` declares it."""
+    return family(path) or (_WORKFLOW_FAMILY if path in declared else None)
+
+
+def listed_files(root: Path, *pathspec: str) -> list[str]:
+    """The files git lists in *root*, or among them those *pathspec* matches: tracked,
+    plus untracked ones not ignored; tracked files deleted from disk are skipped.
+    Raises Failure when git cannot list them. An inherited GIT_*_PATHSPECS setting is
+    dropped: GIT_LITERAL_PATHSPECS would make a `:(glob)` pathspec a literal name."""
+    env = {key: value for key, value in os.environ.items() if not re.fullmatch(r"GIT_\w+_PATHSPECS", key)}
     try:
         listing = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *pathspec],
             cwd=root,
+            env=env,
             capture_output=True,
             check=False,
         )
@@ -926,6 +957,20 @@ def listed_files(root: Path) -> list[str]:
         raise Failure(f"git cannot list the files in {root}: {reason[0] if reason else 'git failed'}")
     paths = {os.fsdecode(raw) for raw in listing.stdout.split(b"\0") if raw}
     return sorted(path for path in paths if os.path.lexists(root / path))
+
+
+def declared_files(root: Path, extra: tuple[str, ...]) -> frozenset[str]:
+    """The .y{a,}ml files git lists that the `[pins] extra` patterns match, as git's glob
+    pathspecs (`*` stops at "/", `**/` crosses directories; a pattern without wildcards
+    also matches inside a directory of that name). Raises Failure for a pattern that
+    matches none: a typo would otherwise drop the files it meant."""
+    declared: set[str] = set()
+    for pattern in extra:
+        matched = [path for path in listed_files(root, f":(glob){pattern}") if path.endswith(_YAML_SUFFIXES)]
+        if not matched:
+            raise Failure(f"devkit.toml: [pins] extra entry {pattern!r} matches no file git lists")
+        declared.update(matched)
+    return frozenset(declared)
 
 
 def read_family_files(root: Path, paths: list[str]) -> tuple[dict[str, str], list[Violation]]:
@@ -956,14 +1001,15 @@ def census(counts: dict[str, int]) -> str:
 def main() -> None:
     root = Path(os.environ.get("PROJECT_ROOT") or ".").resolve()
     try:
-        first_party = load_first_party(root / "devkit.toml")
-        listed = [(path, family(path)) for path in listed_files(root)]
+        first_party, extra = load_pins(root / "devkit.toml")
+        declared = declared_files(root, extra)
+        listed = [(path, kind_of(path, declared)) for path in listed_files(root)]
     except (ValueError, Failure) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
     paths = [path for path, kind in listed if kind is not None]
     files, violations = read_family_files(root, paths)
-    violations += check_files(files, first_party)
+    violations += check_files(files, first_party, declared)
     print(census({name: sum(kind == name for _, kind in listed) for name in FAMILIES}), flush=True)
     for violation in sorted(violations, key=lambda v: (v.file, v.line)):
         print(violation, file=sys.stderr)

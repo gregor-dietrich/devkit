@@ -73,7 +73,8 @@ written against it. In short, a project:
    empty table when it has no minimums); a uv project, what its copy-paste
    gate scans in `[python.duplication] paths`, and the duplicated file
    pairs it accepts; and, optionally, the image namespaces it publishes
-   itself in `[pins] first-party`;
+   itself in `[pins] first-party` and further YAML files `lint-pins` reads
+   as workflows in `[pins] extra`;
 3. adds `/.devkit` to `.gitignore` (a uv project also `/.venv`);
 4. shapes its `Makefile` as the contract shows: profile variables,
    `DEVKIT := $(shell ./devkitw path)` and its empty-result guard,
