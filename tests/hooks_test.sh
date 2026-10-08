@@ -2,8 +2,9 @@
 # Hermetic tests for scripts/hooks.sh and the hooks it installs. Per case, a
 # fresh clone of a local bare origin holding a stub project: devkit.toml with
 # a pin, .devkit linking to it, and a Makefile whose lint-repo and test
-# targets log to $HOOK_LOG and fail when FAIL names them. DEVKIT is this
-# repository; git reads no user or system config. Prints PASS/FAIL per case.
+# targets log to $HOOK_LOG, fail when FAIL names them, and test also runs the
+# shell code in DURING. DEVKIT is this repository; git reads no user or system
+# config. Prints PASS/FAIL per case.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,7 +30,8 @@ printf '[devkit]\nurl = "file:///nowhere"\nversion = "v9.9.9"\ncommit = "%s"\n' 
 printf '/.devkit\n' >"$src/.gitignore"
 printf '%s\n' '.PHONY: lint-repo test' 'lint-repo test:' \
   $'\t@echo "$@ index=$${GIT_INDEX_FILE-unset} dir=$${GIT_DIR-unset}" >>"$$HOOK_LOG"' \
-  $'\t@[ "$${FAIL-}" != "$@" ] || { echo "INTENDED $@ FAILURE"; exit 23; }' >"$src/Makefile"
+  $'\t@[ "$${FAIL-}" != "$@" ] || { echo "INTENDED $@ FAILURE"; exit 23; }' \
+  $'\t@[ "$@" != test ] || eval "$${DURING-}"' >"$src/Makefile"
 echo one >"$src/file"
 git -C "$src" add -A
 git -C "$src" commit -q -m one
@@ -57,6 +59,7 @@ say() { # say CMD...: in the clone; sets rc, out (stdout and stderr, as git show
 }
 install() { run env PROJECT_ROOT="$clone" "$root/scripts/hooks.sh" install; }
 status() { run env PROJECT_ROOT="$clone" "$root/scripts/hooks.sh" status; }
+gate() { run env PROJECT_ROOT="$clone" "$@" "$root/scripts/gate.sh"; } # gate [VAR=value...]
 g() { git -C "$clone" "$@"; }
 logged() { [[ "$(<"$HOOK_LOG")" == "$1" ]]; }
 quiet() { [[ $rc == 0 && -z $out && -z $err ]]; }
@@ -582,6 +585,152 @@ case_moved_aside_orphan() { # foreign hook, ours moved aside: the side copy goes
     ! -e $hooks/pre-commit.devkit ]] && stamped "$hooks/pre-commit.legacy"
 }
 
+# make gate and the pre-push skip.
+rec() { echo "$clone/.git/devkit-verified-head"; }
+both=$'lint-repo index=unset dir=unset\ntest index=unset dir=unset'
+gated() { # a pushable commit that passed the gate; the log is empty again
+  fresh
+  install
+  g commit -q --no-verify --allow-empty -m two
+  gate
+  [[ $rc == 0 && -z $err && $out == "make gate: recorded $(g rev-parse HEAD | cut -c1-12) as verified;"* &&
+    "$(<"$(rec)")" == "$(g rev-parse HEAD)" ]] && logged "$both" || return 1
+  : >"$HOOK_LOG"
+}
+case_gate_records_and_skips() {
+  gated || return 1
+  say git push -q origin main
+  [[ $rc == 0 && $out == "pre-push: HEAD $(g rev-parse HEAD | cut -c1-12) passed 'make gate' on this clean tree; skipping the gate" &&
+    $(g rev-parse origin/main) == $(g rev-parse HEAD) ]] && logged ""
+}
+case_gate_pre_push_reruns() { # another commit, a dirty tree, assume-unchanged, skip-worktree
+  local kind
+  for kind in commit untracked assume skip; do
+    gated || return 1
+    case $kind in
+      commit) g commit -q --no-verify --allow-empty -m three ;;
+      untracked) echo dirt >"$clone/untracked" ;;
+      assume) g update-index --assume-unchanged file && echo two >>"$clone/file" ;;
+      skip) g update-index --skip-worktree file && echo two >>"$clone/file" ;;
+    esac
+    say git push -q origin main
+    [[ $rc == 0 && $out != *skipping* ]] && logged "$both" || return 1
+  done
+}
+case_gate_failure() { # no record, and the record of an earlier pass goes
+  gated || return 1
+  gate FAIL=test
+  [[ $rc != 0 && $out == *"INTENDED test FAILURE"* && $out != *NOTE* && ! -e $(rec) ]]
+}
+case_gate_only() {
+  fresh
+  gate ONLY=x
+  [[ $rc == 2 && -z $out && $err == "ERROR: make gate runs the whole push gate and records the result; unset ONLY (it is 'x')." ]] &&
+    logged "" && [[ ! -e $(rec) ]] || return 1
+  run make -s -f Makefile -f "$root/make/common.mk" gate ONLY=x
+  [[ $rc != 0 && $err == *"unset ONLY"* ]] && logged "" && [[ ! -e $(rec) ]]
+}
+norecord() { # norecord REASON [VAR=value...]: passes, runs both stages, records nothing
+  local why=$1
+  shift
+  gate "$@"
+  [[ $rc == 0 && $out == "NOTE: make gate passed but did not record HEAD: $why." && ! -e $(rec) ]] &&
+    logged "$both"
+}
+case_gate_dirty_start() {
+  local kind
+  for kind in untracked assume skip; do
+    fresh
+    case $kind in
+      untracked) echo dirt >"$clone/untracked" ;;
+      assume) g update-index --assume-unchanged file && echo two >>"$clone/file" ;;
+      skip) g update-index --skip-worktree file && echo two >>"$clone/file" ;;
+    esac
+    norecord "the tree was not clean at the start" || return 1
+  done
+}
+case_gate_environment() { # variables that can skip or deselect tests
+  fresh
+  norecord "MAVEN_ARGS is set (it can skip tests)" MAVEN_ARGS=-q || return 1
+  : >"$HOOK_LOG"
+  local var
+  for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS; do
+    norecord "$var holds a -D (it can skip tests)" "$var=-Dx=y" || return 1
+    : >"$HOOK_LOG"
+  done
+  norecord "PYTEST_ADDOPTS is set (it can deselect tests)" "PYTEST_ADDOPTS=-k x" || return 1
+  gate MAVEN_OPTS=-Xmx1g # no -D: recorded
+  [[ $rc == 0 && $out == "make gate: recorded"* ]]
+}
+case_gate_no_reflog() {
+  fresh
+  rm "$clone/.git/logs/HEAD"
+  norecord "no HEAD reflog (core.logAllRefUpdates), so a HEAD move could not be detected"
+}
+case_gate_nested() { # a project below the top level does not speak for it
+  fresh
+  mkdir "$clone/sub"
+  cp "$clone/Makefile" "$clone/sub/"
+  g add sub
+  g commit -q --no-verify -m sub
+  run env PROJECT_ROOT="$clone/sub" "$root/scripts/gate.sh"
+  [[ $rc == 0 && $out == "NOTE: make gate passed but did not record HEAD: the project is not the git top level, whose gate pre-push runs." &&
+    ! -e $(rec) ]] && logged "$both"
+}
+case_gate_tree_changed() {
+  fresh
+  norecord "the tree changed during the run" DURING='echo dirt >untracked'
+}
+case_gate_head_moved() { # and came back to the same SHA; and stayed moved
+  fresh
+  local before
+  before=$(g rev-parse HEAD)
+  norecord "HEAD moved during the run" DURING='git commit -q --no-verify --allow-empty -m tmp && git reset -q --hard HEAD~1' || return 1
+  [[ $(g rev-parse HEAD) == "$before" ]] || return 1
+  : >"$HOOK_LOG"
+  norecord "HEAD moved during the run" DURING='git commit -q --no-verify --allow-empty -m tmp'
+}
+case_gate_outer_flags() { # an outer make -i, or a MAKEFILES .IGNORE:, must not reach the stages
+  fresh
+  run env FAIL=test make -i -s -f Makefile -f "$root/make/common.mk" gate
+  [[ $out == *"INTENDED test FAILURE"* && ! -e $(rec) ]] || return 1
+  echo .IGNORE: >"$work/ignore.mk"
+  gate FAIL=test MAKEFILES="$work/ignore.mk"
+  [[ $rc != 0 && ! -e $(rec) ]]
+}
+case_gate_record_directory() {
+  fresh
+  mkdir "$(rec)"
+  gate
+  [[ $rc == 0 && $err == "WARNING: make gate passed but could not record HEAD in .git/devkit-verified-head." &&
+    -z $(ls -A "$(rec)") ]] && ! compgen -G "$clone/.git/devkit-verified-head.*" >/dev/null
+}
+case_gate_reftable() {
+  if ! git init -q --ref-format=reftable "$work/probe" 2>/dev/null; then
+    echo "NOTE the reftable case is skipped: this git cannot make a reftable repository" >&2
+    return 0
+  fi
+  fresh
+  rm -rf "$clone"
+  git clone -q --ref-format=reftable "$work/case/origin.git" "$clone"
+  ln -s "$work/cache/$pin" "$clone/.devkit"
+  gate
+  [[ $rc == 0 && $out == "NOTE: make gate passed but did not record HEAD: the reftable ref backend"* && ! -e $(rec) ]]
+}
+case_gate_worktree() { # a linked worktree's record is its own
+  fresh
+  install
+  g commit -q --no-verify --allow-empty -m two
+  g worktree add -q --detach "$work/case/wt" >/dev/null 2>&1 # its post-checkout notice
+  git -C "$work/case/wt" commit -q --no-verify --allow-empty -m three
+  g reset -q --hard "$(git -C "$work/case/wt" rev-parse HEAD)"
+  run env PROJECT_ROOT="$work/case/wt" "$root/scripts/gate.sh"
+  [[ $rc == 0 && $out == "make gate: recorded"* && -f $clone/.git/worktrees/wt/devkit-verified-head && ! -e $(rec) ]] || return 1
+  : >"$HOOK_LOG"
+  say git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both"
+}
+
 t "install writes five executable stamped copies" case_install
 t "a second install changes nothing and says so" case_idempotent
 t "a stale or non-executable copy is refreshed" case_stale_refreshed
@@ -631,6 +780,21 @@ t "pre-push run with GIT_DIR/GIT_INDEX_FILE set gates without them" case_pre_pus
 t "status names a hooks path outside the git directory once" case_status_outside
 t "a side path install did not write is refused" case_side_refused
 t "an orphaned side copy goes when a moved-aside copy is ours" case_moved_aside_orphan
+
+t "make gate records a clean passing HEAD, and pre-push then skips its gate" case_gate_records_and_skips
+t "pre-push still gates after another commit, and on any not strictly clean tree" case_gate_pre_push_reruns
+t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
+t "make gate refuses ONLY, also on the make command line" case_gate_only
+t "make gate records nothing from a tree not strictly clean at the start" case_gate_dirty_start
+t "make gate records nothing under MAVEN_ARGS, PYTEST_ADDOPTS or a JVM option -D" case_gate_environment
+t "make gate records nothing without a HEAD reflog" case_gate_no_reflog
+t "make gate records nothing for a project below the git top level" case_gate_nested
+t "make gate records nothing when the tree changed during the run" case_gate_tree_changed
+t "make gate records nothing when HEAD moved during the run, back or not" case_gate_head_moved
+t "make gate: outer make flags do not reach the stages" case_gate_outer_flags
+t "make gate warns when the record path is a directory, and exits 0" case_gate_record_directory
+t "make gate records nothing in a reftable repository" case_gate_reftable
+t "make gate's record is per worktree" case_gate_worktree
 
 [[ $fails == 0 ]] || {
   echo "$fails case(s) failed"

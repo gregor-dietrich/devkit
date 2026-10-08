@@ -5,6 +5,7 @@
 #
 #   pre-commit     make lint-repo              scripts/hooks/pre-commit.sh
 #   pre-push       make lint-repo test         scripts/hooks/pre-push.sh
+#                  (skipped for a HEAD that make gate passed on a clean tree)
 #   post-checkout  pin and stale-base notices  pin-notice.sh, stale-base-notice.sh
 #   post-merge     pin notice                  pin-notice.sh
 #   post-rewrite   pin notice                  pin-notice.sh

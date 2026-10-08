@@ -90,7 +90,8 @@ written against it. In short, a project:
 
 Then run `make hooks` once per clone: it installs the
 [git hooks](docs/contract.md#git-hooks) that run `make lint-repo` before a
-commit and `make lint-repo test` before a push.
+commit and `make lint-repo test` before a push. `make gate` runs that push
+gate and records a clean, passing HEAD, so the next push skips it.
 
 `make check` then fails when `.devkit` does not resolve to the pinned
 checkout, warns when the committed `devkitw` is stale or a git hook is

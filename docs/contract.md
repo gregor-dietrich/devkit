@@ -114,7 +114,7 @@ include .devkit/make/python-uv.mk
   exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
   COVERAGE_FLOOR ONLY DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
-  `hooks`, `lint-repo`, `lint-pins`, `lint-decisions`, `lint-secrets`,
+  `hooks`, `gate`, `lint-repo`, `lint-pins`, `lint-decisions`, `lint-secrets`,
   `lint-md`, `format-md`, `branch`, `rebase`, `tag`, `untag`.
   `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
   `coverage`, `audit`, `clean`, `kill`. `python-uv.mk` owns
@@ -362,7 +362,24 @@ one is missing or stale. A hook it did not write is never overwritten.
   checkout, merge or rewrite runs no code the branch brings. The gates run
   the work tree's make targets, as a `make` there would. `pre-push` gates
   the work tree at HEAD, not the pushed commits, and says so when they
-  differ or the tree is dirty.
+  differ or the tree is dirty (unless `make gate` verified HEAD, below).
+- `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
+  `MFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer `make -i`,
+  `-k`, `-n` or `-o` cannot reach a stage (a command-line `VAR=value`
+  still reaches the stages' environment), and refuses `ONLY`. Before the
+  stages it removes the old record. When they pass, it records HEAD in
+  `git rev-parse --git-path devkit-verified-head` (per worktree), but only
+  if the project is the git top level, HEAD has a commit, the tree was
+  strictly clean at the start and at the end (no change, no untracked
+  file, no dirty submodule, no assume-unchanged or skip-worktree entry;
+  ignored files are fine), HEAD did not move during the run (detected
+  through HEAD and its reflog, so a move away and back counts, and no
+  reflog means no record), the ref backend is not reftable, and none of
+  `MAVEN_ARGS`, `PYTEST_ADDOPTS` or a `-D` in `MAVEN_OPTS`,
+  `JAVA_TOOL_OPTIONS` or `JDK_JAVA_OPTIONS` is set. Recording never
+  changes the exit status, and a passing run that records nothing says
+  why. `pre-push` skips its gate only while HEAD equals the record and
+  the tree is still strictly clean.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.

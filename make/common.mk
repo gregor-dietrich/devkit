@@ -10,7 +10,7 @@ export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR COVERAGE_FLOOR ONL
 
 MAKEFLAGS += --no-print-directory
 
-.PHONY: help check check-devkit check-hooks hooks lint lint-repo lint-pins \
+.PHONY: help check check-devkit check-hooks hooks gate lint lint-repo lint-pins \
 	lint-decisions lint-secrets lint-md format format-md branch rebase tag untag
 
 help: ## list the available targets
@@ -33,6 +33,9 @@ check-hooks:
 
 hooks: ## install the git hooks (pre-commit: lint-repo; pre-push: lint-repo and test)
 	@"$(DEVKIT)/scripts/hooks.sh" install
+
+gate: ## run the push gate (lint-repo, test) and record a passing clean HEAD, which pre-push then skips
+	@"$(DEVKIT)/scripts/gate.sh"
 
 # No `##` here: the language profile's `lint` and `format` rules carry the
 # descriptions and the recipes, which run after these prerequisites.
