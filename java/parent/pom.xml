@@ -33,7 +33,7 @@
     <nullaway.version>0.14.2</nullaway.version>
     <pmd-plugin.version>3.28.0</pmd-plugin.version>
     <spotbugs-plugin.version>4.10.4.1</spotbugs-plugin.version>
-    <spotless-plugin.version>3.10.3</spotless-plugin.version>
+    <spotless-plugin.version>3.10.4</spotless-plugin.version>
     <surefire-plugin.version>3.6.0</surefire-plugin.version>
 
     <!-- Defaults a consumer overrides in its own <properties>. -->
