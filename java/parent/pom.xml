@@ -17,7 +17,7 @@
 
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-parent</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
   <packaging>pom</packaging>
 
   <properties>

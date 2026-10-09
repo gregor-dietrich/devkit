@@ -1,4 +1,4 @@
-# devkit consumer contract (v0.4.0)
+# devkit consumer contract (v0.5.0)
 
 The interface between devkit and a project that uses it. Every file in
 devkit is written against this page; change it here first.
@@ -30,7 +30,7 @@ devkit is written against this page; change it here first.
 [devkit]
 url = "https://git.vptr.de/gregor/devkit.git"
 # mirror = "https://github.com/<owner>/devkit.git"   # optional fallback
-version = "v0.4.0"
+version = "v0.5.0"
 commit = "<40-hex commit the tag resolves to>"
 
 # Required when FRONTEND_DIR is set; an empty table declares none.
@@ -453,12 +453,12 @@ inherit it, and Maven reads it through the link:
 <parent>
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-parent</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
   <relativePath>.devkit/java/parent/pom.xml</relativePath>
 </parent>
 ```
 
-- Its version is the release tag without the `v` (`v0.4.0` → `0.4.0`),
+- Its version is the release tag without the `v` (`v0.5.0` → `0.5.0`),
   literal, never a property. A bump edits it together with `version` and
   `commit` in `devkit.toml`. The parent is published to no repository: the
   link is the only way to reach it.

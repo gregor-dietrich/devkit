@@ -155,6 +155,22 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make check` warns until it does.
 
+### Upgrading from v0.4.x
+
+v0.5.0 has `lint-md` read exactly one markdownlint configuration per file
+and its `extends` chain (see
+[Repository gates](docs/contract.md#repository-gates)). Besides the version
+bump:
+
+1. Move markdownlint settings kept anywhere else into the project's
+   `.markdownlint.jsonc` or a `[markdown.profiles]` profile. v0.4.x merged
+   beneath the configuration a `.markdownlintrc` in the project root or
+   above it, `/etc/markdownlintrc`, `/etc/markdownlint/config` and, without
+   a `.markdownlint.jsonc`, a root `.markdownlint.json`, `.yaml` or `.yml`;
+   v0.5.0 ignores them. A file a configuration `extends` must be JSONC too.
+2. Run `make hooks` to refresh the git hooks, so `pre-push` skips a HEAD
+   that `make gate` verified; `make check` warns until then.
+
 ### Upgrading from v0.2.x
 
 v0.3.0 adds the repository gates `lint-pins`, `lint-decisions`,
