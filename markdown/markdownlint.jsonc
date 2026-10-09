@@ -1,5 +1,5 @@
-// devkit's default markdownlint profile, which `make lint-md` passes with
-// --config when the project has no .markdownlint.jsonc of its own. A
+// devkit's default markdownlint profile, which `make lint-md` lints with
+// when the project has no .markdownlint.jsonc of its own. A
 // project's file may start with
 // "extends": ".devkit/markdown/markdownlint.jsonc" and override from there.
 {

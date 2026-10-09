@@ -23,7 +23,7 @@ devkit is written against this page; change it here first.
 | `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
 | `.gitleaks.toml` | Optional: the project's gitleaks configuration, read by `lint-secrets` (see Repository gates) |
 | `.gitleaksignore` | Optional: the fingerprints of gitleaks findings the project has triaged, read by `lint-secrets` |
-| `.markdownlint.jsonc` | Optional: the project's markdownlint configuration, at the root (see Repository gates) |
+| `.markdownlint.jsonc` | Optional: the project's markdownlint configuration, at the root; a `[markdown.profiles]` entry names another one per subtree (see Repository gates) |
 | `.markdownlintignore` | Optional: the Markdown files `lint-md` skips, at the root |
 
 ```toml
@@ -43,6 +43,12 @@ commit = "<40-hex commit the tag resolves to>"
 [pins]
 first-party = ["registry.example/my-team"]
 # extra = ["docs/probes/*.yml"]
+
+# Optional: subtrees lint-md checks with a markdownlint configuration of
+# their own instead of the project's (Repository gates).
+[markdown.profiles]
+".claude" = ".claude/.markdownlint.jsonc"
+".agents" = ".claude/.markdownlint.jsonc"
 
 # Required in a uv project: what make lint's copy-paste gate scans (uv projects).
 [python.duplication]
@@ -322,8 +328,9 @@ git's history and changes instead.
     back for triage. Prefer it to a path allowlist in `.gitleaks.toml`,
     which applies to every commit in history as well.
 - `lint-md` checks every listed `*.md` file that is not a symlink with
-  markdownlint-cli at the closure `markdown/package-lock.json` pins,
-  installed with `npm ci --ignore-scripts` into
+  markdownlint, from the closure `markdown/package-lock.json` pins (that of
+  markdownlint-cli, which brings the library), installed with
+  `npm ci --ignore-scripts` into
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/` on first use (the only
   run that needs the network). `format-md`, part of `make format`, runs its
   `--fix` over the same files and rewrites without judging: it prints what
@@ -331,20 +338,27 @@ git's history and changes instead.
   and passes, so `make format` goes on to the language formatter (an error
   of markdownlint's own still fails it). Both need `node` at or above
   `engines.node` in `markdown/package.json` and `npm` on `PATH`. The
-  configuration is the project's `.markdownlint.jsonc` when it has one,
-  else `markdown/markdownlint.jsonc`; a project's file may start with
-  `"extends": ".devkit/markdown/markdownlint.jsonc"`. `.markdownlintignore`
-  excludes files. Each first runs markdownlint on devkit's control files and
-  fails unless they pass and fail as expected.
+  configuration is per file: its subtree's profile from
+  `[markdown.profiles]` in `devkit.toml` (the longest subtree that holds the
+  file wins), else the project's `.markdownlint.jsonc`, else
+  `markdown/markdownlint.jsonc`. Each is JSONC, and its `extends` chain is
+  followed, each path relative to the file that names it: the project's
+  file may start with `"extends": ".devkit/markdown/markdownlint.jsonc"`, a
+  profile at `.claude/.markdownlint.jsonc` with
+  `"extends": "../.devkit/markdown/markdownlint.jsonc"`. A subtree and a
+  profile are relative, normalized paths without `..`, a profile an existing
+  `.jsonc` file; `lint-md` stops with one `ERROR` line when `devkit.toml` is
+  not valid TOML, `[markdown]` holds a key other than `profiles`,
+  `profiles` is not a table, a path is not valid or a profile is missing, or
+  a subtree holds no Markdown file `lint-md` checks, so a typo cannot send its
+  files to the default profile. `.markdownlintignore` excludes files. Each
+  first runs markdownlint on devkit's control files and fails unless they
+  pass and fail as expected.
 
-  markdownlint runs without `markdownlint_*` variables and with an empty
-  `HOME`, so the files it reads from `HOME` (`~/.markdownlintrc`,
-  `~/.config/markdownlint`) do not apply. It still merges, beneath the
-  configuration, the nearest `.markdownlintrc` in the project root or a
-  directory above it (`~/.markdownlintrc` for a project under the home
-  directory), `/etc/markdownlintrc` and `/etc/markdownlint/config`, and,
-  when the project has no `.markdownlint.jsonc`, its `.markdownlint.json`,
-  `.yaml` or `.yml`.
+  `lint-md` lints with markdownlint's library through `markdown/lint.mjs`,
+  which reads exactly that one configuration file and its `extends` chain: no
+  `.markdownlintrc`, `/etc` file, `HOME` file, `markdownlint_*` variable or
+  other `.markdownlint.*` file applies.
 
 ## Git hooks
 

@@ -12,8 +12,9 @@
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/coverage_floor_test.sh, tests/python_clean_test.sh and
 #          tests/duplication_test.sh; then run lint-pins and lint-md over
-#          devkit itself, and lint-secrets when the pinned gitleaks is
-#          already in the tools cache (no download here). Needs git,
+#          devkit itself, tests/markdown_isolation_test.sh, and lint-secrets
+#          when the pinned gitleaks is already in the tools cache (no
+#          download here). Needs git,
 #          make, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
 #          python3 >= 3.11, and node (at or above engines.node in
 #          markdown/package.json and jscpd/package.json) with npm, which
@@ -111,6 +112,7 @@ shell_part() {
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
   check "devkit's own tree passes lint-md" \
     env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/markdown.sh"
+  check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   local version
   version=$(sed -n 's/^version=//p' "$root/scripts/secrets.sh")
   if compgen -G "${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-$version-*/gitleaks" >/dev/null; then

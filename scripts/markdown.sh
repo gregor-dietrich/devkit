@@ -2,9 +2,10 @@
 
 set -euo pipefail
 
-# Check the project's Markdown with markdownlint-cli (lint-md), or with --fix
-# fix what it can (format-md), at the closure markdown/package-lock.json pins
-# (docs/contract.md). Usage: markdown.sh [--fix]
+# Check the project's Markdown with markdownlint (lint-md), or with --fix fix
+# what it can (format-md), at the closure markdown/package-lock.json pins
+# (docs/contract.md), each file under its subtree's [markdown.profiles]
+# configuration or the default one. Usage: markdown.sh [--fix]
 
 case $#:${1-} in
     0:) fix=() label=lint-md verb=check ;;
@@ -44,25 +45,17 @@ fi
 . "$DEVKIT/scripts/lib/node_closure.sh"
 node_closure "$DEVKIT/markdown" markdownlint "$label"
 
-# mdl ARGS...: markdownlint without the user configuration it merges beneath
-# --config: markdownlint_* variables and the files it reads from $HOME. The
-# names come from env -0: compgen -e skips names bash cannot hold, such as
-# markdownlint_line-length, which markdownlint still reads.
-mkdir "$tmp/home"
-mdl() {
-    local entry name drop=()
-    while IFS= read -r -d '' entry; do
-        name=${entry%%=*}
-        [[ ${name,,} != markdownlint_* ]] || drop+=(-u "$name")
-    done < <(env -0)
-    env ${drop[@]+"${drop[@]}"} HOME="$tmp/home" "$NODE_TOOL" "$@"
-}
+# mdl [--fix] MODULES CONFIG FILE...: markdown/lint.mjs, which reads CONFIG and
+# its extends chain only, unlike markdownlint-cli, which merges rc files, /etc
+# and HOME files, and the cwd's .markdownlint.* beneath --config.
+modules=${NODE_TOOL%/.bin/*}
+mdl() { node "$DEVKIT/markdown/lint.mjs" "$@"; }
 
 # Detector controls: devkit's profile must flag the invalid files and pass the
 # clean one, or a passing run would prove nothing. Never with --fix.
 config=$DEVKIT/markdown/markdownlint.jsonc
 rc=0
-out=$(cd "$DEVKIT/markdown/controls" && mdl --config "$config" -- clean.md invalid.md long-line.md 2>&1) || rc=$?
+out=$(cd "$DEVKIT/markdown/controls" && mdl "$modules" "$config" clean.md invalid.md long-line.md 2>&1) || rc=$?
 control() { # control EXPECTATION: print the run, fail naming EXPECTATION
     printf '%s\n' "$out" >&2
     die "markdownlint's detector control failed: $1"
@@ -75,14 +68,25 @@ grep -q '^long-line\.md:.*MD013/line-length' <<<"$out" ||
 ! grep -q '^clean\.md:' <<<"$out" || control "clean.md was reported"
 
 [[ ! -f .markdownlint.jsonc ]] || config=$PROJECT_ROOT/.markdownlint.jsonc
-rc=0
-mdl --config "$config" ${fix[@]+"${fix[@]}"} -- "${files[@]}" || rc=$?
+# shellcheck source=SCRIPTDIR/lib/python.sh
+. "$DEVKIT/scripts/lib/python.sh"
+python3_floor || exit 1
+printf '%s\0' "${files[@]}" | python3 -I "$DEVKIT/scripts/markdown_profiles.py" "$config" >"$tmp/groups" || exit 1
+
+found=false failed=false
+while IFS= read -r -d '' config; do
+    group=()
+    while IFS= read -r -d '' file && [[ -n $file ]]; do group+=("$file"); done
+    rc=0
+    mdl ${fix[@]+"${fix[@]}"} "$modules" "$config" "${group[@]}" || rc=$?
+    case $rc in 0) ;; 1) found=true ;; *) failed=true ;; esac
+done <"$tmp/groups"
 # format-md rewrites and never judges: what --fix leaves (exit 1, findings) is
 # lint-md's to fail on, so make format still reaches the language formatter.
-if [[ $rc == 1 && $label == format-md ]]; then
-    echo "format-md: NOTE: markdownlint cannot fix the findings above; make lint will fail on these."
-elif [[ $rc != 0 ]]; then
+if [[ $failed == true || ($found == true && $label == lint-md) ]]; then
     echo "$label: markdownlint $verb FAILED; see the findings above." >&2
     exit 1
+elif [[ $found == true ]]; then
+    echo "format-md: NOTE: markdownlint cannot fix the findings above; make lint will fail on these."
 fi
 echo "$label: ${#files[@]} Markdown files checked."

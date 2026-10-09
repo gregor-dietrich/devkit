@@ -187,8 +187,9 @@ version bump, make `make lint` pass them:
    and rotate a real secret, then record its fingerprint, like a false
    positive's, in `.gitleaksignore`.
 7. Make `make lint-md` pass: `make format-md` fixes what markdownlint can;
-   wrap long lines by hand, exclude files in `.markdownlintignore`, or add
-   a `.markdownlint.jsonc` that extends devkit's profile.
+   wrap long lines by hand, exclude files in `.markdownlintignore`, add
+   a `.markdownlint.jsonc` that extends devkit's profile, or give a subtree
+   its own profile in `devkit.toml` (`[markdown.profiles]`).
 8. Provide Node.js 22.22.2 or later with npm in CI, e.g.
    `actions/setup-node` with `node-version: "22"` and `check-latest: true`
    (without it, an older cached 22.x can win), pinned like every other
