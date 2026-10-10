@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 /.devkit
+/.claude/settings.local.json
