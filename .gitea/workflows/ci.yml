@@ -1,7 +1,9 @@
-# Every job calls tests/run.sh, the entrypoint that also runs locally.
+# The test jobs call tests/run.sh, the entrypoint that also runs locally; the
+# lint-repo jobs run make lint-repo on devkit's own tree, once with the working
+# tree's gates and once with the previous release's, which devkit.toml pins.
 # Actions are pinned by commit SHA; the comment names the tag it resolved from.
-# The java and python jobs download gitleaks for lint-secrets, verifying the
-# linux_x64 pin.
+# The lint-repo, java and python jobs download gitleaks for lint-secrets,
+# verifying the linux_x64 pin.
 name: ci
 
 on:
@@ -9,13 +11,45 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  shell:
+  lint-repo:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # a failing leg must not cancel the other's verdict
+      matrix:
+        gates: [tree, release]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22" # the newest 22.x, at or above markdown/package.json's engines.node
+          check-latest: true # not an older 22.x the runner has cached
+      - run: apt-get update -qq && apt-get install -y -qq make
+      # devkit.toml pins devkit's SSH URL, and the forge requires sign-in for every read. CI has
+      # no SSH identity, so the fetch goes over HTTPS with the job's token, which reads this
+      # repository. The trap removes the header from ~/.gitconfig even when the fetch fails.
+      - name: Fetch the pinned release
+        if: matrix.gates == 'release'
+        timeout-minutes: 5 # a rejected token can stall the fetch for minutes
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git config --global url."https://git.vptr.de/".insteadOf "ssh://git@git.vptr.de:222/"
+          trap 'git config --global --unset http.https://git.vptr.de/.extraHeader' EXIT
+          git config --global http.https://git.vptr.de/.extraHeader \
+            "Authorization: Basic $(printf 'ci:%s' "$TOKEN" | base64 -w0)"
+          ./devkitw path
+      - run: make lint-repo GATES=${{ matrix.gates }}
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22" # the newest 22.x, at or above engines.node in markdown/ and jscpd/package.json
@@ -31,8 +65,6 @@ jobs:
       MAVEN_SHA512: 908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0 # lint-secrets scans the full history; a shallow clone fails it
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin

@@ -1,0 +1,6 @@
+# The release whose gates make lint-repo GATES=release runs on devkit itself
+# (README, "Gating devkit itself").
+[devkit]
+url = "ssh://git@git.vptr.de:222/gregor/devkit.git"
+version = "v0.5.0"
+commit = "a0c5412f99e49d6897d1848b3703f17a4bc9f36a"

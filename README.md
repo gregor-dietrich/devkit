@@ -115,6 +115,25 @@ Maven import fails until the wrapper has created `.devkit`.
 "Non-resolvable parent POM … devkit-parent" means `.devkit` is missing or
 points at another pin: run `make check`.
 
+## Gating devkit itself
+
+devkit is its own consumer: `make lint-repo`, `make hooks` and `make gate`
+work here as in a project, and `make test` runs all of `tests/run.sh`, so
+the push gate needs what its java and python parts need. By default
+(`GATES=tree`) the targets run the working tree's own scripts, so each
+change is gated by itself. With `GATES=release` they run the release
+`devkit.toml` pins, fetched by `devkitw` as a consumer's is, so a change
+that accidentally breaks a gate script does not pass on that gate alone;
+`devkitw`, the `Makefile`, `devkit.toml` and the workflow stay the
+change's own. CI runs `make lint-repo` both ways. `make gate` records
+HEAD whichever way it ran, and `pre-push` then skips either.
+
+`make check` applies to `GATES=release` only, since it requires `.devkit`
+to resolve to the pin; run it once per clone, which also quiets the hooks'
+notice that `.devkit` points at nothing. Its warning that `./devkitw`
+differs from the pinned copy is expected while `devkitw` has changed since
+that release: never copy the old wrapper over devkit's own.
+
 ## Releasing
 
 A release is a signed annotated tag on `main`; `devkitw` refuses a tag whose
@@ -133,7 +152,7 @@ network):
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
 ```
 
-Then tag, from `main`'s tip:
+Then tag, from `main`'s tip, with this snippet rather than `make tag`:
 
 ```sh
 git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
@@ -142,6 +161,18 @@ version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apac
 print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
   git tag -a -s "$tag" -m "devkit $tag" &&
   git push origin "$tag"
+```
+
+Then, in a pull request of its own, point `devkit.toml` at the new release,
+so that CI's `GATES=release` run gates the next changes with it: `version`
+the tag, `commit` the peeled commit the tag names (as for a consumer's bump,
+below):
+
+```sh
+commit=$(git ls-remote origin "refs/tags/${tag:?}^{}" | cut -f1) &&
+  [ -n "$commit" ] && sed -i.bak -e "/^\[devkit\]/,/^\[/s/^version = .*/version = \"$tag\"/" \
+    -e "/^\[devkit\]/,/^\[/s/^commit = .*/commit = \"$commit\"/" devkit.toml &&
+  rm devkit.toml.bak && make lint-repo GATES=release
 ```
 
 Tags are never moved or reused. Were one moved, the wrapper would refuse the

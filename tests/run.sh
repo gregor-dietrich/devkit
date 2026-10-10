@@ -10,11 +10,9 @@
 #          tests/python_floor_test.sh, tests/secrets_test.sh,
 #          tests/markdown_test.sh, tests/hooks_test.sh,
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
-#          tests/coverage_floor_test.sh, tests/python_clean_test.sh and
-#          tests/duplication_test.sh; then run lint-pins and lint-md over
-#          devkit itself, tests/markdown_isolation_test.sh, and lint-secrets
-#          when the pinned gitleaks is already in the tools cache (no
-#          download here). Needs git,
+#          tests/coverage_floor_test.sh, tests/python_clean_test.sh,
+#          tests/duplication_test.sh and tests/markdown_isolation_test.sh;
+#          make lint-repo, not this, gates devkit's own tree. Needs git,
 #          make, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
 #          python3 >= 3.11, and node (at or above engines.node in
 #          markdown/package.json and jscpd/package.json) with npm, which
@@ -31,8 +29,7 @@
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
-#          latter too, before Maven runs; then run lint-secrets over devkit
-#          itself with the gitleaks that make lint downloaded and verified.
+#          latter too, before Maven runs.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3, curl, tar, node with npm and the
@@ -108,23 +105,7 @@ shell_part() {
   check "coverage_floor tests" "$root/tests/coverage_floor_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
-  check "devkit's own tree passes lint-pins" \
-    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/pins.sh"
-  check "devkit's own tree passes lint-md" \
-    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/markdown.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
-  local version
-  version=$(sed -n 's/^version=//p' "$root/scripts/secrets.sh")
-  if compgen -G "${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-$version-*/gitleaks" >/dev/null; then
-    own_secrets
-  else
-    echo "PASS devkit's own repository passes lint-secrets (skipped: gitleaks $version is not cached; the java part runs it)"
-  fi
-}
-
-own_secrets() {
-  check "devkit's own repository passes lint-secrets" \
-    env PROJECT_ROOT="$root" DEVKIT="$root" "$root/scripts/secrets.sh"
 }
 
 listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or untracked but not ignored
@@ -295,7 +276,6 @@ java_part() {
     unchanged "${fixture%/}" target .coverage.md
   done
   negatives
-  own_secrets # with the gitleaks the fixtures downloaded
 }
 
 ruff_skips_devkit() { # ruff's walk of DIR lists files, none of them through the .devkit link
