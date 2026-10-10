@@ -96,10 +96,10 @@ commit and `make lint-repo test` before a push. `make gate` runs that push
 gate and records a clean, passing HEAD, so the next push skips it.
 
 `make check` then fails when `.devkit` does not resolve to the pinned
-checkout, warns when the committed `devkitw` is stale or a git hook is
-missing or stale, and runs the language checks; every target that runs
-Maven fails while the root pom does not inherit the parent as the contract
-requires. `make lint` runs the
+checkout, warns when a git hook is missing or stale, and runs the language
+checks (`make lint`, not `make check`, fails on a committed `devkitw` older
+than the pin's); every target that runs Maven fails while the root pom does
+not inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
 bash and python3 (3.11 or later); a uv project needs python3's venv and
@@ -130,9 +130,10 @@ HEAD whichever way it ran, and `pre-push` then skips either.
 
 `make check` applies to `GATES=release` only, since it requires `.devkit`
 to resolve to the pin; run it once per clone, which also quiets the hooks'
-notice that `.devkit` points at nothing. Its warning that `./devkitw`
-differs from the pinned copy is expected while `devkitw` has changed since
-that release: never copy the old wrapper over devkit's own.
+notice that `.devkit` points at nothing. `GATES=release` `lint-repo` fails
+when `./devkitw` differs from the pinned release's copy without a higher
+`# devkitw revision` line, so a change to `devkitw` raises the line once per
+release. Never copy the old wrapper over devkit's own.
 
 ## Releasing
 
@@ -144,6 +145,8 @@ version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
 `tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
 `version` and the `<parent>` snippet's version; the tag is `v` + that
 version, and `tests/run.sh` tags the tree under test under the same name.
+A release whose `devkitw` changed since the previous release has raised its
+`# devkitw revision` line.
 Before
 tagging, review the parent's pins against Maven Central (advisory, needs the
 network):
@@ -189,15 +192,18 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 ```
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
-`make check` warns until it does.
+`make lint` fails until it does.
 
 ### Upgrading from v0.5.x
 
-Copy the new `devkitw`: it refuses a pinned commit that is not on devkit's
-`main`, and only a copied wrapper does. A bump that edits only
-`devkit.toml`, as Renovate's does, keeps the old wrapper, and
-`./devkitw self-check` compares it with the pinned commit's own copy, so it
-cannot vouch for that copy.
+After the bump, copy the wrapper the old one has just fetched and verified,
+and commit it with the bump: `cp .devkit/devkitw devkitw`. The new wrapper
+refuses a pinned commit that is not on devkit's `main`, and only a copied
+wrapper does. `make lint` now fails until the copy is committed
+(`lint-devkitw`), for this and every later release that changes `devkitw`,
+so a bump that edits only `devkit.toml`, as Renovate's does, needs that one
+commit on its pull request. `./devkitw self-check` is gone; `make check` no
+longer warns about the wrapper.
 
 ### Upgrading from v0.4.x
 

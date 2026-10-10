@@ -10,8 +10,8 @@ export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR COVERAGE_FLOOR ONL
 
 MAKEFLAGS += --no-print-directory
 
-.PHONY: help check check-devkit check-hooks hooks gate lint lint-repo lint-pins \
-	lint-decisions lint-secrets lint-md format format-md branch rebase tag untag
+.PHONY: help check check-devkit check-hooks hooks gate lint lint-repo lint-devkitw \
+	lint-pins lint-decisions lint-secrets lint-md format format-md branch rebase tag untag
 
 help: ## list the available targets
 	@echo "$(PROJECT) - Available commands:"
@@ -20,9 +20,7 @@ help: ## list the available targets
 
 check: check-devkit check-hooks ## verify the local environment
 
-check-devkit: ## verify .devkit links to the pin (warns on a stale devkitw)
-	@cd "$(PROJECT_ROOT)" && ./devkitw self-check \
-		|| echo "check-devkit: warning: ./devkitw differs from .devkit/devkitw" >&2
+check-devkit: ## verify .devkit links to the pin
 	@[ "$$(cd "$(PROJECT_ROOT)/.devkit" && pwd -P)" = "$$(cd "$(DEVKIT)" && pwd -P)" ] \
 		|| { echo "check-devkit: .devkit does not resolve to $(DEVKIT)" >&2; exit 1; }
 
@@ -42,7 +40,10 @@ gate: ## run the push gate (lint-repo, test) and record a passing clean HEAD, wh
 lint: lint-repo
 format: format-md
 
-lint-repo: lint-pins lint-decisions lint-secrets lint-md ## run the repository-wide gates (ONLY does not narrow them)
+lint-repo: lint-devkitw lint-pins lint-decisions lint-secrets lint-md ## run the repository-wide gates (ONLY does not narrow them)
+
+lint-devkitw: ## check that ./devkitw is not older than the pinned devkit's
+	@"$(DEVKIT)/scripts/devkitw.sh"
 
 lint-pins: ## check that workflow actions and container images are pinned
 	@"$(DEVKIT)/scripts/pins.sh"

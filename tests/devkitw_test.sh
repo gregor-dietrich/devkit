@@ -186,21 +186,15 @@ case_no_toml() {
   one_line_error
 }
 case_bad_commit() { # rejected before any git call
+  local ok=0
   pin "file://$bare" "" v0.0.2 "$(tr a-f A-F <<<"$c2")"
   run_with "$work/nogit" path
-  one_line_error || return 1
+  one_line_error || ok=1
   pin "file://$bare" "" v0.0.2 "${c2:1}"
   run_with "$work/nogit" path
-  one_line_error && [ ! -e "$work/nogit/called" ]
-}
-case_self_check() {
-  pin "file://$bare" "" v0.0.2 "$c2"
-  run self-check
-  [ "$rc" = 0 ] && [ -z "$out" ] || return 1
-  echo '# local edit' >>"$proj/devkitw"
-  run self-check
-  cp "$wrapper" "$proj/devkitw"
-  [ "$rc" = 1 ] && one_line_error
+  one_line_error && [ ! -e "$work/nogit/called" ] || ok=1
+  pin "file://$bare" "" v0.0.2 "$c2" # the cases after it pin v0.0.2, pass or fail
+  return "$ok"
 }
 case_unknown_arg() {
   run frobnicate
@@ -268,7 +262,6 @@ t "5 new pin repoints the link" case_repoint
 t "6 .devkit that is a directory fails" case_not_a_link
 t "7a missing devkit.toml fails" case_no_toml
 t "7b malformed commit fails" case_bad_commit
-t "8 self-check: 0 when identical, 1 when the copy differs" case_self_check
 t "9 unknown argument exits 2" case_unknown_arg
 t "10 a git hook's GIT_DIR/GIT_INDEX_FILE are left alone" case_hook_env
 t "11 a concurrent run's copy wins; ours is discarded" case_race

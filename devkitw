@@ -1,8 +1,9 @@
 #!/bin/sh
 # devkitw: fetch the devkit commit pinned in ./devkit.toml into a per-user
 # cache, point ./.devkit at it and print its path. A project commits this file
-# verbatim; `./devkitw self-check` notices a copy that has drifted.
-# Usage, from the project root: ./devkitw [path | self-check]
+# verbatim; `make lint-devkitw` notices a copy older than the pin's.
+# devkitw revision 1
+# Usage, from the project root: ./devkitw [path]
 set -eu
 
 die() {
@@ -11,9 +12,9 @@ die() {
 }
 
 case $#:${1-} in
-  0: | 1:path | 1:self-check) ;;
+  0: | 1:path) ;;
   *)
-    echo "devkitw: unknown argument '$*'; usage: devkitw [path|self-check]" >&2
+    echo "devkitw: unknown argument '$*'; usage: devkitw [path]" >&2
     exit 2
     ;;
 esac
@@ -85,9 +86,4 @@ fi >&2 # only the path may reach stdout: not git's, nor a hook's
 
 [ "$(readlink .devkit 2>/dev/null)" = "$dir" ] || ln -sfn "$dir" .devkit
 
-if [ "${1-}" = self-check ]; then
-  cmp -s devkitw "$dir/devkitw" ||
-    die "./devkitw differs from devkit $version; copy $dir/devkitw over it"
-else
-  printf '%s\n' "$dir"
-fi
+printf '%s\n' "$dir"

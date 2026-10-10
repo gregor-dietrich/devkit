@@ -35,7 +35,8 @@ break a gate silently.
   later (`scripts/lib/python.sh` checks the floor before any helper).
 - Markdown is hard-wrapped at 80 columns (`markdown/markdownlint.jsonc`).
 - Security-relevant paths, which take a full `/agent-kit:ai-review`
-  rather than one reviewer: `devkitw`; what fetches and verifies a tool
+  rather than one reviewer: `devkitw` and the gate that delivers it
+  (`scripts/devkitw.sh`); what fetches and verifies a tool
   (`scripts/lib/get_uv.sh`, `scripts/lib/node_closure.sh`,
   `scripts/lib/sha256.sh`, `scripts/secrets.sh`,
   `scripts/python/uv_project.py`, which writes the uv bootstrap's hashes,
@@ -57,10 +58,10 @@ break a gate silently.
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
   run `make gate`, then push.
-- `make check` applies to `GATES=release` only. Its warning that
-  `./devkitw` differs from the pinned copy is expected while `devkitw` has
-  changed since that release: never copy the old wrapper over devkit's
-  own.
+- `make check` applies to `GATES=release` only. `GATES=release`
+  `lint-repo` fails when `./devkitw` differs from the pinned release's copy
+  without a higher `# devkitw revision`: a change to `devkitw` raises that
+  line once per release. Never copy the old wrapper over devkit's own.
 
 ## Releasing
 

@@ -83,9 +83,9 @@ include .devkit/make/java-maven.mk
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/<commit>/`, and points the
   project's `./.devkit` symlink at it. No network when cached. The cached
   checkout is read-only, and the pinned `version` is recorded with it.
-- `./devkitw self-check` exits non-zero when the project's `devkitw` differs
-  from the pinned commit's copy. It is advisory: `make check` warns on it
-  and does not fail.
+- `devkitw` carries a `# devkitw revision N` line; devkit raises N, once
+  per release, whenever the file changes, and `lint-devkitw` fails while a
+  project's copy is older than the pinned commit's.
 - It fails closed, with one line naming the cause, on: missing or malformed
   `devkit.toml`, fetched commit ≠ `commit`, a `commit` that is not an
   ancestor of the same remote's `main`, a cache hit whose recorded
@@ -95,8 +95,10 @@ include .devkit/make/java-maven.mk
   symlink. It never falls back to another version.
 - `url` and `mirror` are both trusted: whoever can push `main` and tags to
   the remote that answers decides which code runs. Limits: a checkout
-  cached by an older `devkitw` is not re-checked, and a project's copy of
-  `devkitw` predating the `main` check accepts any tagged commit.
+  cached by an older `devkitw` is not re-checked, a project's copy of
+  `devkitw` predating the `main` check accepts any tagged commit, and a pin
+  chosen to evade `lint-devkitw` brings its own gates, so only the
+  wrapper's own checks hold against it.
 - It reads only the `[devkit]` table, one `key = "value"` per line; every
   other table in `devkit.toml` belongs to devkit's scripts.
 
@@ -129,8 +131,9 @@ include .devkit/make/python-uv.mk
   exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
   COVERAGE_FLOOR ONLY DEVKIT` to every recipe.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
-  `hooks`, `gate`, `lint-repo`, `lint-pins`, `lint-decisions`, `lint-secrets`,
-  `lint-md`, `format-md`, `branch`, `rebase`, `tag`, `untag`.
+  `hooks`, `gate`, `lint-repo`, `lint-devkitw`, `lint-pins`, `lint-decisions`,
+  `lint-secrets`, `lint-md`, `format-md`, `branch`, `rebase`, `tag`,
+  `untag`.
   `java-maven.mk` owns `check-java`, `install`, `lint`, `format`, `test`,
   `coverage`, `audit`, `clean`, `kill`. `python-uv.mk` owns
   `check-python`, `install`, `lint`, `format`, `test`, `audit`, `clean`.
@@ -141,8 +144,7 @@ include .devkit/make/python-uv.mk
   `check: check-java` or `check: check-python` and carries the `lint` and
   `format` recipes, which run after the prerequisites. Only one rule line
   per target carries a `## description`.
-- `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)` and
-  only warns when `./devkitw self-check` fails.
+- `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)`.
 - `help` lists every target that carries a `## description` comment on its
   rule line, the consumer's own targets included.
 - Every target is `.PHONY`. Recipes call scripts as
@@ -194,9 +196,19 @@ before the language gates of `make lint`; `ONLY` does not narrow it.
 `lint-pins`, like every gate that reads a family of files, reads the files
 git lists in `$PROJECT_ROOT` (tracked, plus untracked files that are not
 ignored), fails when git cannot list them, and passes when none match.
-`lint-decisions` reads `docs/decisions.md` directly; `lint-secrets` reads
-git's history and changes instead.
+`lint-devkitw` reads `devkitw` and `lint-decisions` reads
+`docs/decisions.md` directly; `lint-secrets` reads git's history and
+changes instead.
 
+- `lint-devkitw` passes when the project's `devkitw` is byte-identical to
+  `$DEVKIT/devkitw`, or its `# devkitw revision` line names a greater
+  number (a project pinned back to an older release keeps its newer
+  wrapper). Otherwise it fails with one `ERROR` line whose remedy is
+  `cp .devkit/devkitw devkitw`, the wrapper the project's own has just
+  verified. A copy without the line is revision 0. It reads both files as
+  data and runs neither. Like every gate it is the pinned commit's own: it
+  makes an honest bump deliver the wrapper, and cannot hold against a pin
+  chosen to evade it; only the wrapper's own checks do.
 - `lint-pins` reads four families of files; a file belongs to the first
   that matches:
   - workflows: `.yml`/`.yaml` files under `.gitea/workflows/` or

@@ -7,8 +7,8 @@
 #          tests/select_modules_test.sh, tests/kill_test.sh,
 #          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
 #          tests/check_pins_test.sh, tests/check_decisions_test.sh,
-#          tests/python_floor_test.sh, tests/secrets_test.sh,
-#          tests/markdown_test.sh, tests/hooks_test.sh,
+#          tests/devkitw_lint_test.sh, tests/python_floor_test.sh,
+#          tests/secrets_test.sh, tests/markdown_test.sh, tests/hooks_test.sh,
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/coverage_floor_test.sh, tests/python_clean_test.sh,
 #          tests/duplication_test.sh and tests/markdown_isolation_test.sh;
@@ -25,7 +25,8 @@
 #          check, lint, test, coverage and format; then break copies of the
 #          monolith (format, a shared and a project checkstyle rule, the
 #          project rule's suppression, coverage, an image digest, Markdown,
-#          a secret committed, staged or unstaged, a missing git object) and
+#          a secret committed, staged or unstaged, a missing git object, a
+#          devkitw without its revision line) and
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
@@ -96,6 +97,7 @@ shell_part() {
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
+  check "devkitw lint tests" "$root/tests/devkitw_lint_test.sh"
   check "python floor tests" "$root/tests/python_floor_test.sh"
   check "markdown tests" "$root/tests/markdown_test.sh"
   check "secrets tests" "$root/tests/secrets_test.sh"
@@ -184,9 +186,13 @@ make_says() { # make_says pass|fail DIR TARGET TEXT...: make TARGET ends so, say
   }
 }
 
+sed_into() { # sed_into FILE SED: FILE run through SED in place, keeping its mode
+  sed "$2" "$1" >"$1.new" && cat "$1.new" >"$1" && rm "$1.new"
+}
+
 edited() { # edited DIR FILE SED: a monolith copy in DIR with FILE run through SED
   setup "$root/tests/fixtures/java-monolith" "$1"
-  sed "$3" "$1/$2" >"$1/$2.new" && mv "$1/$2.new" "$1/$2"
+  sed_into "$1/$2" "$3"
 }
 
 negative() { # negative NAME TARGET TEXT FILE SED: break FILE in a monolith copy
@@ -215,6 +221,7 @@ negatives() {
   local parent_off_pin='/<parent>/,/<\/parent>/s|<version>[^<]*</version>|<version>0.0.0</version>|'
   negative parent-version check "devkit.toml pins" pom.xml "$parent_off_pin"
   negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"
+  negative devkitw lint "cp .devkit/devkitw devkitw" devkitw '/^# devkitw revision/d'
   negative no-parent check "which devkit requires since v0.2.0" pom.xml '/<parent>/,/<\/parent>/d'
   local proj=$work/no-project-checkstyle
   setup "$root/tests/fixtures/java-monolith" "$proj"
@@ -301,7 +308,7 @@ py_copy() {
   local dir=$work/py-$2
   setup "$root/tests/fixtures/python-uv-$1" "$dir"
   [[ $3 != installed ]] || installed "$dir" || return
-  [[ -z ${4:-} ]] || { sed "$5" "$dir/$4" >"$dir/$4.new" && mv "$dir/$4.new" "$dir/$4"; } || return
+  [[ -z ${4:-} ]] || sed_into "$dir/$4" "$5" || return
   [[ $3 != relocked ]] || relocked "$dir"
 }
 
