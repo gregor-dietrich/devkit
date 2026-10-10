@@ -26,7 +26,8 @@ lists its upgrade steps under [Releasing](#releasing)), and a cached
 checkout works offline. The cache is
 read-only: a change to shared tooling is made and released in devkit, never
 edited inside a project. The wrapper fails closed: it never falls back to
-another version and refuses a fetched commit that differs from the pin.
+another version and refuses a fetched commit that differs from the pin or
+is not on devkit's `main`.
 
 **Why a parent POM.** The Maven gate configuration lives in one place,
 `java/parent/pom.xml`, which a consumer's root pom inherits through the
@@ -116,7 +117,10 @@ points at another pin: run `make check`.
 
 ## Releasing
 
-A release is an annotated tag on `main`. The release commit sets the
+A release is an annotated tag on `main`; `devkitw` refuses a tag whose
+commit is not on `main`. That check relies on every commit on `main` having
+been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
+protected, and pull requests squash-merged. The release commit sets the
 version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
 `tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
 `version` and the `<parent>` snippet's version; the tag is `v` + that
@@ -129,9 +133,10 @@ network):
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
 ```
 
-Then tag:
+Then tag, from `main`'s tip:
 
 ```sh
+git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
 tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
 version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
 print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
@@ -154,6 +159,14 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make check` warns until it does.
+
+### Upgrading from v0.5.x
+
+Copy the new `devkitw`: it refuses a pinned commit that is not on devkit's
+`main`, and only a copied wrapper does. A bump that edits only
+`devkit.toml`, as Renovate's does, keeps the old wrapper, and
+`./devkitw self-check` compares it with the pinned commit's own copy, so it
+cannot vouch for that copy.
 
 ### Upgrading from v0.4.x
 

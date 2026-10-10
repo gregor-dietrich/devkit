@@ -29,7 +29,7 @@ devkit is written against this page; change it here first.
 ```toml
 [devkit]
 url = "https://git.vptr.de/gregor/devkit.git"
-# mirror = "https://github.com/<owner>/devkit.git"   # optional fallback
+# mirror = "https://github.com/<owner>/devkit.git"   # optional, when url is unreachable
 version = "v0.5.0"
 commit = "<40-hex commit the tag resolves to>"
 
@@ -87,9 +87,16 @@ include .devkit/make/java-maven.mk
   from the pinned commit's copy. It is advisory: `make check` warns on it
   and does not fail.
 - It fails closed, with one line naming the cause, on: missing or malformed
-  `devkit.toml`, fetched commit ≠ `commit`, a cache hit whose recorded
-  version ≠ `version`, every remote unreachable, and a `.devkit` that
-  exists and is not a symlink. It never falls back to another version.
+  `devkit.toml`, fetched commit ≠ `commit`, a `commit` that is not an
+  ancestor of the same remote's `main`, a cache hit whose recorded
+  version ≠ `version`, a reachable `url` that serves no tag `version` or
+  no `main` (it does not fall back to the mirror then), every remote
+  unreachable or without them, and a `.devkit` that exists and is not a
+  symlink. It never falls back to another version.
+- `url` and `mirror` are both trusted: whoever can push `main` and tags to
+  the remote that answers decides which code runs. Limits: a checkout
+  cached by an older `devkitw` is not re-checked, and a project's copy of
+  `devkitw` predating the `main` check accepts any tagged commit.
 - It reads only the `[devkit]` table, one `key = "value"` per line; every
   other table in `devkit.toml` belongs to devkit's scripts.
 

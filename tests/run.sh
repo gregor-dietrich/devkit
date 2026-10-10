@@ -135,7 +135,8 @@ listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or unt
     done | tar -C "$1" --null -T - -cf - | tar -C "$2" -xf -
 }
 
-# The devkit a fixture pins: the tree under test as tag $tag in bare repo $bare.
+# The devkit a fixture pins: the tree under test as tag $tag on main (devkitw
+# refuses a tag off main) in bare repo $bare.
 publish() {
   local src=$work/src
   listed "$root" "$src"

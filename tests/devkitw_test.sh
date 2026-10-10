@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic tests for devkitw: a temp HOME and cache, a local bare repo with
-# two annotated tags whose commits carry the devkitw under test, and a temp
+# annotated tags whose commits carry the devkitw under test, and a temp
 # project pinned to them over file://. Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -17,7 +17,8 @@ proj=$work/proj cache=$XDG_CACHE_HOME/devkit
 nowhere=file://$work/missing.git bare=$work/devkit.git
 
 # The served devkit: v0.0.1 and v0.0.1b -> c1, v0.0.2 -> c2, all carrying
-# devkitw.
+# devkitw and on main; v0.0.3 -> c3 on a side branch only. $notag serves no
+# v0.0.2, and $sidemain's main is the side branch.
 git init -q -b main "$work/src"
 cp "$wrapper" "$work/src/devkitw"
 git -C "$work/src" add devkitw
@@ -28,7 +29,17 @@ c1=$(git -C "$work/src" rev-parse HEAD)
 git -C "$work/src" commit -q --allow-empty -m two
 git -C "$work/src" tag -a v0.0.2 -m v0.0.2
 c2=$(git -C "$work/src" rev-parse HEAD)
+git -C "$work/src" switch -q -c side
+git -C "$work/src" commit -q --allow-empty -m three
+git -C "$work/src" tag -a v0.0.3 -m v0.0.3
+c3=$(git -C "$work/src" rev-parse HEAD)
+git -C "$work/src" switch -q main
 git clone -q --bare "$work/src" "$bare"
+notag=$work/notag.git sidemain=$work/sidemain.git
+git clone -q --bare "$work/src" "$notag"
+git -C "$notag" tag -d v0.0.2 >/dev/null
+git clone -q --bare "$work/src" "$sidemain"
+git -C "$sidemain" update-ref refs/heads/main "$c3"
 cp "$wrapper" "$proj/devkitw"
 
 fake() { # fake DIR NAME BODY: an sh script $work/DIR/NAME; see run_with
@@ -118,11 +129,28 @@ case_wrong_commit() {
   run path
   one_line_error && [ ! -e "$cache/$c2" ] && no_temp_left
 }
+case_off_main() { # the tag resolves to the pin, but the commit is not on main
+  pin "file://$bare" "" v0.0.3 "$c3"
+  run path
+  one_line_error && [[ $err == *"not on devkit's main"* ]] &&
+    [ ! -e "$cache/$c3" ] && no_temp_left || return 1
+  pin "file://$bare" "file://$sidemain" v0.0.3 "$c3" # where c3 is on main
+  run path
+  one_line_error && [[ $err == *"not on devkit's main"* ]] &&
+    [ ! -e "$cache/$c3" ] && no_temp_left
+}
 case_mirror() {
   rm -rf "${cache:?}/$c1"
   pin "$nowhere" "file://$bare" v0.0.1 "$c1"
   run path
   ok_at "$c1" && [ -f "$cache/$c1/.devkit-commit" ]
+}
+case_url_lacks_tag() { # reachable, so the mirror is not asked
+  rm -rf "${cache:?}/$c2"
+  pin "file://$notag" "file://$bare" v0.0.2 "$c2"
+  run path
+  one_line_error && [[ $err == *"file://$notag serves no tag v0.0.2"* ]] &&
+    [ ! -e "$cache/$c2" ] && no_temp_left
 }
 case_unreachable() {
   rm -rf "${cache:?}/$c1"
@@ -229,7 +257,11 @@ case_version_mismatch() { # c1 is cached as v0.0.1; v0.0.1b tags it too
 t "1 miss fetches, prints the path, marks, links, makes read-only" case_miss
 t "2 hit needs no remote and no git" case_hit_offline
 t "3 wrong commit fails and caches nothing" case_wrong_commit
+t "3b a commit off main fails, the mirror's main notwithstanding" \
+  case_off_main
 t "4 unreachable url falls back to the mirror" case_mirror
+t "4a a reachable url without the tag fails; no mirror fallback" \
+  case_url_lacks_tag
 t "4b both remotes unreachable fails and caches nothing" case_unreachable
 t "4c a mirror outside [devkit] is ignored" case_trailing_mirror
 t "5 new pin repoints the link" case_repoint
