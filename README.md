@@ -117,7 +117,7 @@ points at another pin: run `make check`.
 
 ## Releasing
 
-A release is an annotated tag on `main`; `devkitw` refuses a tag whose
+A release is a signed annotated tag on `main`; `devkitw` refuses a tag whose
 commit is not on `main`. That check relies on every commit on `main` having
 been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
 protected, and pull requests squash-merged. The release commit sets the
@@ -140,7 +140,7 @@ git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
 tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
 version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
 print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
-  git tag -a "$tag" -m "devkit $tag" &&
+  git tag -a -s "$tag" -m "devkit $tag" &&
   git push origin "$tag"
 ```
 
