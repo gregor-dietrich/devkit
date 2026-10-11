@@ -131,10 +131,13 @@ HEAD whichever way it ran, and `pre-push` then skips either.
 
 `make check` applies to `GATES=release` only, since it requires `.devkit`
 to resolve to the pin; run it once per clone, which also quiets the hooks'
-notice that `.devkit` points at nothing. `GATES=release` `lint-repo` fails
-when `./devkitw` differs from the pinned release's copy without a higher
-`# devkitw revision` line, so a change to `devkitw` raises the line once per
-release. Never copy the old wrapper over devkit's own.
+notice that `.devkit` points at nothing. It compares the clone against the
+pin, so while the tree has changed `devkitw` or the hooks since that release
+it warns that they differ; that is expected here, and `make hooks` stays in
+tree mode. `GATES=release` `lint-repo` fails when `./devkitw` differs from
+the pinned release's copy without a higher `# devkitw revision` line, so a
+change to `devkitw` raises the line once per release. Never copy the old
+wrapper over devkit's own.
 
 ## Releasing
 

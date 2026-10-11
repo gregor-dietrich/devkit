@@ -11,6 +11,11 @@ $(error devkitw failed; see its message above)
 endif
 include .devkit/make/common.mk
 else ifeq ($(GATES),tree)
+# check-devkit needs .devkit to resolve to DEVKIT, which here is the working
+# tree, never the pin the hooks' notice asks to fetch and link.
+ifneq ($(filter check check-devkit,$(MAKECMDGOALS)),)
+$(error make check applies to GATES=release only: run 'make GATES=release check')
+endif
 DEVKIT := $(CURDIR)
 include make/common.mk
 else
