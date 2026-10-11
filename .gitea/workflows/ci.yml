@@ -35,7 +35,7 @@ jobs:
       # repository. The trap removes the header from ~/.gitconfig even when the fetch fails.
       - name: Fetch the pinned release
         if: matrix.gates == 'release'
-        timeout-minutes: 5 # a rejected token can stall the fetch for minutes
+        timeout-minutes: 5 # a cap only: a rejected token fails within seconds (#63)
         env:
           TOKEN: ${{ github.token }}
         run: |
