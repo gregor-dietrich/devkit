@@ -7,9 +7,10 @@
 # network. Prints PASS/FAIL per case.
 set -euo pipefail
 
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'uncache "$work"' EXIT
 proj=$work/proj pin=0.12.10+devkit.test
 mkdir "$proj"
 hash=$(printf '1%.0s' {1..64})
@@ -55,6 +56,8 @@ cp "$last" "$WORK/pip-requirements"
 [ -z "${PIP_FAILS:-}" ] || { echo "pip: hash mismatch" >&2; exit 1; }
 printf "#!/bin/sh\necho \"uv $PIN (x86_64-unknown-linux-gnu)\"\n" >"${0%/*}/uv"
 chmod +x "${0%/*}/uv" && touch "${0%/*}/uvx"'
+  # A move that fails.
+  fake failmv mv 'exit 1'
   # A concurrent run moves its copy into place just before our mv.
   fake racy mv 'PATH=${PATH#*:}; cp -R "$1" "$2"; exec mv "$@"'
 }
@@ -86,7 +89,7 @@ t() { # t NAME COMMAND...: report whether COMMAND succeeds, with a fresh cache
 chose() { [[ $rc == 0 && $out == "$1" ]]; }
 failed_saying() { [[ $rc != 0 && $out == *"ERROR: "*"$1"* && $out != *Traceback* ]]; }
 cached_uv() { echo "$cache/devkit/uv/$pin/bin/uv"; }
-read_only() { [[ -z $(find "$1" -type f -perm -u+w) ]]; } # root-safe
+read_only() { [[ -z $(find "$1" ! -type l -perm -u+w) ]]; } # files and directories; root-safe
 
 case_path_pin() {
   stub "$work/a/uv" "uv $pin"
@@ -128,7 +131,7 @@ case_venv_link_refused() {
 case_cache_other_version() {
   stub "$(cached_uv)" "uv 0.12.9"
   run
-  failed_saying "$(cached_uv) does not report uv $pin; remove $cache/devkit/uv/$pin"
+  failed_saying "$(cached_uv) does not report uv $pin; remove $cache/devkit/uv/$pin (chmod -R u+w '$cache/devkit/uv/$pin'; rm -rf '$cache/devkit/uv/$pin') and run make install"
 }
 case_no_bootstrap_unasked() {
   run "$work/python"
@@ -139,7 +142,7 @@ case_bootstrap() {
   run "$work/python" -- UV_BOOTSTRAP=true
   [[ $rc == 0 && $out == *"Installing uv $pin"* && $out == *$'\n'"$(cached_uv)" ]] &&
     [[ $(ls -A "$cache/devkit/uv") == "$pin" && $(ls -A "$cache/devkit/uv/$pin/bin") == uv ]] &&
-    read_only "$(cached_uv)" &&
+    read_only "$cache/devkit/uv/$pin" &&
     grep -q -- '-I -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps -r ' \
       "$work/pip-args" &&
     [[ $(<"$work/pip-requirements") == "uv==$pin \\"$'\n'"    --hash=sha256:$hash" ]]
@@ -149,6 +152,10 @@ case_bootstrap_race() {
   [[ $rc == 0 && $out == *$'\n'"$(cached_uv)" ]] &&
     [[ $(ls -A "$cache/devkit/uv") == "$pin" && $(ls -A "$cache/devkit/uv/$pin") == bin ]] &&
     [[ $(ls -A "$cache/devkit/uv/$pin/bin") == uv ]]
+}
+case_bootstrap_move_fails() {
+  run "$work/failmv" "$work/python" -- UV_BOOTSTRAP=true
+  failed_saying "cannot move the installed uv $pin into $cache/devkit/uv/$pin" && [[ -z $(ls -A "$cache/devkit/uv") ]]
 }
 case_bootstrap_pip_fails() {
   run "$work/python" -- UV_BOOTSTRAP=true PIP_FAILS=1
@@ -199,7 +206,7 @@ case_cache_dangling_link() {
   mkdir -p "$cache/devkit/uv"
   ln -s "$work/nowhere" "$cache/devkit/uv/$pin"
   run "$work/python" -- UV_BOOTSTRAP=true
-  failed_saying "$(cached_uv) does not report uv $pin; remove $cache/devkit/uv/$pin and run make install" &&
+  failed_saying "$(cached_uv) does not report uv $pin; remove $cache/devkit/uv/$pin (chmod -R u+w '$cache/devkit/uv/$pin'; rm -rf '$cache/devkit/uv/$pin') and run make install" &&
     [[ $out != *"Installing uv"* ]]
 }
 case_bootstrap_shadowing() {
@@ -236,5 +243,6 @@ t "18 a .venv that does not resolve refuses every uv on PATH" case_venv_unresolv
 t "19 a dangling cache link fails naming it, and is not bootstrapped over" case_cache_dangling_link
 t "20 the bootstrap never runs a project-root venv.py or pip.py" case_bootstrap_shadowing
 t "21 UV_PROJECT_ENVIRONMENT is unset for the uv calls" case_project_environment_unset
+t "22 a failed move fails in one line and leaves no temp dir" case_bootstrap_move_fails
 
 [[ $fails == 0 ]]

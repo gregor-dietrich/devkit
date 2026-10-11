@@ -105,6 +105,19 @@ include .devkit/make/java-maven.mk
   `devkitw` predating the `main` check accepts any tagged commit, and a pin
   chosen to evade `lint-devkitw` brings its own gates, so only the
   wrapper's own checks hold against it.
+- Every cache devkit fills under `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/`
+  (the checkout, and the tools below) is read-only, its directories
+  included, so that an edit through `.devkit` or the cache fails instead of
+  changing every project's gates. To remove one, as a message may ask, make
+  it writable first: `chmod -R u+w '<dir>'; rm -rf '<dir>'`. Limits: this stops
+  an accident, not a process of the same user, which can make an entry writable
+  again, nor root (a root container, say), which a mode does not stop, and a
+  cache hit is not re-verified. On a CI runner whose `HOME` persists between
+  jobs (on the host rather than in a fresh container per job), any job can
+  change what a later job's gates run, through these caches as through `~/.m2`
+  or the user's git configuration; give each job its own `HOME`, and `chmod -R
+  u+w` it before removing it. An entry cached by an older devkit keeps writable
+  directories until it is removed.
 - It reads only the `[devkit]` table, one `key = "value"` per line; every
   other table in `devkit.toml` belongs to devkit's scripts.
 

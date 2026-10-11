@@ -209,6 +209,11 @@ program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`), so a project whose
 devkit fetch authenticated through one moves the credential into git
 configuration, such as `http.<url>.extraHeader`, or into `~/.netrc`.
 
+devkit's caches (`~/.cache/devkit`, or `$XDG_CACHE_HOME/devkit`) are now
+read-only directories as well as files, so a plain `rm -rf` of one fails:
+a job or script that clears them runs `chmod -R u+w` on them first. An
+entry cached before the bump keeps writable directories until removed.
+
 A Maven project whose `./mvnw` launches a maven-wrapper jar
 (any `distributionType` but `only-script`) regenerates it script-only, since
 every target that runs Maven now fails on it: that launcher ignores

@@ -36,13 +36,14 @@ break a gate silently.
 - Markdown is hard-wrapped at 80 columns (`markdown/markdownlint.jsonc`).
 - Security-relevant paths, which take a full `/agent-kit:ai-review`
   rather than one reviewer: `devkitw` and the gate that delivers it
-  (`scripts/devkitw.sh`); what fetches and verifies a tool
+  (`scripts/devkitw.sh`); what fetches, verifies and seals a tool
   (`scripts/lib/get_uv.sh`, `scripts/lib/node_closure.sh`,
-  `scripts/lib/sha256.sh`, `scripts/secrets.sh`,
-  `scripts/python/uv_project.py`, which writes the uv bootstrap's hashes,
-  and the lockfiles in `markdown/` and `jscpd/`); the git hooks and the
-  record that lets `pre-push` skip (`scripts/hooks/`, `scripts/hooks.sh`,
-  `scripts/gate.sh`); and `.gitea/workflows/`.
+  `scripts/lib/sha256.sh`, `scripts/lib/sealed_dir.sh`,
+  `scripts/secrets.sh`, `scripts/python/uv_project.py`, which writes the
+  uv bootstrap's hashes, and the lockfiles in `markdown/` and `jscpd/`);
+  the git hooks and the record that lets `pre-push` skip
+  (`scripts/hooks/`, `scripts/hooks.sh`, `scripts/gate.sh`); and
+  `.gitea/workflows/`.
 
 ## Gates
 

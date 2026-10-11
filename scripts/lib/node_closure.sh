@@ -5,6 +5,8 @@
 
 # shellcheck source=SCRIPTDIR/sha256.sh
 . "$DEVKIT/scripts/lib/sha256.sh"
+# shellcheck source=SCRIPTDIR/sealed_dir.sh
+. "$DEVKIT/scripts/lib/sealed_dir.sh"
 
 node_closure_fail() {
     echo "ERROR: $*" >&2
@@ -42,14 +44,14 @@ node_closure() {
     cache=$root/$name-${key:0:16}
     NODE_TOOL=$cache/node_modules/.bin/$name
     if [[ -e $cache || -L $cache ]]; then
-        [[ -x $NODE_TOOL ]] || node_closure_fail "$cache is incomplete; remove it and retry"
+        [[ -x $NODE_TOOL ]] || node_closure_fail "$cache is incomplete; remove it (chmod -R u+w '$cache'; rm -rf '$cache') and retry"
         return 0
     fi
     command -v npm >/dev/null || node_closure_fail "npm not found; $label needs it on PATH to install $package once."
     mkdir -p "$root"
     ( # a subshell, so its traps stay its own
         stage=$(mktemp -d "$root/.tmp.XXXXXX")
-        trap 'rm -rf "$stage"' EXIT
+        trap 'sealed_remove "$stage"' EXIT
         trap 'exit 1' HUP INT TERM
         cp "$dir/package.json" "$dir/package-lock.json" "$stage/"
         echo "$label: installing $package into $cache..."
@@ -62,9 +64,7 @@ node_closure() {
             node_closure_fail "npm ci did not install $name (check npm's bin-links setting)"
         said=$(cd "$stage" && "$stage/node_modules/.bin/$name" --version 2>&1) ||
             node_closure_fail "the $name npm ci installed does not run (${said%%$'\n'*}); nothing was cached, fix that and retry"
-        # Read-only, so an edit inside the cache cannot change every project's gate.
-        find "$stage" -type f -exec chmod a-w {} +
-        mv "$stage" "$cache"
-        rm -rf "${cache:?}/${stage##*/}" # a concurrent run won: mv nested ours in it
+        # Read-only, directories too, so an edit inside the cache cannot change every project's gate.
+        sealed_place "$stage" "$cache" || node_closure_fail "cannot move the installed $name into $cache"
     )
 }

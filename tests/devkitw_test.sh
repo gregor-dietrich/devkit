@@ -6,7 +6,8 @@ set -euo pipefail
 
 wrapper=$(cd "$(dirname "$0")/.." && pwd)/devkitw
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # sealed trees
+trap 'uncache "$work"' EXIT
 # shellcheck disable=SC2046 # word splitting is intended
 unset $(git rev-parse --local-env-vars) GIT_SSH_COMMAND http_proxy all_proxy ALL_PROXY
 export HOME=$work/home XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
@@ -53,6 +54,8 @@ fake() { # fake DIR NAME BODY: an sh script $work/DIR/NAME; see run_with
   fake nogit git 'touch "${0%/*}/called"; exit 97'
   # A concurrent run wins the race to the cache dir, or to the link.
   fake racy mv 'PATH=${PATH#*:}; cp -R "$1" "$2"; exec mv "$@"'
+  fake older mv 'PATH=${PATH#*:}; cp -R "$1" "$2"; chmod -R u+w "$2"; exec mv "$@"'
+  fake nomv mv 'echo "mv: noise" >&2; exit 1'
   fake relink ln 'PATH=${PATH#*:}; for a; do t=$l; l=$a; done
 rm -f "$l"; ln -sn "$t" "$l"; exec ln "$@"'
   fake noisy git 'PATH=${PATH#*:}; case " $* " in *" init "*) echo leak ;; esac
@@ -111,7 +114,7 @@ one_line_error() { # non-zero, one stderr line, prefixed
   [[ $rc != 0 && $err == "devkitw: "* && $err != *$'\n'* ]]
 }
 no_temp_left() { ! compgen -G "$cache/.tmp.*" >/dev/null; }
-read_only() { [ -z "$(find "$cache/$1" -type f -perm -u+w)" ]; } # root-safe
+read_only() { [ -z "$(find "$cache/$1" ! -type l -perm -u+w)" ]; } # files and dirs; root-safe
 
 case_miss() {
   pin "file://$bare" "" v0.0.1 "$c1"
@@ -141,26 +144,26 @@ case_off_main() { # the tag resolves to the pin, but the commit is not on main
     [ ! -e "$cache/$c3" ] && no_temp_left
 }
 case_mirror() {
-  rm -rf "${cache:?}/$c1"
+  uncache "${cache:?}/$c1"
   pin "$nowhere" "file://$bare" v0.0.1 "$c1"
   run path
   ok_at "$c1" && [ -f "$cache/$c1/.devkit-commit" ]
 }
 case_url_lacks_tag() { # reachable, so the mirror is not asked
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   pin "file://$notag" "file://$bare" v0.0.2 "$c2"
   run path
   one_line_error && [[ $err == *"file://$notag serves no tag v0.0.2"* ]] &&
     [ ! -e "$cache/$c2" ] && no_temp_left
 }
 case_unreachable() {
-  rm -rf "${cache:?}/$c1"
+  uncache "${cache:?}/$c1"
   pin "$nowhere" "$nowhere" v0.0.1 "$c1"
   run path
   one_line_error && [ ! -e "$cache/$c1" ] && no_temp_left
 }
 case_trailing_mirror() { # pin() puts a reachable mirror in a later table
-  rm -rf "${cache:?}/$c1"
+  uncache "${cache:?}/$c1"
   pin "$nowhere" "" v0.0.1 "$c1"
   run path
   one_line_error && [ ! -e "$cache/$c1" ] && no_temp_left
@@ -202,19 +205,31 @@ case_unknown_arg() {
   [ "$rc" = 2 ] && [[ $err == "devkitw: "* ]]
 }
 case_hook_env() { # a pre-commit hook exports the caller's repository
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   export GIT_DIR=$work/caller.git GIT_INDEX_FILE=$work/caller-index
   run path
   unset GIT_DIR GIT_INDEX_FILE
   ok_at "$c2" && [ ! -e "$work/caller.git" ] && [ ! -e "$work/caller-index" ]
 }
 case_race() { # another run moved its copy into place just before our mv
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   run_with "$work/racy" path
   ok_at "$c2" && no_temp_left && ! compgen -G "$cache/$c2/.tmp.*" >/dev/null
 }
+case_race_older() { # an older devkitw's writable copy won: ours is discarded
+  uncache "${cache:?}/$c2"
+  run_with "$work/older" path
+  ok_at "$c2" && no_temp_left && ! compgen -G "$cache/$c2/.tmp.*" >/dev/null &&
+    ! read_only "$c2"
+}
+case_move_fails() {
+  uncache "${cache:?}/$c2"
+  run_with "$work/nomv" path
+  one_line_error && [[ $err == *"$cache/$c2"* && $err != *noise* ]] &&
+    [ ! -e "$cache/$c2" ] && no_temp_left
+}
 case_incomplete() {
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   mkdir "$cache/$c2"
   run path
   one_line_error && rmdir "$cache/$c2"
@@ -225,20 +240,20 @@ case_relink_race() { # another run relinks .devkit just before our ln
   ok_at "$c2" && [ ! -L "$cache/$c2/$c2" ] && [ ! -e "$cache/$c2/$c2" ]
 }
 case_git_quiet() { # a global post-checkout hook, and git writing to stdout
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   git config --global core.hooksPath "$work/hooks"
   run_with "$work/noisy" path
   git config --global --unset core.hooksPath
   ok_at "$c2" && [ ! -e "$work/hooks/ran" ]
 }
 case_ssh_batch() {
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   pin "ssh://example.invalid/devkit.git" "file://$bare" v0.0.2 "$c2"
   run_with "$work/ssh" path
   ok_at "$c2" && grep -q 'BatchMode=yes' "$work/ssh/args"
 }
 case_askpass() { # a url that answers 401, and an askpass from every source
-  rm -rf "${cache:?}/$c2"
+  uncache "${cache:?}/$c2"
   coproc python3 -I -c 'import http.server as h, sys
 class H(h.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -267,7 +282,8 @@ case_version_mismatch() { # c1 is cached as v0.0.1; v0.0.1b tags it too
   run_with "$work/nogit" path
   one_line_error && [[ $err == *"does not match"*"remove $cache/$c1"* ]] &&
     [ ! -e "$work/nogit/called" ] || return 1
-  rm -rf "${cache:?}/$c1"
+  local cmd=${err#*\(}
+  sh -c "${cmd%%)*}"
   run path
   ok_at "$c1" && [ "$(<"$cache/$c1/.devkit-commit")" = "$c1 v0.0.1b" ]
 }
@@ -289,6 +305,10 @@ t "7b malformed commit fails" case_bad_commit
 t "9 unknown argument exits 2" case_unknown_arg
 t "10 a git hook's GIT_DIR/GIT_INDEX_FILE are left alone" case_hook_env
 t "11 a concurrent run's copy wins; ours is discarded" case_race
+t "11b an older devkitw's writable copy wins; ours is discarded" \
+  case_race_older
+t "11c a failed move fails in one line and leaves no temp dir" \
+  case_move_fails
 t "12 a cache dir without its marker fails" case_incomplete
 t "13 a concurrent relink leaves one link and nothing in the cache" \
   case_relink_race

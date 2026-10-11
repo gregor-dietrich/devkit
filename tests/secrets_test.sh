@@ -6,12 +6,13 @@
 # No network. Prints PASS/FAIL per case.
 set -euo pipefail
 
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 root=$(cd "$(dirname "$0")/.." && pwd)
 # Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
 # /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
-trap 'rm -rf "$work"' EXIT
+trap 'uncache "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) GITLEAKS_CONFIG GITLEAKS_CONFIG_TOML
 export HOME=$work/home XDG_CACHE_HOME=$work/cache GIT_CEILING_DIRECTORIES=$work
@@ -68,6 +69,10 @@ while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$FAKE_ASSET" "$2"; shift; done'
   mkdir "$work/racy"
   printf '#!/bin/sh\n%s\n' 'PATH=${PATH#*:}; cp -R "$1" "$2"; exec mv "$@"' >"$work/racy/mv"
   chmod +x "$work/racy/mv"
+  # A move that fails.
+  mkdir "$work/failmv"
+  printf '#!/bin/sh\nexit 1\n' >"$work/failmv/mv"
+  chmod +x "$work/failmv/mv"
 }
 export PATH=$work/bin:$PATH FAKE_ASSET=$work/good.tar.gz
 
@@ -121,7 +126,7 @@ case_no_download() {
 }
 case_install() {
   run
-  [[ $rc == 0 && -z $err && -x $installed/gitleaks && -z $(find "$installed" -type f -perm -u+w) ]] &&
+  [[ $rc == 0 && -z $err && -x $installed/gitleaks && -z $(find "$installed" ! -type l -perm -u+w) ]] &&
     [[ $(ls -A "$installed") == gitleaks ]] && ! compgen -G "$tools/.tmp.*" >/dev/null &&
     grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_linux_x64.tar.gz$" "$LOG" &&
     grep -q "^tar -xzf $tools/.tmp.[^ ]*/asset.tar.gz -C $tools/.tmp.[^ ]* gitleaks$" "$LOG" || return 1
@@ -129,10 +134,27 @@ case_install() {
   [[ $rc == 0 ]] && ! logged curl && ! logged tar
 }
 case_race() { # a concurrent run's install wins; ours is discarded
-  rm -rf "$installed"
+  uncache "$installed"
   PATH=$work/racy:$PATH run
   [[ $rc == 0 && -z $err && $(ls -A "$installed") == gitleaks ]] &&
     ! compgen -G "$tools/.tmp.*" >/dev/null && scanned "${scans[@]}"
+}
+case_move_fails() { # a move that fails fails in one line, and no temp dir is left
+  uncache "$installed"
+  PATH=$work/failmv:$PATH run
+  one_error "cannot move the downloaded gitleaks into $installed" && [[ ! -e $installed ]] &&
+    ! compgen -G "$tools/.tmp.*" >/dev/null
+}
+case_dangling_link() { # a link to nowhere at the tool dir is an entry: no download over it
+  uncache "$installed"
+  mkdir -p "$tools"
+  ln -s "$work/nowhere" "$installed"
+  run
+  local ok=0
+  one_error "$installed has no gitleaks; remove it (chmod -R u+w '$installed'; rm -rf '$installed') and retry" &&
+    ! logged curl && [[ -L $installed ]] || ok=1
+  rm -f "$installed"
+  return $ok
 }
 case_platforms() { # each pinned platform fetches its own asset (the fake fails its pin)
   local uname platform
@@ -229,6 +251,8 @@ t "1 a mismatched asset fails before tar, caching nothing" case_mismatch
 t "2 a failed download fails, caching nothing" case_no_download
 t "3 a matching asset installs read-only; the next run downloads nothing" case_install
 t "3b a concurrent install wins; ours is discarded" case_race
+t "3c a failed move fails in one line and leaves no temp dir" case_move_fails
+t "3d a dangling link at the tool dir fails without a download" case_dangling_link
 t "4 each pinned platform fetches its own asset" case_platforms
 t "5 an unsupported platform fails before any download" case_unsupported
 t "6 the three scans run in order, and never dir" case_three_scans

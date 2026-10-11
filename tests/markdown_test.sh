@@ -5,12 +5,13 @@
 # npm and the markdownlint npm install. No network. Prints PASS/FAIL per case.
 set -euo pipefail
 
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 root=$(cd "$(dirname "$0")/.." && pwd)
 # Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
 # /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
-trap 'rm -rf "$work"' EXIT
+trap 'uncache "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars)
 export HOME=$work/home XDG_CACHE_HOME=$work/cache GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -109,6 +110,7 @@ holds() {
 count() { [[ $(grep -c -F -- "$2" "$LOG/$1" 2>/dev/null) == "$3" ]]; } # count LOG TEXT N
 runs() { local n && n=$(wc -l <"$LOG/mdl") && echo "$((n))"; } # runs of node as the linter; BSD wc pads
 installs() { compgen -G "$tools/markdownlint-*" || :; } # the installed closures
+sealed() { [[ -z $(find "$1" ! -type l -perm -u+w) ]]; } # no file or directory is writable; links have no mode; root-safe
 installed() { # one closure at tools/markdownlint-<16 hex>, with its markdownlint
   [[ $(installs) =~ /markdownlint-[0-9a-f]{16}$ && -x $(installs)/node_modules/.bin/markdownlint ]]
 }
@@ -132,18 +134,20 @@ FAKE_NODE=garbage expect "an unreadable node version fails" 1 -- \
   "ERROR: cannot read a version from 'node --version' ('garbage')"
 
 # Installation.
-rm -rf "$tools"
+uncache "$tools"
 project README.md
 expect "the first run installs and passes" 0 -- "lint-md: 1 Markdown files checked."
 holds "the first run calls npm ci --ignore-scripts once" count npm "npm ci --ignore-scripts" 1
 holds "it installs at tools/markdownlint-<16 hex>" installed
+holds "every file and directory of the closure is read-only" sealed "$(installs)"
 rm -f "$LOG/npm"
 expect "the second run passes" 0 -- "lint-md: 1 Markdown files checked."
 holds "the second run makes no npm call" [ ! -e "$LOG/npm" ]
+chmod u+w "$(installs)/node_modules/.bin"
 rm -f "$(installs)/node_modules/.bin/markdownlint"
 expect "a cache dir without its markdownlint fails naming it" 1 -- \
-  "ERROR: $(installs) is incomplete; remove it and retry"
-rm -rf "$tools"
+  "ERROR: $(installs) is incomplete; remove it (chmod -R u+w '$(installs)'; rm -rf '$(installs)') and retry"
+uncache "$tools"
 FAKE_NPM_FAIL=1 expect "an npm failure fails" 1 -- \
   "ERROR: cannot install markdownlint-cli (npm ci failed; the first run needs the npm registry)"
 holds "an npm failure leaves no install and no temp dir" [ -z "$(installs)$(compgen -G "$tools/.tmp.*")" ]
@@ -151,6 +155,20 @@ FAKE_NPM_NOBIN=1 expect "an npm ci that links no markdownlint fails" 1 -- \
   "ERROR: npm ci did not install markdownlint (check npm's bin-links setting)"
 holds "it leaves no install and no temp dir" [ -z "$(installs)$(compgen -G "$tools/.tmp.*")" ]
 expect "a later run installs" 0 -- "lint-md: 1 Markdown files checked."
+# A mv first on PATH: one that fails, then one after a concurrent run's install.
+uncache "$tools"
+fake mv 'exit 1'
+expect "a move that fails fails naming the closure" 1 -- \
+  "ERROR: cannot move the installed markdownlint into $tools/markdownlint-"
+holds "it leaves no install and no temp dir" [ -z "$(installs)$(compgen -G "$tools/.tmp.*")" ]
+# shellcheck disable=SC2016 # expands when the fake runs
+fake mv 'PATH=${PATH#*:}; cp -R "$1" "$2"; exec mv "$@"'
+expect "a concurrent install wins; the run passes" 0 -- "lint-md: 1 Markdown files checked."
+holds "it leaves exactly one install" installed
+holds "it leaves no temp dir" [ -z "$(compgen -G "$tools/.tmp.*")" ]
+rm "$STUBS/mv"
+uncache "$tools"
+expect "a later run installs again" 0 -- "lint-md: 1 Markdown files checked."
 mkdir "$work/devkit"
 cp -R "$root/scripts" "$root/markdown" "$work/devkit/"
 echo >>"$work/devkit/markdown/package-lock.json"
@@ -160,7 +178,7 @@ holds "another package-lock.json installs under another key" \
   [ "$(installs | grep -cE '/markdownlint-[0-9a-f]{16}$')" = 2 ]
 
 # Detector controls.
-rm -rf "$tools"
+uncache "$tools"
 control="ERROR: markdownlint's detector control failed:"
 CONTROL_MODE=accept-invalid expect "a control run that passes everything fails" 1 -- \
   "$control it passed invalid.md and long-line.md"

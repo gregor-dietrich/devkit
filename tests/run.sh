@@ -11,9 +11,9 @@
 #          tests/python_floor_test.sh, tests/secrets_test.sh,
 #          tests/markdown_test.sh, tests/hooks_test.sh,
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
-#          tests/coverage_floor_test.sh, tests/python_clean_test.sh,
-#          tests/java_clean_test.sh, tests/duplication_test.sh and
-#          tests/markdown_isolation_test.sh;
+#          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
+#          tests/python_clean_test.sh, tests/java_clean_test.sh,
+#          tests/duplication_test.sh and tests/markdown_isolation_test.sh;
 #          make lint-repo, not this, gates devkit's own tree. Needs git,
 #          make, shellcheck, bash >= 4 (shopt globstar; macOS ships 3.2),
 #          procps (pgrep, ps), tar, sha256sum or shasum,
@@ -81,6 +81,7 @@ shopt -s globstar
 root=$(cd "$(dirname "$0")/.." && pwd)
 fails=0
 
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 check() { # check LABEL COMMAND...: run COMMAND and report how it went
   local label=$1 start=$SECONDS rc=0
   shift
@@ -114,6 +115,7 @@ shell_part() {
   check "hooks tests" "$root/tests/hooks_test.sh"
   check "uv_project tests" "$root/tests/uv_project_test.sh"
   check "get_uv tests" "$root/tests/get_uv_test.sh"
+  check "sealed_dir tests" "$root/tests/sealed_dir_test.sh"
   check "coverage_floor tests" "$root/tests/coverage_floor_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
   check "java clean tests" "$root/tests/java_clean_test.sh"
@@ -313,7 +315,7 @@ sys.exit("java/parent/pom.xml declares no <version>") if not version else print(
 prepare() { # once per run: the temp dir, a clean environment and the published tree under test
   [[ -z ${work:-} ]] || return 0
   work=$(mktemp -d) tag=v$(parent_version) bare=$work/devkit.git
-  trap 'rm -rf "$work"' EXIT
+  trap 'uncache "$work"' EXIT
   # shellcheck disable=SC2046 # one argument per variable name
   unset $(git rev-parse --local-env-vars) ONLY PROJECT_ROOT REVISION JUNIT_DIR COVERAGE_FLOOR MODULES
   export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1

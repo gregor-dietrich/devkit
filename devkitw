@@ -48,9 +48,11 @@ g() {
 cached=$(cat "$dir/$mark" 2>/dev/null || :)
 if [ -n "$cached" ] && [ "$cached" != "$commit $version" ]; then
   die "version $version does not match cached commit $commit;" \
-    "check devkit.toml, or remove $dir to refetch"
+    "check devkit.toml, or remove $dir" \
+    "(chmod -R u+w '$dir'; rm -rf '$dir') to refetch"
 elif [ -z "$cached" ]; then
-  [ ! -e "$dir" ] || die "$dir has no $mark; remove it and retry"
+  [ ! -e "$dir" ] || die "$dir has no $mark; remove it" \
+    "(chmod -R u+w '$dir'; rm -rf '$dir') and retry"
   # Never touch a calling git hook's repository (GIT_DIR, GIT_INDEX_FILE, ...).
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
@@ -60,7 +62,7 @@ elif [ -z "$cached" ]; then
   export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
   mkdir -p "$root"
   tmp=$(mktemp -d "$root/.tmp.XXXXXX")
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'chmod -R u+w "$tmp" 2>/dev/null || :; rm -rf "$tmp"' EXIT
   trap 'exit 1' HUP INT TERM
   g init -q
   # Fetch main too: anyone who can push a tag can put it on any commit, so the
@@ -80,10 +82,21 @@ elif [ -z "$cached" ]; then
   g checkout -q "$commit"
   rm -rf "$tmp/.git"
   echo "$commit $version" >"$tmp/$mark"
-  # Read-only, so an edit through .devkit cannot change every project's gates.
-  find "$tmp" -type f -exec chmod a-w {} +
-  mv "$tmp" "$dir"
-  rm -rf "${dir:?}/${tmp##*/}" # a concurrent run won: mv nested ours in it
+  # Read-only, directories too, so an edit through .devkit cannot change every
+  # project's gates.
+  chmod -R a-w "$tmp"
+  nested=$dir/${tmp##*/}
+  if mv "$tmp" "$dir" 2>/dev/null; then
+    # mv succeeded, yet ours landed inside a DIR that was there already: only
+    # root gets this, a read-only tmp does not stop it. The existing DIR wins.
+    # scripts/lib/sealed_dir.sh is the shared version of this logic.
+    if [ -e "$nested" ]; then
+      chmod -R u+w "$nested"
+      rm -rf "${nested:?}"
+    fi
+  elif [ ! -e "$dir" ]; then # else mv failed on an existing DIR (non-root): its copy wins
+    die "cannot move the fetched devkit into $dir"
+  fi
 fi >&2 # only the path may reach stdout: not git's, nor a hook's
 
 [ "$(readlink .devkit 2>/dev/null)" = "$dir" ] || ln -sfn "$dir" .devkit

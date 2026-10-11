@@ -7,12 +7,13 @@
 # devkit.toml written per case. Prints PASS/FAIL per case.
 set -euo pipefail
 
+uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 root=$(cd "$(dirname "$0")/.." && pwd)
 # Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
 # /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
-trap 'rm -rf "$work"' EXIT
+trap 'uncache "$work"' EXIT
 export DEVKIT=$root
 # shellcheck source=SCRIPTDIR/../scripts/lib/node_closure.sh
 . "$root/scripts/lib/node_closure.sh"

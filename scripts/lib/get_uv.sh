@@ -13,6 +13,8 @@
 # shellcheck source=SCRIPTDIR/python.sh
 . "$DEVKIT/scripts/lib/python.sh"
 python3_floor || exit 1
+# shellcheck source=SCRIPTDIR/sealed_dir.sh
+. "$DEVKIT/scripts/lib/sealed_dir.sh"
 UV_PIN=$(python3 "$DEVKIT/scripts/python/uv_project.py" uv-version) || exit
 uv_root=${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv
 [[ $uv_root == /* ]] || {
@@ -31,7 +33,7 @@ uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps sta
     (
         mkdir -p "$uv_root"
         tmp=$(mktemp -d "$uv_root/.tmp.XXXXXX")
-        trap 'rm -rf "$tmp"' EXIT
+        trap 'sealed_remove "$tmp"' EXIT
         trap 'exit 1' HUP INT TERM
         echo "Installing uv $UV_PIN, hash-verified from uv.lock, into $uv_dir ..."
         # A file, not a pipe: pip installs nothing, and succeeds, from an empty requirements list.
@@ -49,10 +51,12 @@ uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps sta
         }
         mkdir "$tmp/bin"
         cp "$tmp/venv/bin/uv" "$tmp/bin/uv"
-        chmod a-w "$tmp/bin/uv" # read-only, like the devkit checkout
         rm -rf "$tmp/venv" "$tmp/requirements.txt"
-        mv "$tmp" "$uv_dir"
-        rm -rf "${uv_dir:?}/${tmp##*/}" # a concurrent run won: mv nested ours in it
+        # Read-only, directories too, like the devkit checkout.
+        sealed_place "$tmp" "$uv_dir" || {
+            echo "ERROR: cannot move the installed uv $UV_PIN into $uv_dir." >&2
+            exit 1
+        }
     )
 }
 
@@ -76,13 +80,13 @@ if uv_on_path; then
     : # UV_CMD is the uv on PATH
 elif UV_CMD=$uv_dir/bin/uv; [[ -e $uv_dir || -L $uv_dir ]]; then
     uv_is_pin "$UV_CMD" || {
-        echo "ERROR: $UV_CMD does not report uv $UV_PIN; remove $uv_dir and run make install." >&2
+        echo "ERROR: $UV_CMD does not report uv $UV_PIN; remove $uv_dir (chmod -R u+w '$uv_dir'; rm -rf '$uv_dir') and run make install." >&2
         exit 1
     }
 elif [[ ${UV_BOOTSTRAP:-} == true ]]; then
     uv_bootstrap
     uv_is_pin "$UV_CMD" || {
-        echo "ERROR: the uv installed into $uv_dir does not report uv $UV_PIN; remove $uv_dir and retry." >&2
+        echo "ERROR: the uv installed into $uv_dir does not report uv $UV_PIN; remove $uv_dir (chmod -R u+w '$uv_dir'; rm -rf '$uv_dir') and retry." >&2
         exit 1
     }
 else
