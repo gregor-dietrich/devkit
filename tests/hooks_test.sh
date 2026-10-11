@@ -8,10 +8,18 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# Physical: hooks.sh reports resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps: inside a substitution a failed
+# mktemp would leave `cd ""`, which bash 3.2 accepts, and the trap would remove
+# the caller's directory.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) CI FAIL GIT_CEILING_DIRECTORIES
+# What the hooks and make gate react to: an ambient one would change the cases.
+unset ONLY MAVEN_ARGS MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS PYTEST_ADDOPTS MAVEN_SKIP_RC \
+  MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 export HOME=$work/home GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
 export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid
@@ -245,6 +253,17 @@ case_pre_commit_blocks() {
   [[ $rc != 0 && $out == *"INTENDED lint-repo FAILURE"* && $(g rev-list --count HEAD) == 1 ]] &&
     logged "lint-repo index=unset dir=unset"
 }
+case_pre_commit_outer_flags() { # a commit from inside make -i, or a MAKEFILES .IGNORE:, still fails
+  fresh
+  install
+  echo two >>"$clone/file"
+  echo .IGNORE: >"$work/ignore.mk"
+  local flags
+  for flags in MAKEFLAGS=i GNUMAKEFLAGS=-i MAKEFILES="$work/ignore.mk"; do
+    say env FAIL=lint-repo "$flags" git commit -qam two
+    [[ $rc != 0 && $out == *"INTENDED lint-repo FAILURE"* && $(g rev-list --count HEAD) == 1 ]] || return 1
+  done
+}
 case_pre_commit_env() { # a partial commit, which hands the hook a temporary index
   fresh
   install
@@ -304,6 +323,88 @@ case_pre_push_side_no_refs() { # called from a foreign hook: gate HEAD
   run "$hooks/pre-push.devkit" origin "$work/case/origin.git" </dev/null
   [[ $rc == 0 && -z $err && $out == *"git sent no refs"* ]] &&
     logged $'lint-repo index=unset dir=unset\ntest index=unset dir=unset'
+}
+case_pre_push_only() { # ONLY left in the shell never narrows the push gate
+  fresh
+  install
+  g commit -q --no-verify --allow-empty -m two
+  # shellcheck disable=SC2016 # DURING is evaluated by the stage's recipe
+  say env ONLY=x DURING='echo "only=${ONLY-unset}" >>"$HOOK_LOG"' git push -q origin main
+  [[ $rc == 0 && $out == *"pre-push: ignoring ONLY (it is 'x'); the push gate is never narrowed"* ]] &&
+    logged "$both"$'\nonly=unset'
+}
+case_pre_push_environment() { # variables that can skip or deselect tests: warn, still gate
+  fresh
+  install
+  local spec var n=0 ok=0
+  for spec in "MAVEN_ARGS=-q|MAVEN_ARGS is set (it can skip tests)." \
+    "MAVEN_OPTS=-Dx=y|MAVEN_OPTS holds a -D (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-Dx=y|JAVA_TOOL_OPTIONS holds a -D (it can skip tests)." \
+    "JDK_JAVA_OPTIONS=-Dx=y|JDK_JAVA_OPTIONS holds a -D (it can skip tests)." \
+    "_JAVA_OPTIONS=-Dx=y|_JAVA_OPTIONS holds a -D (it can skip tests)." \
+    "PYTEST_ADDOPTS=-k x|PYTEST_ADDOPTS is set (it can deselect tests)."; do
+    n=$((n + 1))
+    var=${spec%%|*}
+    g commit -q --no-verify --allow-empty -m "env$n"
+    : >"$HOOK_LOG"
+    say env "$var" git push -q origin main
+    [[ $rc == 0 && $out == *"WARNING: ${spec#*|}"* ]] && logged "$both" || return 1
+  done
+  g commit -q --no-verify --allow-empty -m last
+  : >"$HOOK_LOG"
+  say env MAVEN_OPTS=-Xmx1g git push -q origin main # no -D: no warning
+  [[ $rc == 0 ]] && { unwarned || [[ $out != *WARNING* ]]; } && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m negated
+  : >"$HOOK_LOG"
+  say env JAVA_TOOL_OPTIONS=-XX:-DisableExplicitGC git push -q origin main # -D inside a word
+  [[ $rc == 0 ]] && { unwarned || [[ $out != *WARNING* ]]; } && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m quoted
+  : >"$HOOK_LOG"
+  say env JAVA_TOOL_OPTIONS='-Xmx1g "-Dx=a b"' git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: JAVA_TOOL_OPTIONS holds a -D"* ]] && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m rc
+  : >"$HOOK_LOG"
+  echo 'MAVEN_OPTS=-DskipTests' >"$HOME/.mavenrc"
+  say git push -q origin main
+  ok=0
+  [[ $rc == 0 && $out == *"WARNING: $HOME/.mavenrc exists, and Maven runs it (it can skip tests)."* ]] && logged "$both" || ok=1
+  rm -f "$HOME/.mavenrc"
+  [[ $ok == 0 ]] || return 1
+  g commit -q --no-verify --allow-empty -m skiprc
+  : >"$HOOK_LOG"
+  echo 'MAVEN_OPTS=-DskipTests' >"$HOME/.mavenrc"
+  say env MAVEN_SKIP_RC=1 git push -q origin main # no rc-file warning at all
+  [[ $rc == 0 && $out != *"mavenrc"* ]] && logged "$both" || ok=1
+  rm -f "$HOME/.mavenrc"
+  [[ $ok == 0 ]] || return 1
+  g commit -q --no-verify --allow-empty -m props
+  : >"$HOOK_LOG"
+  settings_xml props
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: $HOME/.m2/settings.xml sets profile properties (they can skip tests)."* ]] && logged "$both" || ok=1
+  rm -f "$HOME/.m2/settings.xml"
+  [[ $ok == 0 ]] || return 1
+  g commit -q --no-verify --allow-empty -m benign
+  : >"$HOOK_LOG"
+  settings_xml benign
+  say git push -q origin main # a mirror, and properties only in a comment
+  [[ $rc == 0 && $out != *"settings.xml"* ]] && logged "$both" || ok=1
+  rm -f "$HOME/.m2/settings.xml"
+  [[ $ok == 0 ]]
+}
+case_pre_push_outer_flags() { # a push from inside make -i, or a MAKEFILES .IGNORE:, still fails
+  fresh
+  install
+  g commit -q --no-verify --allow-empty -m two
+  local before
+  before=$(g rev-parse origin/main)
+  say env FAIL=test MAKEFLAGS=i git push -q origin main
+  [[ $rc != 0 && $out == *"INTENDED test FAILURE"* && $(g rev-parse origin/main) == "$before" ]] || return 1
+  echo .IGNORE: >"$work/ignore.mk"
+  say env FAIL=test MAKEFILES="$work/ignore.mk" git push -q origin main
+  [[ $rc != 0 && $out == *"INTENDED test FAILURE"* && $(g rev-parse origin/main) == "$before" ]] || return 1
+  say env FAIL=test GNUMAKEFLAGS=-i git push -q origin main # read by GNU make 4
+  [[ $rc != 0 && $out == *"INTENDED test FAILURE"* && $(g rev-parse origin/main) == "$before" ]]
 }
 case_part_status() { # a failing gate part ends the hook; a failing notice never does
   fresh
@@ -603,6 +704,12 @@ case_gate_records_and_skips() {
   [[ $rc == 0 && $out == "pre-push: HEAD $(g rev-parse HEAD | cut -c1-12) passed 'make gate' on this clean tree; skipping the gate" &&
     $(g rev-parse origin/main) == $(g rev-parse HEAD) ]] && logged ""
 }
+case_gate_skip_ignores_only() { # the record-skip path stays silent about ONLY
+  gated || return 1
+  say env ONLY=x git push -q origin main
+  [[ $rc == 0 && $out == "pre-push: HEAD $(g rev-parse HEAD | cut -c1-12) passed 'make gate' on this clean tree; skipping the gate" ]] &&
+    logged ""
+}
 case_gate_pre_push_reruns() { # another commit, a dirty tree, assume-unchanged, skip-worktree
   local kind
   for kind in commit untracked assume skip; do
@@ -630,6 +737,29 @@ case_gate_only() {
   run make -s -f Makefile -f "$root/make/common.mk" gate ONLY=x
   [[ $rc != 0 && $err == *"unset ONLY"* ]] && logged "" && [[ ! -e $(rec) ]]
 }
+# sysrc: a machine-wide mavenrc that exists, which the cases cannot move; the
+# assertions that need none say so and skip when it is there.
+sysrc() {
+  local f
+  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
+    [[ ! -e $f ]] || { echo "$f"; return 0; }
+  done
+  return 1
+}
+unwarned() { # true, with a SKIP line, when a machine-wide mavenrc makes "no warning" untestable
+  local f
+  f=$(sysrc) || return 1
+  echo "SKIP: $f exists; not asserting the absence of a warning" >&2
+}
+settings_xml() { # settings_xml KIND: writes $HOME/.m2/settings.xml
+  mkdir -p "$HOME/.m2"
+  case $1 in
+    props) echo '<settings><profiles><profile><id>p</id><properties><skipTests>true</skipTests></properties></profile></profiles></settings>' ;;
+    benign) printf '%s\n' '<settings><mirrors><mirror><id>m</id><url>https://example.invalid</url></mirror></mirrors>' \
+      '<!-- <profiles><profile><id>p</id>' '<properties><skipTests>true</skipTests></properties>' \
+      '</profile></profiles> -->' '</settings>' ;;
+  esac >"$HOME/.m2/settings.xml"
+}
 norecord() { # norecord REASON [VAR=value...]: passes, runs both stages, records nothing
   local why=$1
   shift
@@ -654,13 +784,45 @@ case_gate_environment() { # variables that can skip or deselect tests
   norecord "MAVEN_ARGS is set (it can skip tests)" MAVEN_ARGS=-q || return 1
   : >"$HOOK_LOG"
   local var
-  for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS; do
+  for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
     norecord "$var holds a -D (it can skip tests)" "$var=-Dx=y" || return 1
     : >"$HOOK_LOG"
   done
   norecord "PYTEST_ADDOPTS is set (it can deselect tests)" "PYTEST_ADDOPTS=-k x" || return 1
-  gate MAVEN_OPTS=-Xmx1g # no -D: recorded
-  [[ $rc == 0 && $out == "make gate: recorded"* ]]
+  : >"$HOOK_LOG"
+  norecord "JAVA_TOOL_OPTIONS holds a -D (it can skip tests)" 'JAVA_TOOL_OPTIONS=-Xmx1g "-Dx=a b"' || return 1
+  : >"$HOOK_LOG"
+  if ! unwarned; then
+    gate MAVEN_OPTS='-Xmx1g -XX:-DisableExplicitGC' # no option starts with -D: recorded
+    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
+    rm -f "$(rec)"
+    : >"$HOOK_LOG"
+  fi
+  # Maven runs a mavenrc file unless MAVEN_SKIP_RC is non-empty. A machine-wide
+  # one cannot be moved, so it is named first in the reason, as the gate does.
+  local f lead="" ok=0
+  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
+    [[ ! -e $f ]] || lead="$lead$f exists, and Maven runs it (it can skip tests); "
+  done
+  echo 'MAVEN_OPTS=-DskipTests' >"$HOME/.mavenrc"
+  norecord "$lead$HOME/.mavenrc exists, and Maven runs it (it can skip tests)" || ok=1
+  : >"$HOOK_LOG"
+  gate MAVEN_SKIP_RC=1 # the launcher skips every rc file: recorded
+  [[ $rc == 0 && $out == "make gate: recorded"* ]] || ok=1
+  rm -f "$HOME/.mavenrc" "$(rec)"
+  [[ $ok == 0 ]] || return 1
+  : >"$HOOK_LOG"
+  settings_xml props
+  norecord "${lead}$HOME/.m2/settings.xml sets profile properties (they can skip tests)" || ok=1
+  rm -f "$HOME/.m2/settings.xml"
+  [[ $ok == 0 ]] || return 1
+  : >"$HOOK_LOG"
+  settings_xml benign # a mirror, and properties only in a comment: recorded
+  gate
+  [[ $rc == 0 && ( $out == "make gate: recorded"* || -n $lead ) ]] || ok=1
+  rm -f "$HOME/.m2/settings.xml"
+  [[ -z $lead ]] || echo "SKIP: a machine-wide mavenrc exists; not asserting the benign settings.xml is recorded" >&2
+  [[ $ok == 0 ]]
 }
 case_gate_no_reflog() {
   fresh
@@ -696,6 +858,8 @@ case_gate_outer_flags() { # an outer make -i, or a MAKEFILES .IGNORE:, must not 
   [[ $out == *"INTENDED test FAILURE"* && ! -e $(rec) ]] || return 1
   echo .IGNORE: >"$work/ignore.mk"
   gate FAIL=test MAKEFILES="$work/ignore.mk"
+  [[ $rc != 0 && ! -e $(rec) ]] || return 1
+  gate FAIL=test GNUMAKEFLAGS=-i # read by GNU make 4
   [[ $rc != 0 && ! -e $(rec) ]]
 }
 case_gate_record_directory() {
@@ -747,12 +911,16 @@ t "the rendered hooks are shellcheck-clean" case_shellcheck
 t "switching to and merging a branch runs none of its code" case_switch_runs_nothing
 t "pre-commit blocks a commit when lint-repo fails" case_pre_commit_blocks
 t "pre-commit's gate sees no GIT_INDEX_FILE or GIT_DIR" case_pre_commit_env
+t "pre-commit: outer make flags do not reach lint-repo" case_pre_commit_outer_flags
 t "--no-verify bypasses pre-commit" case_no_verify
 t "pre-push runs lint-repo and test, and blocks on a failure" case_pre_push
 t "pre-push warns on a ref that is not HEAD and on a dirty tree" case_pre_push_warns
 t "pre-push ignores a deletion-only push" case_pre_push_deletion
 t "pre-push installed directly exits 0 on zero refs" case_pre_push_no_refs
 t "pre-push.devkit with zero refs runs the gate" case_pre_push_side_no_refs
+t "pre-push ignores ONLY and says so" case_pre_push_only
+t "pre-push warns on variables that can deselect tests, and still gates" case_pre_push_environment
+t "pre-push: outer make flags do not reach the stages" case_pre_push_outer_flags
 t "a failing gate part fails the hook, a failing notice never does" case_part_status
 t "a copy does nothing outside a devkit project" case_outside_project
 t "the pin notice speaks on a mismatch" case_pin_mismatch
@@ -782,6 +950,7 @@ t "a side path install did not write is refused" case_side_refused
 t "an orphaned side copy goes when a moved-aside copy is ours" case_moved_aside_orphan
 
 t "make gate records a clean passing HEAD, and pre-push then skips its gate" case_gate_records_and_skips
+t "pre-push skip stays silent under ONLY" case_gate_skip_ignores_only
 t "pre-push still gates after another commit, and on any not strictly clean tree" case_gate_pre_push_reruns
 t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
 t "make gate refuses ONLY, also on the make command line" case_gate_only

@@ -20,4 +20,4 @@ endif
 .PHONY: test
 # Cleared, an outer make's flags, and its VAR=value as an override, cannot reach a fixture's make.
 test: ## run devkit's tests (tests/run.sh), the push gate's second stage
-	@env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL -u MAKEFILES tests/run.sh
+	@env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKELEVEL -u MAKEFILES tests/run.sh

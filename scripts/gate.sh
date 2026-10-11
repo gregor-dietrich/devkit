@@ -10,7 +10,8 @@
 #     HEAD reflog), since a run that moved HEAD verified no single commit;
 #   - the tree was strictly clean at the start and at the end, so the verdict
 #     is about the commit, not about edits or untracked files;
-#   - no environment variable that can skip or deselect tests is set.
+#   - no environment variable, mavenrc file or settings.xml profile property
+#     that can skip or deselect tests is set.
 # Recording never changes the exit status: it is the stages'. bash 3.2 (macOS).
 set -uo pipefail
 
@@ -31,6 +32,29 @@ strictly_clean() {
     [[ -z "$status" ]] || return 1
     files=$(git ls-files -v -- :/ 2> /dev/null) || return 1
     ! grep -q '^[a-zS]' <<< "$files"
+}
+
+# strip_comments TEXT: TEXT without its XML comments (<!-- ... -->, which may
+# span lines); an unterminated comment drops the rest. Duplicated in
+# scripts/hooks/pre-push.sh. Pure parameter expansion, for bash 3.2.
+strip_comments() {
+    local s=$1 kept=""
+    while [[ "$s" == *'<!--'* ]]; do
+        kept="$kept${s%%'<!--'*}"
+        s=${s#*'<!--'}
+        if [[ "$s" == *'-->'* ]]; then s=${s#*'-->'}; else s=""; fi
+    done
+    printf '%s' "$kept$s"
+}
+
+# sets_properties FILE: FILE is a readable file that, comments aside, holds a
+# <properties element. In a Maven settings.xml that occurs only in a profile.
+sets_properties() {
+    local content
+    [[ -f "$1" && -r "$1" ]] || return 1
+    content=$(<"$1") || return 1
+    content=$(strip_comments "$content")
+    [[ "$content" == *'<properties'* ]]
 }
 
 reasons=""
@@ -55,18 +79,30 @@ if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
 else
     why "this is not a git work tree"
 fi
+# These variables and files are listed again in scripts/hooks/pre-push.sh, which
+# warns on the same ones; keep the two in step.
 [[ -z "${MAVEN_ARGS-}" ]] || why "MAVEN_ARGS is set (it can skip tests)"
-for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS; do # JVM options: -D sets a system property
-    [[ "${!var-}" != *-D* ]] || why "$var holds a -D (it can skip tests)"
+# JVM options: -D sets a system property. Only an option that starts with -D,
+# quoted or not, so a negated -XX:-D... flag does not count.
+for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
+    [[ " ${!var-}" != *[[:space:]\"\']-D* ]] || why "$var holds a -D (it can skip tests)"
 done
 [[ -z "${PYTEST_ADDOPTS-}" ]] || why "PYTEST_ADDOPTS is set (it can deselect tests)"
+# Maven's launcher sources these shell files unless MAVEN_SKIP_RC is non-empty,
+# and a settings.xml profile's <properties> can set skipTests like a -D.
+if [[ -z "${MAVEN_SKIP_RC-}" ]]; then
+    for rcfile in /usr/local/etc/mavenrc /etc/mavenrc "${HOME-}/.mavenrc"; do
+        [[ ! -e "$rcfile" ]] || why "$rcfile exists, and Maven runs it (it can skip tests)"
+    done
+fi
+! sets_properties "${HOME-}/.m2/settings.xml" || why "${HOME-}/.m2/settings.xml sets profile properties (they can skip tests)"
 # Beside the record (same filesystem and timestamp granularity): the files
 # touched after it are what moved HEAD during the run.
 [[ -n "$reasons" ]] || marker=$(mktemp "$record.XXXXXX") || why "no marker could be created"
 
 # Cleared, an outer `make -i/-k/-n/-o` cannot reach a stage, nor can makefiles
 # MAKEFILES adds. A command-line VAR=value still reaches the stages' environment.
-env -u MAKEFLAGS -u MFLAGS -u MAKELEVEL -u MAKEFILES make --no-print-directory lint-repo test
+env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKELEVEL -u MAKEFILES make --no-print-directory lint-repo test
 rc=$?
 
 if [[ "$rc" -eq 0 && -z "$reasons" ]]; then

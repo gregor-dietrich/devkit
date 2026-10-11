@@ -11,7 +11,10 @@ set -euo pipefail
 unset vaadin_version local_repo resolve frontend
 
 check=$(cd "$(dirname "$0")/.." && pwd)/scripts/java/check_frontend_deps.py
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
 mkdir "$proj"

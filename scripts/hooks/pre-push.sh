@@ -9,6 +9,11 @@
 # gate for a HEAD that `make gate` passed (scripts/gate.sh recorded it) while
 # the tree is still strictly clean.
 #
+# It never narrows the gate: it unsets ONLY and clears the outer make's flags,
+# as `make gate` does. It warns, but does not refuse, on the variables and files
+# `make gate` will not record under, since those are often set on purpose. That
+# list is duplicated in scripts/gate.sh.
+#
 # git sends the ref lines on one stdin, which an up-to-date push leaves empty.
 # Installed as `pre-push` itself, zero lines therefore means nothing to push.
 # Under any other name (pre-push.devkit called from someone else's hook, or
@@ -25,6 +30,29 @@ strictly_clean() {
     [[ -z "$status" ]] || return 1
     files="$(git ls-files -v -- :/ 2> /dev/null)" || return 1
     ! grep -q '^[a-zS]' <<< "$files"
+}
+
+# strip_comments TEXT: TEXT without its XML comments (<!-- ... -->, which may
+# span lines); an unterminated comment drops the rest. Duplicated in
+# scripts/gate.sh. Pure parameter expansion, for bash 3.2.
+strip_comments() {
+    local s=$1 kept=""
+    while [[ "$s" == *'<!--'* ]]; do
+        kept="$kept${s%%'<!--'*}"
+        s=${s#*'<!--'}
+        if [[ "$s" == *'-->'* ]]; then s=${s#*'-->'}; else s=""; fi
+    done
+    printf '%s' "$kept$s"
+}
+
+# sets_properties FILE: FILE is a readable file that, comments aside, holds a
+# <properties element. In a Maven settings.xml that occurs only in a profile.
+sets_properties() {
+    local content
+    [[ -f "$1" && -r "$1" ]] || return 1
+    content=$(<"$1") || return 1
+    content=$(strip_comments "$content")
+    [[ "$content" == *'<properties'* ]]
 }
 
 root="$(git rev-parse --show-toplevel)" || exit 1
@@ -75,7 +103,26 @@ if [[ -n "$head" && "$recorded" == "$head" ]] && strictly_clean; then
     exit 0
 fi
 
+# ONLY reaches every recipe (common.mk exports it): an ambient one would narrow
+# the gate unseen, so the hook says so and runs the whole gate.
+[[ -z "${ONLY-}" ]] || echo "pre-push: ignoring ONLY (it is '$ONLY'); the push gate is never narrowed"
+[[ -z "${MAVEN_ARGS-}" ]] || echo "WARNING: MAVEN_ARGS is set (it can skip tests)."
+for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do # as in gate.sh
+    [[ " ${!var-}" != *[[:space:]\"\']-D* ]] || echo "WARNING: $var holds a -D (it can skip tests)."
+done
+[[ -z "${PYTEST_ADDOPTS-}" ]] || echo "WARNING: PYTEST_ADDOPTS is set (it can deselect tests)."
+# Maven sources these unless MAVEN_SKIP_RC is non-empty; as in gate.sh.
+if [[ -z "${MAVEN_SKIP_RC-}" ]]; then
+    for rcfile in /usr/local/etc/mavenrc /etc/mavenrc "${HOME-}/.mavenrc"; do
+        [[ ! -e "$rcfile" ]] || echo "WARNING: $rcfile exists, and Maven runs it (it can skip tests)."
+    done
+fi
+! sets_properties "${HOME-}/.m2/settings.xml" || echo "WARNING: ${HOME-}/.m2/settings.xml sets profile properties (they can skip tests)."
+
 echo "pre-push: make lint-repo test (skip once with 'git push --no-verify')"
+# A push from inside a make recipe hands that make's flags down in MAKEFLAGS;
+# GNU make 4 also reads them from GNUMAKEFLAGS.
+unset ONLY MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 # stdin carried git's ref lines, read above; /dev/null keeps a child that
 # reads stdin from waiting on the terminal.
 exec make --no-print-directory lint-repo test < /dev/null

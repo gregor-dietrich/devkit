@@ -5,7 +5,10 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars)

@@ -18,4 +18,8 @@ done < <(git rev-parse --local-env-vars)
 cd "$root" || exit 1
 
 echo "pre-commit: make lint-repo (skip once with 'git commit --no-verify')"
+# A commit from inside a make recipe hands that make's flags down in MAKEFLAGS
+# (GNU make 4 also reads GNUMAKEFLAGS): an outer -i, -k or -n would let a
+# failing stage pass.
+unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 exec make --no-print-directory lint-repo < /dev/null

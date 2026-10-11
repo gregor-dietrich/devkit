@@ -443,23 +443,38 @@ one is missing or stale. A hook it did not write is never overwritten.
   the work tree's make targets, as a `make` there would. `pre-push` gates
   the work tree at HEAD, not the pushed commits, and says so when they
   differ or the tree is dirty (unless `make gate` verified HEAD, below).
+- `pre-commit` runs `make lint-repo` with `MAKEFLAGS`, `MFLAGS`,
+  `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so a commit from inside
+  a make recipe cannot let a failing stage pass.
+- Neither `ONLY` nor an outer make's flags narrow `pre-push`'s gate: it runs
+  `make lint-repo test` with `ONLY` unset (it says so) and `MAKEFLAGS`,
+  `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, as
+  `make gate` does. It warns on, but still runs under, `MAVEN_ARGS`,
+  `PYTEST_ADDOPTS`, an option starting with `-D` (quoted or not) in
+  `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` or `_JAVA_OPTIONS`,
+  a mavenrc file Maven runs (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or
+  `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a `~/.m2/settings.xml`
+  that defines profile properties (`<properties>` outside XML comments),
+  which are often set on purpose.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
-  `MFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer `make -i`,
-  `-k`, `-n` or `-o` cannot reach a stage (a command-line `VAR=value`
-  still reaches the stages' environment), and refuses `ONLY`. Before the
-  stages it removes the old record. When they pass, it records HEAD in
-  `git rev-parse --git-path devkit-verified-head` (per worktree), but only
+  `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
+  `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
+  `VAR=value` still reaches the stages' environment), and refuses `ONLY`.
+  Before the stages it removes the old record. When they pass, it records HEAD
+  in `git rev-parse --git-path devkit-verified-head` (per worktree), but only
   if the project is the git top level, HEAD has a commit, the tree was
-  strictly clean at the start and at the end (no change, no untracked
-  file, no dirty submodule, no assume-unchanged or skip-worktree entry;
-  ignored files are fine), HEAD did not move during the run (detected
-  through HEAD and its reflog, so a move away and back counts, and no
-  reflog means no record), the ref backend is not reftable, and none of
-  `MAVEN_ARGS`, `PYTEST_ADDOPTS` or a `-D` in `MAVEN_OPTS`,
-  `JAVA_TOOL_OPTIONS` or `JDK_JAVA_OPTIONS` is set. Recording never
-  changes the exit status, and a passing run that records nothing says
-  why. `pre-push` skips its gate only while HEAD equals the record and
-  the tree is still strictly clean.
+  strictly clean at the start and at the end (no change, no untracked file, no
+  dirty submodule, no assume-unchanged or skip-worktree entry; ignored files
+  are fine), HEAD did not move during the run (detected through HEAD and its
+  reflog, so a move away and back counts, and no reflog means no record), the
+  ref backend is not reftable, and none of `MAVEN_ARGS`, `PYTEST_ADDOPTS`,
+  an option starting with `-D` (quoted or not) in `MAVEN_OPTS`,
+  `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` or `_JAVA_OPTIONS`, a mavenrc file
+  Maven runs (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`,
+  unless `MAVEN_SKIP_RC` is set) and a `~/.m2/settings.xml` that defines
+  profile properties is present. Recording never changes the exit status, and
+  a passing run that records nothing says why. `pre-push` skips its gate only
+  while HEAD equals the record and the tree is still strictly clean.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.

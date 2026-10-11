@@ -15,7 +15,8 @@
 #          tests/java_clean_test.sh, tests/duplication_test.sh and
 #          tests/markdown_isolation_test.sh;
 #          make lint-repo, not this, gates devkit's own tree. Needs git,
-#          make, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
+#          make, shellcheck, bash >= 4 (shopt globstar; macOS ships 3.2),
+#          procps (pgrep, ps), tar, sha256sum or shasum,
 #          python3 >= 3.11, and node (at or above engines.node in
 #          markdown/package.json and jscpd/package.json) with npm, which
 #          installs markdownlint-cli and jscpd from the npm registry on
@@ -71,6 +72,10 @@
 #          installs jscpd from the npm registry; the fixtures hold no Markdown,
 #          so lint-md does not run markdownlint.
 set -euo pipefail
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "ERROR: tests/run.sh needs bash 4 or later (globstar); this is bash $BASH_VERSION." >&2
+  exit 1
+fi
 shopt -s globstar
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -273,18 +278,19 @@ EOF
 }
 
 secret_negatives() { # each scan of the real gitleaks reads what it should
-  local leak proj blob
+  local leak append proj blob
   # Built here, so this file holds no token; edited() leaves the change unstaged.
   leak="gh""p_$(printf '%s' {z..a} {9..0})"
-  negative secret lint "leaks found: 1" Makefile "\$a # $leak"
+  append="\$s/\$/\\n# $leak/" # a last line holding it: s, since BSD sed has no one-line a
+  negative secret lint "leaks found: 1" Makefile "$append"
   proj=$work/negative-secret-committed
-  edited "$proj" Makefile "\$a # $leak"
+  edited "$proj" Makefile "$append"
   git -C "$proj" commit -q -am leak
   check "java-monolith: a committed secret fails make lint, found in history" \
     make_says fail "$proj" lint "leaks found: 1" \
     "Fingerprint: $(git -C "$proj" rev-parse HEAD):Makefile:github-pat:"
   proj=$work/negative-secret-staged
-  edited "$proj" Makefile "\$a # $leak"
+  edited "$proj" Makefile "$append"
   git -C "$proj" add Makefile
   check "java-monolith: a staged secret fails make lint" \
     make_says fail "$proj" lint "leaks found: 1" "Fingerprint: Makefile:github-pat:"
@@ -409,7 +415,7 @@ py_vulnerable() {
 py_audited() {
   local dir=$work/py-audited helper=$work/py-audited/libs/helper
   py_copy single audited "" pyproject.toml \
-    's/^dependencies = \[\]/dependencies = ["six", "helper"]/; /^package = false$/a [tool.uv.sources]\nhelper = { path = "libs/helper" }' &&
+    's/^dependencies = \[\]/dependencies = ["six", "helper"]/; s|^package = false$|&\n[tool.uv.sources]\nhelper = { path = "libs/helper" }|' &&
     mkdir -p "$helper/src/helper" && touch "$helper/src/helper/__init__.py" &&
     sed 's/"devkit-core"/"helper"/; s/^dependencies = \[\]/dependencies = ["attrs"]/' \
       "$root/tests/fixtures/python-uv-workspace/packages/core/pyproject.toml" >"$helper/pyproject.toml" &&

@@ -7,7 +7,10 @@
 set -euo pipefail
 
 script=$(cd "$(dirname "$0")/.." && pwd)/scripts/python/uv_project.py
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
 mkdir "$proj"

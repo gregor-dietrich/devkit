@@ -6,7 +6,10 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars)
@@ -104,6 +107,7 @@ holds() {
   fi
 }
 count() { [[ $(grep -c -F -- "$2" "$LOG/$1" 2>/dev/null) == "$3" ]]; } # count LOG TEXT N
+runs() { local n && n=$(wc -l <"$LOG/mdl") && echo "$((n))"; } # runs of node as the linter; BSD wc pads
 installs() { compgen -G "$tools/markdownlint-*" || :; } # the installed closures
 installed() { # one closure at tools/markdownlint-<16 hex>, with its markdownlint
   [[ $(installs) =~ /markdownlint-[0-9a-f]{16}$ && -x $(installs)/node_modules/.bin/markdownlint ]]
@@ -207,7 +211,7 @@ holds "the default group runs once with the project's config" \
 holds "each profile runs once with its config" \
   count mdl "$proj | $lint $mods .claude/.markdownlint.jsonc .agents/c.md |" 1
 holds "a profile gets its own files" count mdl "$proj | $lint $mods .claude/.markdownlint.jsonc .claude/a.md .claude/sub/b.md |" 1
-holds "one run per group, plus the controls" [ "$(wc -l <"$LOG/mdl")" = 4 ]
+holds "one run per group, plus the controls" [ "$(runs)" = 4 ]
 printf '[markdown.profiles]\n"docs" = ".claude/.markdownlint.jsonc"\n"docs/agents" = "docs/agents/.markdownlint.jsonc"\n' >"$proj/devkit.toml"
 expect "nested subtrees pass" 0 -- "lint-md: 6 Markdown files checked."
 holds "the longest subtree wins" \
@@ -227,7 +231,7 @@ LINT_RC=1 LINT_RC_FOR=.claude/.markdownlint.jsonc expect "findings in one group 
 rm "$LOG/mdl"
 LINT_RC=4 LINT_RC_FOR=$proj/.markdownlint.jsonc expect "an error in the default group fails lint-md" 1 -- \
   "lint-md: markdownlint check FAILED; see the findings above."
-holds "the groups after a failing one still run" [ "$(wc -l <"$LOG/mdl")" = 3 ]
+holds "the groups after a failing one still run" [ "$(runs)" = 3 ]
 
 # devkit.toml errors: one ERROR line each, no traceback (expect checks that).
 profile_error() { # profile_error LABEL TOML ERROR
@@ -263,14 +267,20 @@ expect "no devkit.toml behaves as without profiles" 0 -- "lint-md: 6 Markdown fi
 printf '[pins]\nextra = []\n' >"$proj/devkit.toml"
 rm "$LOG/mdl"
 expect "a devkit.toml without [markdown] behaves as without profiles" 0 -- "lint-md: 6 Markdown files checked."
-holds "all files run in one group" [ "$(wc -l <"$LOG/mdl")" = 2 ]
+holds "all files run in one group" [ "$(runs)" = 2 ]
 
-# A file name that is not UTF-8 reaches node byte for byte.
+# A file name that is not UTF-8 reaches node byte for byte. APFS refuses such
+# names, so the case is skipped, visibly, where the file system does.
 latin1=$(printf 'r\xe9.md')
-project README.md ".claude/$latin1"
-printf '{}\n' >"$proj/.claude/.markdownlint.jsonc"
-printf '[markdown.profiles]\n".claude" = ".claude/.markdownlint.jsonc"\n' >"$proj/devkit.toml"
-expect "a file name that is not UTF-8 passes" 0 -- "lint-md: 2 Markdown files checked."
-holds "it reaches node unchanged" count mdl "$proj | $lint $mods .claude/.markdownlint.jsonc $(printf %q ".claude/$latin1") |" 1
+if (: >"$work/$latin1") 2>/dev/null; then
+  rm -f "$work/$latin1"
+  project README.md ".claude/$latin1"
+  printf '{}\n' >"$proj/.claude/.markdownlint.jsonc"
+  printf '[markdown.profiles]\n".claude" = ".claude/.markdownlint.jsonc"\n' >"$proj/devkit.toml"
+  expect "a file name that is not UTF-8 passes" 0 -- "lint-md: 2 Markdown files checked."
+  holds "it reaches node unchanged" count mdl "$proj | $lint $mods .claude/.markdownlint.jsonc $(printf %q ".claude/$latin1") |" 1
+else
+  echo "SKIP a file name that is not UTF-8 (this file system refuses such names)"
+fi
 
 [[ $fails == 0 ]]

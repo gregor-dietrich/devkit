@@ -8,7 +8,10 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 check=$root/scripts/java/parent_check.py
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
 version=$(sed -n 's|^  <version>\(.*\)</version>$|\1|p' "$root/java/parent/pom.xml")
@@ -34,7 +37,9 @@ project() {
 
 # module BODY: add module app-api, whose pom is BODY
 module() {
-  sed -i 's|</project>|<modules><module>app-api</module></modules></project>|' "$proj/pom.xml"
+  # no sed -i: its argument differs between GNU and BSD
+  sed 's|</project>|<modules><module>app-api</module></modules></project>|' "$proj/pom.xml" >"$proj/pom.xml.new"
+  mv "$proj/pom.xml.new" "$proj/pom.xml"
   mkdir -p "$proj/app-api"
   printf '<project xmlns="http://maven.apache.org/POM/4.0.0">%s</project>\n' "$1" >"$proj/app-api/pom.xml"
 }

@@ -234,6 +234,19 @@ the includes moves the line directly after them, before any `$(shell ...)`,
 to keep its own shell; `make SHELL=/bin/sh <target>` runs one target under
 the old shell.
 
+Run `make hooks` to refresh the git hooks, so `pre-push` ignores an `ONLY`
+left in the shell, `pre-commit` and `pre-push` keep an outer make's flags (a
+commit or push from inside a make recipe, or an exported `MAKEFILES` or
+`GNUMAKEFLAGS`) from reaching their gates, and `pre-push` warns on variables
+that can deselect tests (`MAVEN_ARGS`, `PYTEST_ADDOPTS`, a `-D` option in a
+JVM options variable; a negated `-XX:-D…` flag no longer counts, for
+`make gate` either); `make check` warns until then. `pre-push` also warns
+on, and `make gate` no longer records under, a mavenrc file Maven runs
+(`/usr/local/etc/mavenrc`, `/etc/mavenrc`, `~/.mavenrc`) or a
+`~/.m2/settings.xml` with profile properties. Setting `MAVEN_SKIP_RC=1`
+(for the mavenrc files) or moving those properties out of the settings file
+restores the record.
+
 ### Upgrading from v0.4.x
 
 v0.5.0 has `lint-md` read exactly one markdownlint configuration per file

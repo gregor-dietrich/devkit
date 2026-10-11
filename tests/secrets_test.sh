@@ -7,7 +7,10 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) GITLEAKS_CONFIG GITLEAKS_CONFIG_TOML
@@ -213,7 +216,7 @@ case_pins() { # every arm of the shipped script pins a platform and a sha256
   arms=$(sed -n '/^case "$(uname -s)\/$(uname -m)" in$/,/^esac$/p' "$root/scripts/secrets.sh")
   [[ $(grep -c ') platform=' <<<"$arms") == 4 &&
     $(grep -cE '^  [A-Za-z0-9_/ |]+\) platform=[a-z0-9_]+ sha256=[0-9a-f]{64} ;;$' <<<"$arms") == 4 &&
-    $(grep -c '^  \*) die ' <<<"$arms") == 1 && $(wc -l <<<"$arms") == 7 ]] &&
+    $(grep -c '^  \*) die ' <<<"$arms") == 1 && $(wc -l <<<"$arms") -eq 7 ]] &&
     [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 case_sha256_of() { # the concatenation, in order
