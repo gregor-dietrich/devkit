@@ -57,4 +57,11 @@ printf '#!/bin/bash\nexit 127\n' >"$work/bin/python3"
 want="ERROR: devkit's Python helpers need python3 3.11 or later; found no working python3 on PATH."
 expect "lint-pins stops at the floor without a working python3" 1 "$root/scripts/pins.sh"
 
+# A ./mvnw that launches a maven-wrapper jar stops get_maven.sh before the floor.
+echo 'WRAPPER_LAUNCHER=org.apache.maven.wrapper.MavenWrapperMain' >"$proj/mvnw"
+want="ERROR: ./mvnw launches a maven-wrapper jar, which ignores MAVEN_ARGS. Exiting."
+# shellcheck disable=SC2016 # expanded by the inner bash
+expect "get_maven.sh refuses a wrapper-jar ./mvnw, before the floor" 15 \
+  bash -c 'cd "$PROJECT_ROOT" && . "$DEVKIT/scripts/lib/get_maven.sh"'
+
 [[ $fails == 0 ]]

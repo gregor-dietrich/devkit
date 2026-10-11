@@ -12,6 +12,7 @@ devkit is written against this page; change it here first.
 | `Makefile` | Profile variables, the two includes, project-only targets |
 | `pom.xml` | Maven: the root pom inherits devkit's parent POM, with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
 | `.mvn/jvm.config` | Maven: the `jdk.compiler` exports and opens Error Prone needs |
+| `mvnw`, `.mvn/wrapper/maven-wrapper.properties` | Maven, optional: the Maven wrapper, as an `mvnw` that launches no maven-wrapper jar (`-Dtype=only-script`); see Parent POM |
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
 | `checkstyle-suppressions.xml` | Maven: the project's Checkstyle exemptions, in every module, the root included; required (`<suppressions/>` when none) |
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
@@ -483,8 +484,16 @@ inherit it, and Maven reads it through the link:
   link is the only way to reach it.
 - Every target that runs Maven (`check`, `install`, `lint`, `format`,
   `test`, `coverage`, `audit`, `clean`, and a consumer's own script that
-  sources `scripts/lib/get_maven.sh`) first runs `python3_floor`, which
-  exits 13 below python3 3.11, and then `scripts/java/parent_check.py`.
+  sources `scripts/lib/get_maven.sh`) fails before choosing Maven, with
+  exit status 15, on a `./mvnw` that launches a maven-wrapper jar (any
+  `distributionType` but `only-script`): that launcher ignores
+  `MAVEN_ARGS`, which `mvn`'s and an only-script wrapper's read, so a
+  profile requested there would silently not apply. It fails even where
+  `mvn` would be picked or `MAVEN_ARGS` is unset, so that every machine
+  fails at the bump instead of a later build that first runs `./mvnw`
+  with a profile. It then picks `mvn` from `PATH`, or `./mvnw` when `mvn` is
+  missing or older than 3.9.9, runs `python3_floor`, which exits 13 below
+  python3 3.11, and then `scripts/java/parent_check.py`.
   That fails, with one `ERROR` line and exit status 14, when
   - the root pom's `<parent>` is not devkit's;
   - its `<relativePath>` is not exactly `.devkit/java/parent/pom.xml`;
@@ -528,6 +537,11 @@ inherit it, and Maven reads it through the link:
   | `skipITs` | `true` |
   | `nullaway.annotated.packages` | `${project.groupId}` |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
+
+- `MAVEN_ARGS` reaches every Maven call of the targets above, under
+  either launcher `get_maven.sh` picks: `MAVEN_ARGS=-Pproduction make
+  install` applies a profile, and `MAVEN_ARGS=-DskipITs=false make test`
+  runs the integration tests once.
 
 - It commits the files the table above lists. `.mvn/jvm.config` carries
   the `jdk.compiler` `--add-exports` and `--add-opens` lines as devkit's

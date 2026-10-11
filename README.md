@@ -205,6 +205,21 @@ so a bump that edits only `devkit.toml`, as Renovate's does, needs that one
 commit on its pull request. `./devkitw self-check` is gone; `make check` no
 longer warns about the wrapper.
 
+A Maven project whose `./mvnw` launches a maven-wrapper jar
+(any `distributionType` but `only-script`) regenerates it script-only, since
+every target that runs Maven now fails on it: that launcher ignores
+`MAVEN_ARGS`, so a profile such as `MAVEN_ARGS=-Pproduction` was silently
+dropped wherever `./mvnw` ran instead of `mvn`. Run
+
+```sh
+./mvnw -N org.apache.maven.plugins:maven-wrapper-plugin:3.3.4:wrapper -Dtype=only-script
+```
+
+which keeps the wrapper's Maven version and removes `maven-wrapper.jar`
+and `MavenWrapperDownloader.java`, then restore a `distributionSha256Sum`
+line in `.mvn/wrapper/maven-wrapper.properties` if the old one had it, and
+commit the result.
+
 ### Upgrading from v0.4.x
 
 v0.5.0 has `lint-md` read exactly one markdownlint configuration per file

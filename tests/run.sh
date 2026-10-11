@@ -30,7 +30,9 @@
 #          expect lint or test to fail for that reason; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
-#          latter too, before Maven runs.
+#          latter too, before Maven runs. Expect test to fail on a profile
+#          MAVEN_ARGS requests, under mvn and under a script-only ./mvnw, and
+#          check to fail on a ./mvnw that launches a maven-wrapper jar.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3, curl, tar, node with npm and the
@@ -230,6 +232,40 @@ negatives() {
     make_says fail "$proj" check "checkstyle-project.xml"
   NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
     make_says fail "$work/java-monolith" audit "NVD_API_KEY not set"
+  wrapper_checks
+}
+
+wrapped() { # wrapped DIR TYPE: DIR gets ./mvnw of distribution TYPE, for Maven 3.9.9, from the plugin get_maven.sh names
+  local plugin
+  plugin=$(grep -o 'org\.apache\.maven\.plugins:maven-wrapper-plugin:[0-9.]*' "$root/scripts/lib/get_maven.sh")
+  (cd "$1" && ./devkitw path >/dev/null && mvn -B -q -N "$plugin:wrapper" -Dtype="$2" -Dmaven=3.9.9)
+}
+
+# A profile MAVEN_ARGS requests applies under either launcher get_maven.sh picks. The probe profile
+# asks for a release no javac knows, so make test fails at compile only when the profile applies
+# (javac's own message is localized). A ./mvnw that launches a wrapper jar, which ignores
+# MAVEN_ARGS, fails make check.
+wrapper_checks() {
+  local proj=$work/profile old=$work/old-mvn jar=$work/negative-wrapper-jar
+  local compiling=("Fatal error compiling" 99)
+  edited "$proj" pom.xml \
+    's|^</project>|  <profiles><profile><id>probe</id><properties><maven.compiler.release>99</maven.compiler.release></properties></profile></profiles>\n&|'
+  check "java-monolith: a script-only ./mvnw is generated" wrapped "$proj" only-script
+  MAVEN_ARGS=-Pprobe check "java-monolith: a profile in MAVEN_ARGS applies under mvn" \
+    make_says fail "$proj" test "${compiling[@]}"
+  # get_maven.sh passes over an mvn below 3.9.9 for ./mvnw; this one fails any build it is given.
+  mkdir "$old"
+  cat >"$old/mvn" <<'EOF'
+#!/bin/sh
+[ "$*" = "-B -version" ] && echo "Apache Maven 3.0.0" || exit 1
+EOF
+  chmod +x "$old/mvn"
+  PATH=$old:$PATH MAVEN_ARGS=-Pprobe check "java-monolith: a profile in MAVEN_ARGS applies under ./mvnw" \
+    make_says fail "$proj" test "${compiling[@]}"
+  setup "$root/tests/fixtures/java-monolith" "$jar"
+  check "java-monolith: a wrapper-jar ./mvnw is generated" wrapped "$jar" source
+  check "java-monolith: make check fails on a ./mvnw that launches a wrapper jar" \
+    make_says fail "$jar" check "launches a maven-wrapper jar, which ignores MAVEN_ARGS"
 }
 
 secret_negatives() { # each scan of the real gitleaks reads what it should

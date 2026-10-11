@@ -12,6 +12,17 @@ if command -v java &> /dev/null; then
   fi
 fi
 
+# mvn's launcher reads MAVEN_ARGS; a ./mvnw that launches a maven-wrapper jar (any distributionType
+# but only-script) drops it, so a profile there would silently not apply. An only-script ./mvnw execs
+# mvn's. Refused even where mvn is picked or MAVEN_ARGS is unset, so every machine fails at the bump.
+if [[ -f ./mvnw ]] && grep -q MavenWrapperMain ./mvnw; then
+    echo "ERROR: ./mvnw launches a maven-wrapper jar, which ignores MAVEN_ARGS. Exiting."
+    echo "Regenerate it script-only with its own Maven (maven-wrapper.jar and MavenWrapperDownloader.java go):"
+    echo "  ./mvnw -N org.apache.maven.plugins:maven-wrapper-plugin:3.3.4:wrapper -Dtype=only-script"
+    echo "then restore a distributionSha256Sum line in .mvn/wrapper/maven-wrapper.properties if the old one had it, and commit the result; see .devkit/README.md when upgrading from v0.5.x."
+    exit 15
+fi
+
 if ! command -v mvn &> /dev/null; then
     MVN_CMD="./mvnw"
 else
