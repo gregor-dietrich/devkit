@@ -55,7 +55,9 @@ elif [ -z "$cached" ]; then
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
   : "${GIT_SSH_COMMAND:=ssh -o BatchMode=yes -o ConnectTimeout=10}"
-  export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 # fail rather than prompt
+  # Fail rather than prompt. GIT_TERMINAL_PROMPT=0 does not stop git asking an
+  # askpass (GIT_ASKPASS, core.askPass, SSH_ASKPASS); an empty GIT_ASKPASS does.
+  export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
   mkdir -p "$root"
   tmp=$(mktemp -d "$root/.tmp.XXXXXX")
   trap 'rm -rf "$tmp"' EXIT

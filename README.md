@@ -204,7 +204,10 @@ wrapper does. `make lint` now fails until the copy is committed
 (`lint-devkitw`), for this and every later release that changes `devkitw`,
 so a bump that edits only `devkit.toml`, as Renovate's does, needs that one
 commit on its pull request. `./devkitw self-check` is gone; `make check` no
-longer warns about the wrapper.
+longer warns about the wrapper. The new wrapper never asks an askpass
+program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`), so a project whose
+devkit fetch authenticated through one moves the credential into git
+configuration, such as `http.<url>.extraHeader`, or into `~/.netrc`.
 
 A Maven project whose `./mvnw` launches a maven-wrapper jar
 (any `distributionType` but `only-script`) regenerates it script-only, since

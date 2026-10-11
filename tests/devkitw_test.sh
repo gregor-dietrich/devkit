@@ -8,7 +8,7 @@ wrapper=$(cd "$(dirname "$0")/.." && pwd)/devkitw
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # word splitting is intended
-unset $(git rev-parse --local-env-vars) GIT_SSH_COMMAND
+unset $(git rev-parse --local-env-vars) GIT_SSH_COMMAND http_proxy all_proxy ALL_PROXY
 export HOME=$work/home XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid
@@ -59,6 +59,7 @@ rm -f "$l"; ln -sn "$t" "$l"; exec ln "$@"'
 exec git "$@"'
   fake hooks post-checkout 'echo leak; touch "${0%/*}/ran"'
   fake ssh ssh 'echo "$*" >"${0%/*}/args"; exit 255'
+  fake askpass askpass 'touch "${0%/*}/called"'
 }
 
 pin() { # pin URL MIRROR VERSION COMMIT (an empty MIRROR is omitted)
@@ -236,6 +237,29 @@ case_ssh_batch() {
   run_with "$work/ssh" path
   ok_at "$c2" && grep -q 'BatchMode=yes' "$work/ssh/args"
 }
+case_askpass() { # a url that answers 401, and an askpass from every source
+  rm -rf "${cache:?}/$c2"
+  coproc python3 -I -c 'import http.server as h, sys
+class H(h.BaseHTTPRequestHandler):
+    def do_GET(self):
+        open(sys.argv[1], "w").close()
+        self.send_response(401)
+        self.end_headers()
+    def log_message(self, *a): pass
+s = h.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_port, flush=True)
+s.serve_forever()' "$work/hit"
+  # bash unsets COPROC once it reaps a dead server; set -u would then abort
+  local pid=$COPROC_PID fd=${COPROC[0]} port
+  read -r port <&"$fd" || return 1
+  pin "http://127.0.0.1:$port/devkit.git" "" v0.0.2 "$c2"
+  git config --global core.askPass "$work/askpass/askpass"
+  GIT_ASKPASS=$work/askpass/askpass SSH_ASKPASS=$work/askpass/askpass run path
+  git config --global --unset core.askPass
+  kill "$pid"
+  one_line_error && [ -e "$work/hit" ] && [ ! -e "$work/askpass/called" ] &&
+    no_temp_left
+}
 case_version_mismatch() { # c1 is cached as v0.0.1; v0.0.1b tags it too
   pin "file://$bare" "" v0.0.1 "$c1"
   run path
@@ -270,6 +294,7 @@ t "13 a concurrent relink leaves one link and nothing in the cache" \
   case_relink_race
 t "14 neither git hooks nor git's stdout reach the path" case_git_quiet
 t "15 ssh runs in batch mode" case_ssh_batch
+t "15b a rejected credential fails without asking an askpass" case_askpass
 t "16 a cached commit under another version fails until refetched" \
   case_version_mismatch
 

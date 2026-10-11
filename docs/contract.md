@@ -94,6 +94,11 @@ include .devkit/make/java-maven.mk
   no `main` (it does not fall back to the mirror then), every remote
   unreachable or without them, and a `.devkit` that exists and is not a
   symlink. It never falls back to another version.
+- It never prompts, and runs no credential helper or askpass program: an
+  HTTPS remote's credentials come from git configuration such as
+  `http.<url>.extraHeader`, or from `~/.netrc`, and a remote that rejects
+  them counts as unreachable. ssh runs in batch mode unless the
+  environment sets `GIT_SSH_COMMAND`, which then brings its own prompting.
 - `url` and `mirror` are both trusted: whoever can push `main` and tags to
   the remote that answers decides which code runs. Limits: a checkout
   cached by an older `devkitw` is not re-checked, a project's copy of
