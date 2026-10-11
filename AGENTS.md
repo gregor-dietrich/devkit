@@ -13,7 +13,7 @@ break a gate silently.
 | `docs/contract.md` | The consumer contract: what a consumer commits, `devkitw`, the Make targets, scripts, repository gates, git hooks, Maven and uv configuration. Every other file is written against it |
 | `devkitw` | The wrapper a consumer copies verbatim: fetches the pinned commit once per machine, fails closed |
 | `make/` | `common.mk` and the language files `java-maven.mk` and `python-uv.mk` a consumer's `Makefile` includes |
-| `scripts/` | The scripts behind the targets: repository gates and git tooling at the top, `java/`, `python/`, shared helpers in `lib/`, the git hook bodies in `hooks/` |
+| `scripts/` | The scripts behind the targets: repository gates and git tooling at the top (and `closure_audit.*`, devkit's own `make audit`, which no consumer target runs), `java/`, `python/`, shared helpers in `lib/`, the git hook bodies in `hooks/` |
 | `java/` | The shared Maven gate configurations (`config/`) and the parent POM that applies them (`parent/`) |
 | `markdown/`, `jscpd/` | The pinned Node closures of markdownlint (with devkit's default profile) and jscpd |
 | `tests/` | `run.sh`, the shell tests it runs, and the consumer fixtures in `fixtures/` |
@@ -41,6 +41,9 @@ break a gate silently.
   `scripts/lib/sha256.sh`, `scripts/lib/sealed_dir.sh`,
   `scripts/secrets.sh`, `scripts/python/uv_project.py`, which writes the
   uv bootstrap's hashes, and the lockfiles in `markdown/` and `jscpd/`);
+  what decides whether an advisory against them is silenced
+  (`scripts/closure_audit.sh`, `scripts/closure_audit.py` and each
+  closure's `audit-ignore`);
   the git hooks and the record that lets `pre-push` skip
   (`scripts/hooks/`, `scripts/hooks.sh`, `scripts/gate.sh`); and
   `.gitea/workflows/`.
@@ -56,6 +59,12 @@ break a gate silently.
   shell part needs the npm registry on first use; the java and python
   parts build every fixture in a fresh cache and need the network on every
   run.
+- `make audit` runs `npm audit` over the `markdown/` and `jscpd/`
+  lockfiles; it needs the network, and neither `lint-repo`, `test` nor
+  `gate` runs it. CI's `audit` job runs it on every pull request and every
+  push to `main`, `.gitea/workflows/audit.yml` weekly, and a release is
+  tagged only after it passes. A new closure joins its list in the
+  `Makefile`.
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
   run `make gate`, then push.

@@ -139,6 +139,22 @@ the pinned release's copy without a higher `# devkitw revision` line, so a
 change to `devkitw` raises the line once per release. Never copy the old
 wrapper over devkit's own.
 
+`make audit` runs `npm audit` over the lockfiles of the closures in
+`markdown/` and `jscpd/`, so consumers need not audit them themselves: any
+advisory fails it. It runs the working tree's scripts whichever `GATES` is
+set, needs the network and fails closed without it; it asks
+`registry.npmjs.org` whatever npm's own configuration says. Neither
+`lint-repo`, `test` nor `gate` runs it. CI runs it on every pull request and
+every push to `main`, as a required check, so a new advisory fails every
+pull request until it is dealt with; the `audit` workflow also runs it
+weekly. Every top-level directory holding a `package-lock.json` must be in
+its list, which `tests/closure_audit_test.sh` checks. An advisory the
+closure's gate never reaches goes in the closure's `audit-ignore`, one per
+line: the GHSA id, the package npm reports it against, then why. An entry
+without a package or a reason fails, and so does one that matches no
+advisory, so a bump that fixes it forces its removal. Otherwise the fix is a
+bump of the closure.
+
 ## Releasing
 
 A release is a signed annotated tag on `main`; `devkitw` refuses a tag whose
@@ -158,6 +174,11 @@ network):
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
 ```
+
+Run `make audit` as well; unlike that check, it must pass: a release ships
+its closures to every consumer that bumps to it, so a failing advisory is
+fixed or justified in the closure's `audit-ignore`, in a pull request of its
+own, first.
 
 Then tag, from `main`'s tip, with this snippet rather than `make tag`:
 

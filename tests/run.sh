@@ -13,7 +13,8 @@
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
 #          tests/python_clean_test.sh, tests/java_clean_test.sh,
-#          tests/duplication_test.sh and tests/markdown_isolation_test.sh;
+#          tests/duplication_test.sh, tests/markdown_isolation_test.sh and
+#          tests/closure_audit_test.sh;
 #          make lint-repo, not this, gates devkit's own tree. Needs git,
 #          make, shellcheck, bash >= 4 (shopt globstar; macOS ships 3.2),
 #          procps (pgrep, ps), tar, sha256sum or shasum,
@@ -127,6 +128,7 @@ shell_part() {
   check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
+  check "closure_audit tests" "$root/tests/closure_audit_test.sh"
 }
 
 listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or untracked but not ignored

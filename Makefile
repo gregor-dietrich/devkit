@@ -22,7 +22,11 @@ else
 $(error GATES must be tree or release, not '$(GATES)')
 endif
 
-.PHONY: test
+.PHONY: audit test
+# The working tree's closures, whichever GATES: their lockfiles are this change's.
+audit: ## audit the markdown and jscpd closures with npm audit (needs the network)
+	@scripts/closure_audit.sh markdown jscpd
+
 # Cleared, an outer make's flags, and its VAR=value as an override, cannot reach a fixture's make.
 test: ## run devkit's tests (tests/run.sh), the push gate's second stage
 	@env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKELEVEL -u MAKEFILES tests/run.sh

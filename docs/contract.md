@@ -398,8 +398,10 @@ changes instead.
   markdownlint-cli, which brings the library), installed with
   `npm ci --ignore-scripts` into
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/` on first use (the only
-  run that needs the network). `format-md`, part of `make format`, runs its
-  `--fix` over the same files and rewrites without judging: it prints what
+  run that needs the network). devkit runs `npm audit` over that lockfile
+  weekly and before each release, so a project need not audit the closure
+  itself. `format-md`, part of `make format`, runs its `--fix` over the
+  same files and rewrites without judging: it prints what
   markdownlint cannot fix with a `NOTE`, since `make lint` fails on those,
   and passes, so `make format` goes on to the language formatter (an error
   of markdownlint's own still fails it). Both need `node` at or above
@@ -739,11 +741,11 @@ run the tools from `.venv`.
 - `ONLY` narrows `lint`'s ruff passes, `format` and `test`; `install`,
   `check`, `audit` and `clean` act on the whole project.
 - The copy-paste gate, the last step of `make lint`, runs jscpd at the
-  closure `jscpd/package-lock.json` pins, installed like markdownlint-cli
-  (see `lint-md`) on first use, so it needs `node` at or above
-  `engines.node` in `jscpd/package.json` and `npm` on `PATH`. It scans the
-  Python files git lists (tracked, plus untracked ones the project does
-  not ignore; the user's global excludes do not apply) under
+  closure `jscpd/package-lock.json` pins, installed and audited like
+  markdownlint-cli (see `lint-md`); installed on first use, it needs `node`
+  at or above `engines.node` in `jscpd/package.json` and `npm` on `PATH`.
+  It scans the Python files git lists (tracked, plus untracked ones the
+  project does not ignore; the user's global excludes do not apply) under
   `devkit.toml`'s required `[python.duplication] paths`, project-relative
   directories or files inside the project root, each file once and none
   through a symlink, minus the optional `ignore` globs, which match

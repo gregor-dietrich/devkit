@@ -44,10 +44,14 @@ expect() {
 
 expect "lint-pins stops at the floor" 1 "$root/scripts/pins.sh"
 expect "lint-decisions stops at the floor" 1 "$root/scripts/decisions.sh"
+expect "audit of the npm closures stops at the floor" 1 "$root/scripts/closure_audit.sh" markdown
 expect "check stops at the floor" 13 "$root/scripts/java/check.sh"
 # shellcheck disable=SC2016 # expanded by the inner bash
 expect "get_maven.sh stops at the floor, before the parent POM check" 13 \
   bash -c 'cd "$PROJECT_ROOT" && . "$DEVKIT/scripts/lib/get_maven.sh"'
+# shellcheck disable=SC2016 # expanded by the inner bash
+expect "get_uv.sh stops at the floor" 1 \
+  bash -c 'cd "$PROJECT_ROOT" && . "$DEVKIT/scripts/lib/get_uv.sh"'
 for script in check install lint test audit; do
   expect "uv $script stops at the floor" 1 "$root/scripts/python/$script.sh"
 done

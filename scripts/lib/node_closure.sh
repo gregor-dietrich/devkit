@@ -56,7 +56,9 @@ node_closure() {
         cp "$dir/package.json" "$dir/package-lock.json" "$stage/"
         echo "$label: installing $package into $cache..."
         # --include=optional beats an omit=optional in the user's npm config: jscpd's binary
-        # is an optional, per-platform dependency.
+        # is an optional, per-platform dependency. --no-audit: devkit audits these lockfiles
+        # itself (make audit, README "Gating devkit itself"); auditing here would turn every
+        # consumer's lint red at once on an advisory no bump can fix yet.
         (cd "$stage" && NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --ignore-scripts --no-audit --no-fund \
             --include=optional --loglevel=error) ||
             node_closure_fail "cannot install $package (npm ci failed; the first run needs the npm registry)"

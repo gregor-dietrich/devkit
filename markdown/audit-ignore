@@ -1,0 +1,13 @@
+# Advisories npm audit reports against this closure that its gate never
+# reaches, one per line: the GHSA id, the package npm reports it against,
+# then why (README, "Gating devkit itself"). An entry no advisory matches
+# fails make audit, so a bump that fixes one forces its removal.
+# markdownlint-cli 0.49.1, the newest release when these were added
+# (2026-10-11), pins all three below their fixed versions, so no lockfile
+# bump cleared them. lint.mjs loads markdownlint's library, jsonc-parser and
+# ignore, never the CLI. devkit runs the CLI only as `markdownlint --version`
+# at install (lib/node_closure.sh), which exits before it reads any
+# configuration, and in tests/markdown_isolation_test.sh with a JSONC config.
+GHSA-r3ph-w7gj-g6xm js-yaml only markdownlint-cli's YAML config reader requires it, lazily, and lint.mjs never runs the CLI
+GHSA-r4xh-jqrq-34v2 smol-toml only markdownlint-cli's TOML config reader requires it, lazily, and lint.mjs never runs the CLI
+GHSA-238p-pmpm-9mq7 katex micromark-extension-math loads it with markdownlint's math parser, but only its HTML renderer calls katex, and nothing calls that
