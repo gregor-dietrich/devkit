@@ -1,6 +1,11 @@
 # Targets shared by every devkit consumer; the interface is docs/contract.md.
 # `help` lists every rule line that carries a `## description` comment.
 
+# Recipes run under bash on every machine, not whatever /bin/sh is (dash on
+# Debian and Ubuntu). A project that needs another shell sets SHELL directly
+# after the includes.
+SHELL := /bin/bash
+
 # `:=`, not `?=`: an inherited PROJECT_ROOT must not aim the git targets at
 # another repository. A command-line PROJECT_ROOT=... still overrides it.
 PROJECT_ROOT := $(CURDIR)

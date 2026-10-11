@@ -131,6 +131,14 @@ include .devkit/make/python-uv.mk
   does), strips `MODULES` of the blanks a trailing comment leaves, and
   exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
   COVERAGE_FLOOR ONLY DEVKIT` to every recipe.
+- `make/common.mk` sets `SHELL := /bin/bash`, so recipes (devkit's and the
+  project's) and every `$(shell ...)` expanded after the includes run under
+  non-interactive bash on every machine: bash 3.2 on macOS, and it sources
+  `$BASH_ENV` first. A plain `SHELL` assignment before the includes is
+  replaced; a project that needs another shell sets it directly after the
+  includes, before any `$(shell ...)` it affects, or on the command line. A
+  sub-make whose `Makefile` does not include `common.mk` keeps `/bin/sh`.
+  `.SHELLFLAGS` stays make's default.
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
   `hooks`, `gate`, `lint-repo`, `lint-devkitw`, `lint-pins`, `lint-decisions`,
   `lint-secrets`, `lint-md`, `format-md`, `branch`, `rebase`, `tag`,
@@ -145,6 +153,16 @@ include .devkit/make/python-uv.mk
   `check: check-java` or `check: check-python` and carries the `lint` and
   `format` recipes, which run after the prerequisites. Only one rule line
   per target carries a `## description`.
+- A project may add prerequisites to devkit's targets on a rule line of its
+  own after the includes, without a `## description`:
+  `install: frontend-manifest`, `test: test-scripts`, each declared
+  `.PHONY` (a file of the same name would otherwise satisfy it without its
+  recipe). Make runs them before the target's recipe, and a
+  failing one fails the target before devkit's recipe runs. They are
+  unordered relative to devkit's own prerequisites (`install: check` in
+  `java-maven.mk`), which `make -j` may run alongside them. A project never
+  gives a devkit target a recipe: make keeps the last recipe with only a
+  warning, so it would silently replace devkit's gate.
 - `check-devkit` fails when `.devkit` does not resolve to `$(DEVKIT)`.
 - `help` lists every target that carries a `## description` comment on its
   rule line, the consumer's own targets included.
@@ -170,6 +188,11 @@ include .devkit/make/python-uv.mk
   each listed module to `-pl` as the Java scripts document. For uv,
   `MODULES` lists the workspace member directories as `uv.lock` records
   them (e.g. `packages/core`), and `make check` fails when they differ.
+  For Maven, `FRONTEND_DIR` is the directory holding the Vaadin frontend
+  (its `pom.xml`, `package.json` and, when committed, `package-lock.json`):
+  one of `MODULES`, or
+  `.` in a monolith whose frontend is the project root; empty when there is
+  none.
 - `ONLY` is read through `scripts/lib/select_modules.sh`, never parsed by
   hand. It normalizes each entry to its `MODULES` spelling (`./<dir>`,
   `<dir>/` and `:<dir>` as Maven's `-pl` accepts them) and keeps each module
@@ -189,6 +212,11 @@ include .devkit/make/python-uv.mk
   for that it asks Maven (`MVN_CMD`, which `scripts/lib/get_maven.sh`
   exports) for the local repository and the frontend module's
   `vaadin.version` and resolves the dev bundle. It fails without `MVN_CMD`.
+- A Maven project's `make clean` runs `mvn clean` on the selection, then
+  removes each selected module's `logs` and, when the frontend is selected,
+  `FRONTEND_DIR`'s `node_modules` and `src/main/frontend/generated`. devkit
+  never removes `package.json` or `package-lock.json`; what a clean goal
+  bound in the project's own POM removes is the project's.
 
 ## Repository gates
 

@@ -102,7 +102,8 @@ than the pin's); every target that runs Maven fails while the root pom does
 not inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
-bash and python3 (3.11 or later); a uv project needs python3's venv and
+bash as `/bin/bash`, and python3 (3.11 or later); a uv project needs
+python3's venv and
 pip only when no uv of the pinned version is on `PATH` or in devkit's
 cache. `make lint` also needs node (22.22.2 or later) with npm, for
 markdownlint and a uv project's copy-paste gate (jscpd), and `make format`
@@ -219,6 +220,16 @@ which keeps the wrapper's Maven version and removes `maven-wrapper.jar`
 and `MavenWrapperDownloader.java`, then restore a `distributionSha256Sum`
 line in `.mvn/wrapper/maven-wrapper.properties` if the old one had it, and
 commit the result.
+
+Recipes, and every `$(shell ...)` expanded after the includes, now run
+under `/bin/bash` instead of `/bin/sh` (dash on Debian and Ubuntu), so the
+project's own targets need `/bin/bash` too, as devkit's always did. A POSIX
+recipe behaves the same unless it relies on dash's `echo` escapes (use
+`printf`) or the environment sets `BASH_ENV`, which bash sources before
+each recipe line and `$(shell ...)`. A `Makefile` that sets `SHELL` before
+the includes moves the line directly after them, before any `$(shell ...)`,
+to keep its own shell; `make SHELL=/bin/sh <target>` runs one target under
+the old shell.
 
 ### Upgrading from v0.4.x
 

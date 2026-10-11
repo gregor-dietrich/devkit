@@ -4,14 +4,16 @@
 # PASS/FAIL per check with its time and status. java and python share one temp
 # dir (TMPDIR is honoured) and the tree under test, published once.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
-#          tests/select_modules_test.sh, tests/kill_test.sh,
-#          tests/check_frontend_deps_test.sh, tests/parent_check_test.sh,
-#          tests/check_pins_test.sh, tests/check_decisions_test.sh,
-#          tests/devkitw_lint_test.sh, tests/python_floor_test.sh,
-#          tests/secrets_test.sh, tests/markdown_test.sh, tests/hooks_test.sh,
+#          tests/select_modules_test.sh, tests/make_test.sh,
+#          tests/kill_test.sh, tests/check_frontend_deps_test.sh,
+#          tests/parent_check_test.sh, tests/check_pins_test.sh,
+#          tests/check_decisions_test.sh, tests/devkitw_lint_test.sh,
+#          tests/python_floor_test.sh, tests/secrets_test.sh,
+#          tests/markdown_test.sh, tests/hooks_test.sh,
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/coverage_floor_test.sh, tests/python_clean_test.sh,
-#          tests/duplication_test.sh and tests/markdown_isolation_test.sh;
+#          tests/java_clean_test.sh, tests/duplication_test.sh and
+#          tests/markdown_isolation_test.sh;
 #          make lint-repo, not this, gates devkit's own tree. Needs git,
 #          make, shellcheck, procps (pgrep, ps), tar, sha256sum or shasum,
 #          python3 >= 3.11, and node (at or above engines.node in
@@ -94,6 +96,7 @@ shell_part() {
   check "shellcheck" shellcheck_all
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
+  check "make tests" "$root/tests/make_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
   check "parent_check tests" "$root/tests/parent_check_test.sh"
@@ -108,6 +111,7 @@ shell_part() {
   check "get_uv tests" "$root/tests/get_uv_test.sh"
   check "coverage_floor tests" "$root/tests/coverage_floor_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
+  check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
 }

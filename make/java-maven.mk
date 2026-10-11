@@ -3,7 +3,8 @@
 # Profile, set by the project Makefile before the includes:
 #   JAVA_VERSION  JDK major that `check` requires exactly
 #   MODULES       Maven module directories, space-separated; empty = monolith
-#   FRONTEND_DIR  directory holding the Vaadin frontend; empty = none
+#   FRONTEND_DIR  directory holding the Vaadin frontend: one of MODULES, or `.`
+#                 in a monolith whose frontend is the root; empty = none
 #
 # Module selection: ONLY=<module>[,<module>...] limits install, lint,
 # format, test, coverage and clean to those MODULES (passed to Maven as
