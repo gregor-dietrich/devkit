@@ -570,21 +570,46 @@ inherit it, and Maven reads it through the link:
     line (`./mvnw -Dcheckstyle.version=… verify`) instead;
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
     `<annotationProcessorPaths>` without `combine.children="append"`.
-- It pins every gate tool's version as a property (`checkstyle.version`,
+- It pins every gate tool's version, and flatten-maven-plugin's, as a
+  property (`checkstyle.version`,
   `checkstyle-plugin.version`, `compiler-plugin.version`,
   `dependency-check-plugin.version`, `eclipse-formatter.version`,
-  `error-prone.version`, `jacoco-plugin.version`, `license-plugin.version`,
-  `nullaway.version`, `pmd-plugin.version`, `spotbugs-plugin.version`,
-  `spotless-plugin.version`, `surefire-plugin.version`), and manages the
-  `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
-  JaCoCo matches the plugin's.
+  `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
+  `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
+  `spotbugs-plugin.version`, `spotless-plugin.version`,
+  `surefire-plugin.version`), and manages the `org.jacoco` artifacts at the
+  JaCoCo plugin's version, so Quarkus' own JaCoCo matches the plugin's.
 - It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
   `this-escape` and `classfile`, Error Prone with NullAway), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
   PMD (with CPD), Checkstyle (the shared config and the execution
   `project`), JaCoCo (agent, report and coverage check) and Spotless, whose
   checks run at `verify`. dependency-check is configured but not
-  activated; `make audit` runs it by its coordinates.
+  activated; `make audit` runs it by its coordinates. License skips every
+  artifact whose groupId is exactly the module's own: a sibling under it
+  is not third party, and neither is any other artifact published under
+  that groupId; a sibling under another groupId is.
+- flatten-maven-plugin (execution `flatten`, at `verify`, after the tests
+  and Quarkus' build) writes the pom a lifecycle `install` or `deploy`
+  publishes (to `target/.flattened-pom.xml`), in its `ossrh` mode. It
+  holds the project's coordinates; the `<name>`, `<description>`, `<url>`,
+  `<licenses>`, `<developers>` and `<scm>` Maven Central requires; its
+  dependencies, test-scoped ones dropped; its own
+  `<dependencyManagement>`; and its `<profiles>`, not activated. Values
+  are resolved at build time, `${revision}` and those in profiles
+  included. It has no `<parent>`, `<build>`, `<modules>`, `<properties>`,
+  `<repositories>` or other project metadata. With devkit's flatten
+  configuration, an installed or published artifact never refers to
+  devkit's parent, so a build outside the reactor resolves it without
+  devkit: a downstream project, or `ONLY` on a module that depends on a
+  sibling. That sibling comes from the local repository as the last
+  `make install` left it; one never installed resolves like any other
+  dependency, from the remote repositories, so `make install` comes
+  first. Its configuration is not an override point: a project's own
+  flatten configuration merges into devkit's and can fail the build.
+  devkit sets the modes, so no `-D` property changes them, but the skip
+  properties `-Dflatten.skip=true` and `-Dflatten.flatten.skip=true`
+  publish the unflattened poms again.
 - The consumer sets `maven.compiler.release`, which the compiler and PMD's
   `targetJdk` read, and overrides these properties in its own
   `<properties>`:
@@ -621,10 +646,15 @@ inherit it, and Maven reads it through the link:
   check enforces it for the compiler's two lists only.
 - Some settings live at execution level, where a plugin-level override
   does not reach them; override them inside the execution with the id
-  below: license's `failOnMissing`, `failOnBlacklist` and
-  `excludedLicenses` (`add-third-party`), JaCoCo's agent `<excludes>`
-  (`prepare-agent`), and its `<rules>` and `<skip>` (`check`; prefer the
-  properties).
+  below: license's `failOnMissing`, `failOnBlacklist`, `excludedGroups`
+  and `excludedLicenses` (`add-third-party`; an `excludedGroups` of the
+  project's own replaces the one that skips its groupId, so it keeps
+  `^\Q${project.groupId}\E(?=:)|` before its own groups: the plugin embeds
+  the pattern in a regular expression over `groupId:artifactId`, so
+  `^\Qcom.example\E(?=:)` matches exactly that groupId, where a bare
+  `com\.example` matches any that contains it), JaCoCo's
+  agent `<excludes>` (`prepare-agent`), and its `<rules>` and `<skip>`
+  (`check`; prefer the properties).
 - Excluding generated sources is the consumer's: checkstyle
   `<sourceDirectories>`, PMD `<excludeRoots>`, the SpotBugs filter and
   `error-prone.extra.args`.
@@ -638,10 +668,6 @@ inherit it, and Maven reads it through the link:
   root pom or to Maven's settings. Maven must find the parent only through
   the link; a remote lookup of `de.vptr.devkit:devkit-parent` is the
   failure mode, and whatever serves it would configure the build.
-- Known limit: installed poms reference the unpublished parent, so a build
-  outside the reactor cannot resolve it, e.g. `-pl` of a module that
-  depends on a sibling, or a downstream project depending on the
-  consumer's artifacts. No current consumer is affected.
 
 ## uv projects
 

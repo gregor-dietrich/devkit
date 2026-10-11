@@ -25,7 +25,11 @@
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
 #          and committed as a git repository of its own, through make help,
-#          check, lint, test, coverage and format; then break copies of the
+#          check, lint, test, coverage and format; then make install
+#          java-multimodule into a local repository of its own, which reads
+#          through to ~/.m2, and expect its installed poms to name neither
+#          devkit's parent nor an unresolved ${...}, and make test ONLY=app
+#          to resolve core from them offline; then break copies of the
 #          monolith (format, a shared and a project checkstyle rule, the
 #          project rule's suppression, coverage, an image digest, Markdown,
 #          a secret committed, staged or unstaged, a missing git object, a
@@ -40,7 +44,9 @@
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3, curl, tar, node with npm and the
 #          network (Maven Central, Eclipse P2, github.com, the npm registry);
-#          ~/.m2 is used as is.
+#          ~/.m2 is used as is, and never installed into; the install checks
+#          assume ~/.m2/repository is the local repository, and their offline
+#          make test fails on missing plugins when settings.xml moves it.
 #   python run every tests/fixtures/python-* consumer, pinned the same way, in
 #          an environment no later part inherits: user-level uv configuration
 #          (XDG_CONFIG_HOME), the caches and uv's Python downloads in the temp
@@ -330,7 +336,45 @@ java_part() {
     run_fixture "${fixture%/}" "check lint test coverage format"
     unchanged "${fixture%/}" target .coverage.md
   done
+  out_of_reactor
+  check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked" \
+    foreign_group
   negatives
+}
+
+flattened() { # flattened DIR: DIR holds installed poms, none naming devkit's parent or an unresolved ${...}
+  [[ -n $(find "$1" -name '*.pom') ]] || return
+  grep -rE --include='*.pom' 'devkit-parent|\$\{' "$1"
+  (($? == 1)) # no match; 2, an error, fails too
+}
+
+# java-multimodule's app depends on core. Installed, the poms are flattened, so make test ONLY=app
+# (-pl without -am) reads core from the local repository, offline. The fixture runs above filled
+# ~/.m2 with every plugin make test needs; installs go to $work/m2 instead, so a SNAPSHOT never
+# lands there.
+out_of_reactor() {
+  local proj=$work/out-of-reactor m2=$work/m2
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$m2 -Dmaven.repo.local.tail=$HOME/.m2/repository"
+  setup "$root/tests/fixtures/java-multimodule" "$proj"
+  check "java-multimodule: make install" make_says pass "$proj" install "Install completed."
+  check "java-multimodule: installed poms name neither devkit's parent nor an unresolved \${...}" \
+    flattened "$m2/devkit/fixture"
+  MAVEN_ARGS="$MAVEN_ARGS -o" ONLY=app check "java-multimodule: make test ONLY=app resolves core offline" \
+    make_says pass "$proj" test "Starting tests for app..." "Tests completed."
+}
+
+# The parent excludes the project's own groupId from the license check by a pattern that ends it
+# ((?=:)). A license-less jar under devkit.fixture.other, which only starts with the fixture's
+# devkit.fixture, must still fail make test; with a bare ^\Qdevkit.fixture\E it would pass.
+foreign_group() {
+  local proj=$work/foreign-group m2=$work/m2 dep=$work/foreign-dep
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
+  mkdir "$dep" && echo x >"$dep/x.txt" && jar cf "$dep/x.jar" -C "$dep" x.txt || return
+  mvn -B -q install:install-file -Dfile="$dep/x.jar" -DgroupId=devkit.fixture.other -DartifactId=x \
+    -Dversion=1.0 -Dpackaging=jar || return
+  setup "$root/tests/fixtures/java-multimodule" "$proj"
+  sed_into "$proj/app/pom.xml" 's|^  <dependencies>|&\n    <dependency>\n      <groupId>devkit.fixture.other</groupId>\n      <artifactId>x</artifactId>\n      <version>1.0</version>\n    </dependency>|'
+  ONLY=app make_says fail "$proj" test "There are some dependencies with no license"
 }
 
 ruff_skips_devkit() { # ruff's walk of DIR lists files, none of them through the .devkit link

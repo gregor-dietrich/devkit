@@ -255,6 +255,25 @@ on, and `make gate` no longer records under, a mavenrc file Maven runs
 (for the mavenrc files) or moving those properties out of the settings file
 restores the record.
 
+A Maven project's installed and deployed poms are now flattened: no
+`<parent>`, `${revision}` resolved, only the elements
+[Parent POM](docs/contract.md#parent-pom) lists, so a downstream project,
+and `ONLY` on a module that depends on a sibling, resolve them. A project
+that configures flatten-maven-plugin itself first removes that
+configuration, and any `flatten-plugin.version` property, which the parent
+check now rejects: the configuration merges into devkit's, and Maven's
+CI-friendly-versions setup then fails every build that reaches `verify`.
+Then run `make install` once: poms installed before it still name devkit's
+parent, and a downstream project needs the artifacts published again,
+under a new version where the repository refuses to redeploy a release.
+The license check no longer counts a module's
+own groupId as third party. A project that set `excludedGroups` (in
+`add-third-party`, at plugin level or as the `license.excludedGroups`
+property) sets it in `add-third-party` as
+`^\Q${project.groupId}\E(?=:)|<its own groups>`, each written as
+`^\Q<groupId>\E(?=:)` to match exactly that groupId: anywhere else
+devkit's value replaces it.
+
 ### Upgrading from v0.4.x
 
 v0.5.0 has `lint-md` read exactly one markdownlint configuration per file

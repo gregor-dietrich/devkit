@@ -11,4 +11,12 @@
   </parent>
 
   <artifactId>app</artifactId>
+
+  <dependencies>
+    <dependency>
+      <groupId>devkit.fixture</groupId>
+      <artifactId>core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
 </project>

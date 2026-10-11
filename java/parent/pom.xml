@@ -9,7 +9,8 @@
      The version stays literal, never ${revision}: devkit's build scripts pass -Drevision for the
      consumer's own version. No description, url, licenses, scm, organization or developers:
      those would be inherited into the consumer's metadata. dependency-check is configured but
-     not activated: make audit runs it by its coordinates. -->
+     not activated: make audit runs it by its coordinates. flatten-maven-plugin rewrites the pom
+     install and deploy publish, so no installed pom names this parent. -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -27,6 +28,7 @@
     <dependency-check-plugin.version>13.0.0</dependency-check-plugin.version>
     <eclipse-formatter.version>4.40</eclipse-formatter.version>
     <error-prone.version>2.50.0</error-prone.version>
+    <flatten-plugin.version>1.8.0</flatten-plugin.version>
     <!-- Also drives the org.jacoco artifacts quarkus-jacoco uses. See dependencyManagement. -->
     <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
     <license-plugin.version>2.7.1</license-plugin.version>
@@ -179,6 +181,41 @@
         </plugin>
         <plugin>
           <groupId>org.codehaus.mojo</groupId>
+          <artifactId>flatten-maven-plugin</artifactId>
+          <version>${flatten-plugin.version}</version>
+          <!-- The pom install and deploy publish: no <parent>, which nothing outside the
+               reactor can resolve, and ${revision} resolved. ossrh keeps the metadata Maven
+               Central requires; its <repositories> are removed, so a published pom adds no
+               repository to a downstream build. It keeps the project's own
+               <dependencyManagement>, so a BOM ships intact; updatePomFile flattens a
+               pom-packaged root too, which the plugin otherwise installs as written. Both
+               modes are set here, where no -D property changes them; the output goes to
+               target/, so clean removes it and the tree stays clean. -->
+          <configuration>
+            <flattenMode>ossrh</flattenMode>
+            <flattenDependencyMode>direct</flattenDependencyMode>
+            <updatePomFile>true</updatePomFile>
+            <outputDirectory>${project.build.directory}</outputDirectory>
+            <pomElements>
+              <dependencyManagement>interpolate</dependencyManagement>
+              <repositories>remove</repositories>
+            </pomElements>
+          </configuration>
+          <executions>
+            <execution>
+              <id>flatten</id>
+              <!-- Not process-resources, the plugin's usual phase: from there on every mojo reads
+                   the flattened pom, and Quarkus' code generation and test bootstrap then fail.
+                   verify still precedes install and deploy. -->
+              <phase>verify</phase>
+              <goals>
+                <goal>flatten</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
           <artifactId>license-maven-plugin</artifactId>
           <version>${license-plugin.version}</version>
           <executions>
@@ -191,6 +228,10 @@
               <configuration>
                 <failOnMissing>true</failOnMissing>
                 <failOnBlacklist>true</failOnBlacklist>
+                <!-- The project's own modules are not third party. The plugin matches a
+                     group pattern inside its own regex over groupId:artifactId, so (?=:)
+                     ends the groupId where $ cannot. -->
+                <excludedGroups>^\Q${project.groupId}\E(?=:)</excludedGroups>
                 <excludedLicenses>
                   Commercial||Proprietary||SSPL||Elastic License||Business Source
                   License||Commons Clause||Elastic License 2.0||Server Side Public
@@ -403,10 +444,14 @@
       </plugins>
     </pluginManagement>
 
-    <!-- Compiler and surefire run by default; the gates are activated here. -->
+    <!-- Compiler and surefire run by default; the gates and flatten are activated here. -->
     <plugins>
       <plugin>
         <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
       </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

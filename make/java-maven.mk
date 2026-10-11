@@ -9,9 +9,11 @@
 # Module selection: ONLY=<module>[,<module>...] limits install, lint,
 # format, test, coverage and clean to those MODULES (passed to Maven as
 # -pl). Each entry is a module directory as MODULES lists it, not an
-# artifactId. Unset, the whole reactor runs. lint's repository gates
-# (lint-repo) and format's format-md, from common.mk, always cover the whole
-# repository.
+# artifactId. A sibling ONLY leaves out comes from the local repository, as
+# the last `make install` left it; one never installed resolves from the
+# remote repositories, so `make install` first. Unset, the whole reactor
+# runs. lint's repository gates (lint-repo) and format's format-md, from
+# common.mk, always cover the whole repository.
 # Example: make test ONLY=<module-dir>
 #
 # Environment: REVISION (default 1.0.0-SNAPSHOT) is passed as -Drevision;
