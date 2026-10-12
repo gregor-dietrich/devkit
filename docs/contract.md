@@ -594,7 +594,14 @@ inherit it, and Maven reads it through the link:
   activated; `make audit` runs it by its coordinates. License skips every
   artifact whose groupId is exactly the module's own: a sibling under it
   is not third party, and neither is any other artifact published under
-  that groupId; a sibling under another groupId is.
+  that groupId; a sibling under another groupId is. A dependency whose pom
+  declares no license gets one in the module's
+  `src/license/override-THIRD-PARTY.properties`, one
+  `groupId--artifactId--version=License name` line each, which the plugin
+  reads by default and never writes. Its error message names
+  `THIRD-PARTY.properties` instead, which it reads only under
+  `license.useMissingFile`; there, `force` has it rewrite that file, with a
+  fresh timestamp, on every build.
 - flatten-maven-plugin (execution `flatten`, at `verify`, after the tests
   and Quarkus' build) writes the pom a lifecycle `install` or `deploy`
   publishes (to `target/.flattened-pom.xml`), in its `ossrh` mode. It
@@ -650,17 +657,18 @@ inherit it, and Maven reads it through the link:
   `<annotationProcessorPaths>`, JaCoCo's `<excludes>` and `<rules>`, PMD's
   `<rulesets>` and dependency-check's `<suppressionFiles>`. The parent
   check enforces it for the compiler's two lists only.
-- Some settings live at execution level, where a plugin-level override
-  does not reach them; override them inside the execution with the id
-  below: license's `failOnMissing`, `failOnBlacklist`, `excludedGroups`
-  and `excludedLicenses` (`add-third-party`; an `excludedGroups` of the
-  project's own replaces the one that skips its groupId, so it keeps
-  `^\Q${project.groupId}\E(?=:)|` before its own groups: the plugin embeds
-  the pattern in a regular expression over `groupId:artifactId`, so
+- Some settings live at execution level, where a plugin-level override does not
+  reach them; override them inside the execution with the id below: license's
+  `force` (`true`, so that every build runs the license checks, not only the
+  first after a clean), `failOnMissing`, `failOnBlacklist`, `excludedGroups` and
+  `excludedLicenses` (`add-third-party`; an `excludedGroups` of the project's
+  own replaces the one that skips its groupId, so it keeps
+  `^\Q${project.groupId}\E(?=:)|` before its own groups: the plugin embeds the
+  pattern in a regular expression over `groupId:artifactId`, so
   `^\Qcom.example\E(?=:)` matches exactly that groupId, where a bare
-  `com\.example` matches any that contains it), JaCoCo's
-  agent `<excludes>` (`prepare-agent`), and its `<rules>` and `<skip>`
-  (`check`; prefer the properties).
+  `com\.example` matches any that contains it), JaCoCo's agent `<excludes>`
+  (`prepare-agent`), and its `<rules>` and `<skip>` (`check`; prefer the
+  properties).
 - Excluding generated sources is the consumer's: checkstyle
   `<sourceDirectories>`, PMD `<excludeRoots>`, the SpotBugs filter and
   `error-prone.extra.args`.

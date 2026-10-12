@@ -294,13 +294,22 @@ CI-friendly-versions setup then fails every build that reaches `verify`.
 Then run `make install` once: poms installed before it still name devkit's
 parent, and a downstream project needs the artifacts published again,
 under a new version where the repository refuses to redeploy a release.
-The license check no longer counts a module's
-own groupId as third party. A project that set `excludedGroups` (in
-`add-third-party`, at plugin level or as the `license.excludedGroups`
-property) sets it in `add-third-party` as
+
+The license check no longer counts a module's own groupId as third party. A
+project that set `excludedGroups` (in `add-third-party`, at plugin level or as
+the `license.excludedGroups` property) sets it in `add-third-party` as
 `^\Q${project.groupId}\E(?=:)|<its own groups>`, each written as
-`^\Q<groupId>\E(?=:)` to match exactly that groupId: anywhere else
-devkit's value replaces it.
+`^\Q<groupId>\E(?=:)` to match exactly that groupId: anywhere else devkit's
+value replaces it. The license check also runs on every build now: a
+dependency without license metadata, or under a blacklisted license, used to
+fail only the first build after a clean and pass the next, and now fails every
+one. Declare a missing license in the module's
+`src/license/override-THIRD-PARTY.properties`
+(`groupId--artifactId--version=License name`), not the
+`THIRD-PARTY.properties` the error message names; exempt a blacklisted one
+through `excludedGroups` as above, or override `failOnBlacklist` or
+`excludedLicenses` in `add-third-party` ([Parent
+POM](docs/contract.md#parent-pom)). Building again no longer helps.
 
 ### Upgrading from v0.4.x
 

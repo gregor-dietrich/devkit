@@ -30,12 +30,16 @@
 #          java-multimodule into a local repository of its own, which reads
 #          through to ~/.m2, and expect its installed poms to name neither
 #          devkit's parent nor an unresolved ${...}, and make test ONLY=app
-#          to resolve core from them offline; then break copies of the
-#          monolith (format, a shared and a project checkstyle rule, the
-#          project rule's suppression, coverage, an image digest, Markdown,
-#          a secret committed, staged or unstaged, a missing git object, a
-#          devkitw without its revision line) and
-#          expect lint or test to fail for that reason, and make format to
+#          to resolve core from them offline, and make test of a copy whose
+#          app depends on a jar without a license to fail twice in a row,
+#          without a clean between, and to pass once the module's
+#          override-THIRD-PARTY.properties declares one, leaving its
+#          sources unchanged; then break copies of the monolith
+#          (format, a shared and a project checkstyle rule, the project
+#          rule's suppression, coverage, an image digest, Markdown, a secret
+#          committed, staged or unstaged, a missing git object, a devkitw
+#          without its revision line) and expect lint or test to fail for
+#          that reason, and make format to
 #          fix the format break so that lint passes; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
@@ -346,7 +350,7 @@ java_part() {
     unchanged "${fixture%/}" target .coverage.md
   done
   out_of_reactor
-  check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked" \
+  check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group
   negatives
 }
@@ -383,7 +387,15 @@ foreign_group() {
     -Dversion=1.0 -Dpackaging=jar || return
   setup "$root/tests/fixtures/java-multimodule" "$proj"
   sed_into "$proj/app/pom.xml" 's|^  <dependencies>|&\n    <dependency>\n      <groupId>devkit.fixture.other</groupId>\n      <artifactId>x</artifactId>\n      <version>1.0</version>\n    </dependency>|'
-  ONLY=app make_says fail "$proj" test "There are some dependencies with no license"
+  # Twice: a failed run's THIRD-PARTY.txt let the next, un-cleaned one skip the license goal.
+  ONLY=app make_says fail "$proj" test "There are some dependencies with no license" &&
+    ONLY=app make_says fail "$proj" test "There are some dependencies with no license" || return
+  # Declared as docs/contract.md says, committed: the plugin reads it and writes nothing to src.
+  local override=app/src/license/override-THIRD-PARTY.properties changed
+  mkdir -p "$proj/${override%/*}" && echo 'devkit.fixture.other--x--1.0=MIT License' >"$proj/$override" &&
+    git -C "$proj" add "$override" && git -C "$proj" commit -q -m override &&
+    ONLY=app make_says pass "$proj" test && changed=$(git -C "$proj" status --porcelain -- app/src) &&
+    [[ -z $changed ]]
 }
 
 ruff_skips_devkit() { # ruff's walk of DIR lists files, none of them through the .devkit link
