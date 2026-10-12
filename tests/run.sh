@@ -35,7 +35,8 @@
 #          project rule's suppression, coverage, an image digest, Markdown,
 #          a secret committed, staged or unstaged, a missing git object, a
 #          devkitw without its revision line) and
-#          expect lint or test to fail for that reason; expect check to fail
+#          expect lint or test to fail for that reason, and make format to
+#          fix the format break so that lint passes; expect check to fail
 #          without checkstyle-project.xml, without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
 #          latter too, before Maven runs. Expect test to fail on a profile
@@ -222,10 +223,16 @@ negative() { # negative NAME TARGET TEXT FILE SED: break FILE in a monolith copy
     make_says fail "$work/negative-$1" "$2" "$3"
 }
 
+formatted() { # formatted FILE SED: make format undoes SED's break in a monolith copy, so that lint passes
+  edited "$work/formatted" "$1" "$2" &&
+    make_says pass "$work/formatted" format && make_says pass "$work/formatted" lint
+}
+
 negatives() {
   local main=src/main/java/devkit/fixture/Greeter.java
-  local test=src/test/java/devkit/fixture/GreeterTest.java
-  negative format lint "format violations" "$main" 's/^    public/  public/'
+  local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
+  negative format lint "format violations" "$main" "$indent"
+  check "java-monolith: make format fixes a format break" formatted "$main" "$indent"
   negative checkstyle lint "Fully Qualified Class Names" "$main" \
     's/return name\./return java.util.Objects.requireNonNull(name)./'
   negative project-checkstyle lint "Fixture project rule" "$main" \
