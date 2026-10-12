@@ -244,6 +244,71 @@
                   Business Source License|Commons Clause|Elastic License 2.0|
                   Server Side Public License|BUSL-1.1|Polyform|PolyForm
                 </excludedLicenses>
+                <!-- Only these licenses are allowed. The plugin passes a dependency when any one
+                     of its licenses is listed, as Maven reads a pom's licenses as alternatives,
+                     and the exact, case-sensitive name is all it compares: one element per
+                     name, never a | list. "Unknown license" is the plugin's key for a dependency
+                     that declares none; it is listed so that failOnMissing keeps reporting it
+                     as "There are some dependencies with no license". -->
+                <includedLicenses>
+                  <!-- Apache -->
+                  <includedLicense>Apache License 2.0</includedLicense>
+                  <includedLicense>Apache License, 2.0</includedLicense>
+                  <includedLicense>Apache License, Version 2.0</includedLicense>
+                  <includedLicense>Apache Software License - Version 2.0</includedLicense>
+                  <includedLicense>Apache-2.0</includedLicense>
+                  <includedLicense>The Apache License, Version 2.0</includedLicense>
+                  <includedLicense>The Apache Software License, Version 2.0</includedLicense>
+                  <!-- MIT -->
+                  <includedLicense>MIT</includedLicense>
+                  <includedLicense>MIT License</includedLicense>
+                  <includedLicense>MIT-0</includedLicense>
+                  <includedLicense>The MIT License</includedLicense>
+                  <!-- BSD -->
+                  <includedLicense>BSD License 2.0</includedLicense>
+                  <includedLicense>BSD License 3</includedLicense>
+                  <includedLicense>BSD-2-Clause</includedLicense>
+                  <includedLicense>BSD-3-Clause</includedLicense>
+                  <includedLicense>Modified BSD</includedLicense>
+                  <includedLicense>Revised BSD</includedLicense>
+                  <!-- EPL and EDL -->
+                  <includedLicense>EDL 1.0</includedLicense>
+                  <includedLicense>EPL 1.0</includedLicense>
+                  <includedLicense>EPL 2.0</includedLicense>
+                  <includedLicense>EPL-2.0</includedLicense>
+                  <includedLicense>Eclipse Distribution License - v 1.0</includedLicense>
+                  <includedLicense>Eclipse Distribution License v. 1.0</includedLicense>
+                  <includedLicense>Eclipse Public License - Version 2.0</includedLicense>
+                  <includedLicense>Eclipse Public License - v 1.0</includedLicense>
+                  <includedLicense>Eclipse Public License - v 2.0</includedLicense>
+                  <includedLicense>Eclipse Public License 1.0</includedLicense>
+                  <includedLicense>Eclipse Public License v. 2.0</includedLicense>
+                  <includedLicense>Eclipse Public License v2.0</includedLicense>
+                  <!-- Public domain -->
+                  <includedLicense>Public Domain</includedLicense>
+                  <includedLicense>Public Domain, per Creative Commons CC0</includedLicense>
+                  <!-- Other permissive -->
+                  <includedLicense>Bouncy Castle Licence</includedLicense>
+                  <includedLicense>Plexus</includedLicense>
+                  <includedLicense>Similar to Apache License but with the acknowledgment clause removed</includedLicense>
+                  <includedLicense>The SAX License</includedLicense>
+                  <includedLicense>The W3C License</includedLicense>
+                  <!-- Weak copyleft: CDDL, LGPL, MPL -->
+                  <includedLicense>COMMON DEVELOPMENT AND DISTRIBUTION LICENSE (CDDL) Version 1.0</includedLicense>
+                  <includedLicense>GNU Lesser General Public License</includedLicense>
+                  <includedLicense>GNU Library General Public License v2.1 or later</includedLicense>
+                  <includedLicense>LGPL-2.1</includedLicense>
+                  <includedLicense>LGPL-2.1-or-later</includedLicense>
+                  <includedLicense>MPL 2.0</includedLicense>
+                  <includedLicense>Mozilla Public License, Version 2.0</includedLicense>
+                  <!-- GPL with the Classpath Exception. Not the Universal FOSS Exception: it
+                       covers only FOSS software, so a FOSS project appends it. -->
+                  <includedLicense>GPL-2.0-with-classpath-exception</includedLicense>
+                  <includedLicense>GPL2 w/ CPE</includedLicense>
+                  <includedLicense>The GNU General Public License (GPL), Version 2, With Classpath Exception</includedLicense>
+                  <!-- No license declared -->
+                  <includedLicense>Unknown license</includedLicense>
+                </includedLicenses>
               </configuration>
             </execution>
           </executions>
