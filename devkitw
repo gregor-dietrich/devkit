@@ -2,7 +2,7 @@
 # devkitw: fetch the devkit commit pinned in ./devkit.toml into a per-user
 # cache, point ./.devkit at it and print its path. A project commits this file
 # verbatim; `make lint-devkitw` notices a copy older than the pin's.
-# devkitw revision 1
+# devkitw revision 2
 # Usage, from the project root: ./devkitw [path]
 set -eu
 
@@ -10,6 +10,9 @@ die() {
   echo "devkitw: $*" >&2
   exit 1
 }
+
+# The release key: docs/contract.md ("devkitw") says what this line is.
+signers='devkit-release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBoBUp+KIF066cVVB6bU+oTkgs9bCQYJucUOUdUMNLK'
 
 case $#:${1-} in
   0: | 1:path) ;;
@@ -45,6 +48,51 @@ g() {
     -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 -C "$tmp" "$@"
 }
 
+# verify_release: die unless refs/tags/$version in the temp dir is an annotated
+# tag of $commit, named $version, and signed by the key in $signers. It does
+# not use git verify-tag, so no gpg.* setting, GNUPGHOME or ~/.ssh is read. The
+# scratch files go in .git, which is removed before the tree is sealed.
+verify_release() {
+  vr=$tmp/.git/devkitw-
+  [ "$(g cat-file -t "refs/tags/$version")" = tag ] ||
+    die "tag $version is not an annotated tag; refusing $commit"
+  g cat-file tag "refs/tags/$version" >"${vr}tag"
+  sed '/^$/q' "${vr}tag" >"${vr}head" # the header: up to the first empty line
+  # Each of object, type and tag occurs once, with the expected value, as text.
+  for pair in "object $commit" "type commit" "tag $version"; do
+    if [ "$(grep -c "^${pair%% *} " "${vr}head")" != 1 ] ||
+      [ "$(grep -Fxc "$pair" "${vr}head")" != 1 ]; then
+      die "tag $version is a tag of another name, commit or tag;" \
+        "refusing $commit"
+    fi
+  done
+  # Split at the last SSH signature line.
+  n=$(grep -n '^-----BEGIN SSH SIGNATURE-----$' "${vr}tag" | tail -n 1 |
+    cut -d: -f1)
+  [ -n "$n" ] || die "tag $version is not signed by devkit's release key;" \
+    "refusing $commit"
+  head -n "$((n - 1))" "${vr}tag" >"${vr}payload"
+  tail -n "+$n" "${vr}tag" >"${vr}sig"
+  printf '%s\n' "$signers" >"${vr}signers"
+  # A bad signature prints "Could not verify signature." and exits 255, but 255
+  # is also what ssh-keygen exits on a fault such as a UID without a passwd
+  # entry, so the verdict is read from that line. An ssh-keygen without -Y
+  # (before OpenSSH 8.1) exits 1 on its usage error.
+  rc=0
+  ssh-keygen -Y verify -f "${vr}signers" -I devkit-release -n git \
+    -s "${vr}sig" <"${vr}payload" >"${vr}out" 2>"${vr}err" || rc=$?
+  [ "$rc" != 0 ] || return 0
+  if grep -qx 'Could not verify signature\.' "${vr}out"; then
+    die "tag $version is not signed by devkit's release key; refusing $commit"
+  elif [ "$rc" = 1 ]; then
+    die "ssh-keygen cannot verify tag $version (it needs OpenSSH 8.1 or" \
+      "later); refusing $commit"
+  fi
+  msg=$(head -n 1 "${vr}err")
+  die "ssh-keygen failed verifying tag $version: ${msg:-exited $rc};" \
+    "refusing $commit"
+}
+
 cached=$(cat "$dir/$mark" 2>/dev/null || :)
 if [ -n "$cached" ] && [ "$cached" != "$commit $version" ]; then
   die "version $version does not match cached commit $commit;" \
@@ -53,6 +101,8 @@ if [ -n "$cached" ] && [ "$cached" != "$commit $version" ]; then
 elif [ -z "$cached" ]; then
   [ ! -e "$dir" ] || die "$dir has no $mark; remove it" \
     "(chmod -R u+w '$dir'; rm -rf '$dir') and retry"
+  command -v ssh-keygen >/dev/null 2>&1 ||
+    die "verifying tag $version needs ssh-keygen (OpenSSH 8.1 or later)"
   # Never touch a calling git hook's repository (GIT_DIR, GIT_INDEX_FILE, ...).
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
@@ -77,6 +127,7 @@ elif [ -z "$cached" ]; then
   got=$(g rev-parse -q --verify "refs/tags/$version^{commit}") ||
     die "cannot fetch tag $version and main from $url${mirror:+ or $mirror}"
   [ "$got" = "$commit" ] || die "tag $version is $got, not the pinned $commit"
+  verify_release
   g merge-base --is-ancestor "$commit" refs/devkit/main ||
     die "tag $version is not on devkit's main; refusing $commit"
   g checkout -q "$commit"

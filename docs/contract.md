@@ -89,22 +89,44 @@ include .devkit/make/java-maven.mk
   project's copy is older than the pinned commit's.
 - It fails closed, with one line naming the cause, on: missing or malformed
   `devkit.toml`, fetched commit ≠ `commit`, a `commit` that is not an
-  ancestor of the same remote's `main`, a cache hit whose recorded
-  version ≠ `version`, a reachable `url` that serves no tag `version` or
-  no `main` (it does not fall back to the mirror then), every remote
-  unreachable or without them, and a `.devkit` that exists and is not a
-  symlink. It never falls back to another version.
+  ancestor of the same remote's `main`, a tag that is not an annotated tag
+  of `commit`, named `version` and signed by devkit's release key, a cache
+  hit whose recorded version ≠ `version`, a reachable `url` that serves no
+  tag `version` or no `main` (it does not fall back to the mirror then),
+  every remote unreachable or without them, no `ssh-keygen` of OpenSSH 8.1
+  or later, and a `.devkit` that exists and is not a symlink. It never falls
+  back to another version. Where `ssh-keygen` fails for another reason than a
+  bad signature, the line is "ssh-keygen failed verifying tag …" with its
+  first message.
+- A cache miss verifies the tag with `ssh-keygen -Y verify` (principal
+  `devkit-release`, namespace `git`) against the allowed-signers line
+  `devkitw` carries. It reads no git signing configuration and needs no gpg.
+  A cache miss needs the running UID to have a passwd entry, which
+  `ssh-keygen` requires (a container run with an arbitrary `-u` UID); a hit
+  does not.
 - It never prompts, and runs no credential helper or askpass program: an
   HTTPS remote's credentials come from git configuration such as
   `http.<url>.extraHeader`, or from `~/.netrc`, and a remote that rejects
   them counts as unreachable. ssh runs in batch mode unless the
   environment sets `GIT_SSH_COMMAND`, which then brings its own prompting.
-- `url` and `mirror` are both trusted: whoever can push `main` and tags to
-  the remote that answers decides which code runs. Limits: a checkout
-  cached by an older `devkitw` is not re-checked, a project's copy of
-  `devkitw` predating the `main` check accepts any tagged commit, and a pin
-  chosen to evade `lint-devkitw` brings its own gates, so only the
-  wrapper's own checks hold against it.
+- Two things are trusted. The release key decides which tags are releases;
+  `main` on the remote that answers (`url`, or `mirror` when `url` is
+  unreachable) decides which commits may be. A pinned commit needs both. The
+  release key signs devkit's release tags and nothing else: a signature binds
+  commit, type, tag name and namespace, not the repository. Past the first
+  copy at adoption, which is trusted on first copy, a new release key reaches
+  a project only in a `devkitw` that a release signed by the previous key
+  delivered; a rotation release carries both keys' lines, every existing
+  `v*` tag is re-signed with the new key at its same commit (so pinning back
+  keeps working), and a consumer bumps through that release: a wrapper that
+  knows only the old key refuses a tag signed only by the new one. Limits: a
+  checkout cached by an older `devkitw` is not re-checked; a project's copy
+  of `devkitw` predating the signature check accepts any tag on `main`, and
+  one predating the `main` check accepts any tagged commit; a signature does
+  not stop a tag's deletion; the tools `devkitw` runs (`git`, `ssh-keygen`,
+  `sed`, `grep`, `head`, `tail`, `cut`, …) come from `PATH`; and a pin chosen
+  to evade `lint-devkitw` brings its own gates, so only the wrapper's own
+  checks hold against it.
 - Every cache devkit fills under `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/`
   (the checkout, and the tools below) is read-only, its directories
   included, so that an edit through `.devkit` or the cache fails instead of

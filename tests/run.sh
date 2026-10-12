@@ -17,9 +17,10 @@
 #          tests/closure_audit_test.sh, and that no entry of the parent's
 #          excludedLicenses is empty or holds a line break, a tab or a
 #          double space;
-#          make lint-repo, not this, gates devkit's own tree. Needs git,
-#          make, shellcheck, bash >= 4 (shopt globstar; macOS ships 3.2),
-#          procps (pgrep, ps), tar, sha256sum or shasum,
+#          make lint-repo, not this, gates devkit's own tree. Needs git
+#          >= 2.34 (SSH signing), make, shellcheck, ssh-keygen (OpenSSH 8.1
+#          or later), bash >= 4 (shopt globstar; macOS ships 3.2), procps
+#          (pgrep, ps), tar, sha256sum or shasum,
 #          python3 >= 3.11, and node (at or above engines.node in
 #          markdown/package.json and jscpd/package.json) with npm, which
 #          installs markdownlint-cli and jscpd from the npm registry on
@@ -52,8 +53,10 @@
 #          check to fail on a ./mvnw that launches a maven-wrapper jar.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
-#          JDK 25, Maven >= 3.9.9, python3, curl, tar, node with npm and the
-#          network (Maven Central, Eclipse P2, github.com, the npm registry);
+#          JDK 25, Maven >= 3.9.9, python3, git >= 2.34 and ssh-keygen
+#          (OpenSSH 8.1 or later), to sign and verify the tag, curl, tar,
+#          node with npm and the network (Maven Central, Eclipse P2,
+#          github.com, the npm registry);
 #          ~/.m2 is used as is, and never installed into; the install checks
 #          assume ~/.m2/repository is the local repository, and their offline
 #          make test fails on missing plugins when settings.xml moves it.
@@ -81,12 +84,13 @@
 #          virtual member: test ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
 #          fails, and JUNIT_DIR=reports writes one report per member into the
-#          project. Needs git, make, python3 >= 3.11 with venv and pip, curl,
-#          tar, sha256sum or shasum and the network (PyPI, its advisory API,
-#          github.com, and uv's Python downloads when no CPython of the pin is
-#          installed), and node with npm for the copy-paste gate, which
-#          installs jscpd from the npm registry; the fixtures hold no Markdown,
-#          so lint-md does not run markdownlint.
+#          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
+#          later), python3 >= 3.11 with venv and pip, curl, tar, sha256sum or
+#          shasum and the network (PyPI, its advisory API, github.com, and
+#          uv's Python downloads when no CPython of the pin is installed),
+#          and node with npm for the copy-paste gate, which installs jscpd
+#          from the npm registry; the fixtures hold no Markdown, so lint-md
+#          does not run markdownlint.
 set -euo pipefail
 if ((BASH_VERSINFO[0] < 4)); then
   echo "ERROR: tests/run.sh needs bash 4 or later (globstar); this is bash $BASH_VERSION." >&2
@@ -167,16 +171,41 @@ listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or unt
     done | tar -C "$1" --null -T - -cf - | tar -C "$2" -xf -
 }
 
+# swap_signers FILE KEY.pub: replace the key type and blob of the signers= line
+# of FILE by KEY.pub's, and fail unless that is the one line that changed.
+swap_signers() {
+  local line type blob changed
+  read -r type blob _ <"$2"
+  while IFS= read -r line; do
+    if [[ $line == signers=* ]]; then
+      printf '%s\n' "${line% * *} $type $blob'" # the last two fields
+    else
+      printf '%s\n' "$line"
+    fi
+  done <"$1" >"$1.new"
+  changed=$(diff "$1" "$1.new" | grep -c '^[<>]' || :)
+  [[ $changed == 2 && $(grep -c '^signers=' "$1") == 1 &&
+    $(grep -c "^signers='.*'\$" "$1") == 1 ]] || { # one line, one key
+    echo "swap_signers: $1 must change in only its signers= line" >&2
+    return 1
+  }
+  cat "$1.new" >"$1" && rm "$1.new" # in place, keeping the mode
+}
+
 # The devkit a fixture pins: the tree under test as tag $tag on main (devkitw
-# refuses a tag off main) in bare repo $bare.
+# refuses a tag off main), signed by a key made here, in bare repo $bare. The
+# tree's devkitw trusts the release key, so the published copy trusts this one.
 publish() {
-  local src=$work/src
+  local src=$work/src key=$work/release-key
   listed "$root" "$src"
-  export GIT_CONFIG_GLOBAL=/dev/null # from here on: no signing, no url rewrites
+  export GIT_CONFIG_GLOBAL=/dev/null # from here on: no url rewrites, no signing config
+  ssh-keygen -q -t ed25519 -N '' -C '' -f "$key"
+  swap_signers "$src/devkitw" "$key.pub"
   git -C "$src" init -q -b main
   git -C "$src" add -A
   git -C "$src" commit -q -m "tree under test"
-  git -C "$src" tag -a "$tag" -m "$tag"
+  git -C "$src" -c gpg.format=ssh -c user.signingKey="$key" \
+    tag -a -s -m "$tag" "$tag"
   git clone -q --bare "$src" "$bare"
   commit=$(git -C "$src" rev-parse HEAD)
 }
@@ -191,7 +220,7 @@ help_lists() { # make help lists lint and format once, the repository gates and 
 
 setup() { # setup FIXTURE DIR: copy FIXTURE to DIR, pinned to the tag, as a git repo
   listed "$1" "$2" # never a .venv, .devkit or cache of a developer's
-  cp "$root/devkitw" "$2/"
+  cp "$work/src/devkitw" "$2/" # the published copy, which trusts the test key
   printf '[devkit]\nurl = "file://%s"\nversion = "%s"\ncommit = "%s"\n' \
     "$bare" "$tag" "$commit" >"$2/devkit.toml"
   # The fixture's own devkit.toml, if any, follows the pin.

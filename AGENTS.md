@@ -76,7 +76,7 @@ break a gate silently.
 ## Releasing
 
 The procedure is the README's "Releasing" section, step by step: follow
-it rather than `make tag`. Tags are never moved or reused.
+it rather than `make tag`. Tags are never moved to another commit or reused.
 
 ## Agent tooling
 

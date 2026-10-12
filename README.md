@@ -26,8 +26,9 @@ lists its upgrade steps under [Releasing](#releasing)), and a cached
 checkout works offline. The cache is
 read-only: a change to shared tooling is made and released in devkit, never
 edited inside a project. The wrapper fails closed: it never falls back to
-another version and refuses a fetched commit that differs from the pin or
-is not on devkit's `main`.
+another version and refuses a fetched commit that differs from the pin, is
+not on devkit's `main`, or is named by a tag devkit's release key did not
+sign.
 
 **Why a parent POM.** The Maven gate configuration lives in one place,
 `java/parent/pom.xml`, which a consumer's root pom inherits through the
@@ -102,8 +103,10 @@ than the pin's); every target that runs Maven fails while the root pom does
 not inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
 whole repository, then the language gates. Requirements: git, GNU make,
-bash as `/bin/bash`, and python3 (3.11 or later); a uv project needs
-python3's venv and
+ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3 (3.11 or
+later); fetching a devkit release on a cache miss also needs the running UID to
+have a passwd entry, which ssh-keygen requires (a container run with an
+arbitrary `-u` UID needs one added); a uv project needs python3's venv and
 pip only when no uv of the pinned version is on `PATH` or in devkit's
 cache. `make lint` also needs node (22.22.2 or later) with npm, for
 markdownlint and a uv project's copy-paste gate (jscpd), and `make format`
@@ -157,8 +160,10 @@ bump of the closure.
 
 ## Releasing
 
-A release is a signed annotated tag on `main`; `devkitw` refuses a tag whose
-commit is not on `main`. That check relies on every commit on `main` having
+A release is an annotated tag on `main`, signed with devkit's SSH release
+key, whose allowed-signers line `devkitw` carries. `devkitw` refuses a tag
+that key did not sign, one named other than the pinned version, and one whose
+commit is not on `main`. The last check relies on every commit on `main` having
 been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
 protected, and pull requests squash-merged. The release commit sets the
 version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
@@ -180,16 +185,21 @@ its closures to every consumer that bumps to it, so a failing advisory is
 fixed or justified in the closure's `audit-ignore`, in a pull request of its
 own, first.
 
-Then tag, from `main`'s tip, with this snippet rather than `make tag`:
+Then tag, from `main`'s tip, with this snippet rather than `make tag`. It
+needs git 2.34 or later and ssh-keygen (OpenSSH 8.1 or later), and
+`user.signingKey` set to the release key in the clone's own config first:
 
 ```sh
 git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
 tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
 version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
 print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
-  git tag -a -s "$tag" -m "devkit $tag" &&
+  git -c gpg.format=ssh tag -a -s "$tag" -m "devkit $tag" &&
   git push origin "$tag"
 ```
+
+The release key signs devkit's release tags and nothing else: a signature
+binds the commit, type, tag name and namespace, not the repository.
 
 Then, in a pull request of its own, point `devkit.toml` at the new release,
 so that CI's `GATES=release` run gates the next changes with it: `version`
@@ -203,8 +213,24 @@ commit=$(git ls-remote origin "refs/tags/${tag:?}^{}" | cut -f1) &&
   rm devkit.toml.bak && make lint-repo GATES=release
 ```
 
-Tags are never moved or reused. Were one moved, the wrapper would refuse the
-fetched commit rather than build with it.
+Tags are never moved to another commit, and never reused. Were one moved,
+the wrapper would refuse the fetched commit rather than build with it.
+v0.1.0 through v0.6.0 were re-signed once with the SSH release key, at their
+same commits, so that the current wrapper fetches every release.
+
+On devkit's forge, and on any mirror a consumer pins, only the maintainer may
+create, move or delete `v*` tags. A signature does not stop anyone deleting a
+pinned tag, and then every project without a cached copy fails closed.
+
+A new release key ships in `devkitw` as a second allowed-signers line (the
+single-quoted `signers` value may span lines; the rotation release loosens the
+one-line guards in both `swap_signers` copies, in `tests/`), in a release the
+old key signs. Every existing `v*` tag is re-signed with the new key at its
+same commit, so a newer wrapper still fetches older releases, and later
+releases are signed with the new key. A consumer bumps through the release
+that carries both lines: a wrapper that knows only the old key, bumped
+straight past it, refuses the tag as "not signed by devkit's release key".
+The old line goes once every tag is re-signed and that release has shipped.
 
 A consumer bumps by editing `version` and `commit` in `devkit.toml` and,
 in a Maven project, the root pom's `<parent><version>` (the version without
@@ -218,6 +244,25 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
+
+### Upgrading from v0.6.x
+
+After the bump, copy the wrapper the old one has just fetched and verified,
+and commit it with the bump: `cp .devkit/devkitw devkitw`. `make lint` fails
+until the copy is committed (`lint-devkitw`), so a bump that edits only
+`devkit.toml`, as Renovate's does, needs that one commit on its pull
+request. The new wrapper refuses a tag devkit's release key did not sign or
+that names another version. It needs ssh-keygen (OpenSSH 8.1 or later), which
+macOS and most Linux installs carry; a CI image without it installs it
+(`openssh-client` on Debian and Ubuntu) before the first make target. On a
+cache miss ssh-keygen also needs the running UID to have a passwd entry: a
+container run with an arbitrary `-u` UID fails with "ssh-keygen failed
+verifying tag", naming ssh-keygen's own message.
+
+A remote that mirrors devkit must re-sync its `v*` tags with force (`git fetch
+--force --tags` or equivalent), since v0.1.0 through v0.6.0 were re-signed as
+new tag objects at the same commits; the new wrapper refuses a mirror still
+serving the old unsigned objects.
 
 ### Upgrading from v0.5.x
 
