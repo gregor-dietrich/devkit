@@ -661,8 +661,9 @@ inherit it, and Maven reads it through the link:
   reach them; override them inside the execution with the id below: license's
   `force` (`true`, so that every build runs the license checks, not only the
   first after a clean), `failOnMissing`, `failOnBlacklist`, `excludedGroups` and
-  `excludedLicenses` (`add-third-party`; an `excludedGroups` of the project's
-  own replaces the one that skips its groupId, so it keeps
+  `excludedLicenses` (`add-third-party`; `excludedLicenses` names are separated
+  by `|` and compared exactly, so none may wrap over a line; an `excludedGroups`
+  of the project's own replaces the one that skips its groupId, so it keeps
   `^\Q${project.groupId}\E(?=:)|` before its own groups: the plugin embeds the
   pattern in a regular expression over `groupId:artifactId`, so
   `^\Qcom.example\E(?=:)` matches exactly that groupId, where a bare

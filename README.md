@@ -310,6 +310,9 @@ one. Declare a missing license in the module's
 through `excludedGroups` as above, or override `failOnBlacklist` or
 `excludedLicenses` in `add-third-party` ([Parent
 POM](docs/contract.md#parent-pom)). Building again no longer helps.
+A dependency under "Business Source License" or "Server Side Public License"
+now fails the license check too: the parent's list wrapped inside those two
+names, so they never matched.
 
 ### Upgrading from v0.4.x
 

@@ -237,10 +237,12 @@
                      group pattern inside its own regex over groupId:artifactId, so (?=:)
                      ends the groupId where $ cannot. -->
                 <excludedGroups>^\Q${project.groupId}\E(?=:)</excludedGroups>
+                <!-- The plugin splits on | and compares each name exactly, so a name must not
+                     wrap: break lines only next to a |. -->
                 <excludedLicenses>
-                  Commercial||Proprietary||SSPL||Elastic License||Business Source
-                  License||Commons Clause||Elastic License 2.0||Server Side Public
-                  License||BUSL-1.1||Polyform||PolyForm
+                  Commercial|Proprietary|SSPL|Elastic License|
+                  Business Source License|Commons Clause|Elastic License 2.0|
+                  Server Side Public License|BUSL-1.1|Polyform|PolyForm
                 </excludedLicenses>
               </configuration>
             </execution>

@@ -14,7 +14,9 @@
 #          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
 #          tests/python_clean_test.sh, tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/markdown_isolation_test.sh and
-#          tests/closure_audit_test.sh;
+#          tests/closure_audit_test.sh, and that no entry of the parent's
+#          excludedLicenses is empty or holds a line break, a tab or a
+#          double space;
 #          make lint-repo, not this, gates devkit's own tree. Needs git,
 #          make, shellcheck, bash >= 4 (shopt globstar; macOS ships 3.2),
 #          procps (pgrep, ps), tar, sha256sum or shasum,
@@ -34,7 +36,9 @@
 #          app depends on a jar without a license to fail twice in a row,
 #          without a clean between, and to pass once the module's
 #          override-THIRD-PARTY.properties declares one, leaving its
-#          sources unchanged; then break copies of the monolith
+#          sources unchanged, and of a copy whose app depends on a jar under
+#          the Business Source License to fail twice in a row the same way;
+#          then break copies of the monolith
 #          (format, a shared and a project checkstyle rule, the project
 #          rule's suppression, coverage, an image digest, Markdown, a secret
 #          committed, staged or unstaged, a missing git object, a devkitw
@@ -134,6 +138,25 @@ shell_part() {
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
+  check "parent: no excludedLicenses entry is empty or holds a line break, a tab or a double space" \
+    excluded_licenses_whole "$root/java/parent/pom.xml"
+  check "parent: the excludedLicenses check rejects a name wrapped over a line" excluded_licenses_wrapped
+}
+
+# excluded_licenses_whole POM: the license plugin splits each excludedLicenses on \s*\|\s* and
+# compares each piece, untrimmed, to a license name exactly: a name wrapped over lines never matches.
+excluded_licenses_whole() {
+  python3 -c 'import re, sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+lists = [e.text or "" for e in ET.parse(sys.argv[1]).getroot().iterfind(".//m:excludedLicenses", ns)]
+bad = [e for t in lists for e in re.split(r"\s*\|\s*", t.strip()) if not e or re.search(r"[\n\t]|  ", e)]
+sys.exit(f"excludedLicenses entries that can never match: {bad!r}") if bad or not lists else None' "$1"
+}
+
+excluded_licenses_wrapped() { # the check fails on the parent with one name wrapped, as it was before
+  local wrapped
+  wrapped=$(sed 's/Server Side Public License|/Server Side Public\n                  License|/' "$root/java/parent/pom.xml") &&
+    [[ $wrapped == *$'Public\n'*'License|BUSL'* ]] && ! excluded_licenses_whole /dev/stdin <<<"$wrapped" 2>/dev/null
 }
 
 listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or untracked but not ignored
@@ -352,6 +375,8 @@ java_part() {
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group
+  check "java-multimodule: a dependency under the Business Source License fails every make test" \
+    blacklisted
   negatives
 }
 
@@ -376,26 +401,50 @@ out_of_reactor() {
     make_says pass "$proj" test "Starting tests for app..." "Tests completed."
 }
 
+# with_dep DIR [LICENSE]: a copy of java-multimodule in DIR whose app depends on a jar installed into
+# the caller's MAVEN_ARGS repository as devkit.fixture.other:<DIR's name>:1.0, under LICENSE when
+# given, else with no license metadata.
+with_dep() {
+  local dep=$work/dep-${1##*/} artifact=${1##*/} pom=()
+  mkdir "$dep" && echo x >"$dep/x.txt" && jar cf "$dep/x.jar" -C "$dep" x.txt || return
+  if [[ -n ${2:-} ]]; then
+    printf '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+<groupId>devkit.fixture.other</groupId><artifactId>%s</artifactId><version>1.0</version>
+<licenses><license><name>%s</name></license></licenses></project>\n' "$artifact" "$2" >"$dep/pom.xml"
+    pom=(-DpomFile="$dep/pom.xml")
+  fi
+  mvn -B -q install:install-file -Dfile="$dep/x.jar" -DgroupId=devkit.fixture.other -DartifactId="$artifact" \
+    -Dversion=1.0 -Dpackaging=jar ${pom[@]+"${pom[@]}"} || return
+  setup "$root/tests/fixtures/java-multimodule" "$1"
+  sed_into "$1/app/pom.xml" "s|^  <dependencies>|&\\n    <dependency>\\n      <groupId>devkit.fixture.other</groupId>\\n      <artifactId>$artifact</artifactId>\\n      <version>1.0</version>\\n    </dependency>|"
+}
+
 # The parent excludes the project's own groupId from the license check by a pattern that ends it
 # ((?=:)). A license-less jar under devkit.fixture.other, which only starts with the fixture's
 # devkit.fixture, must still fail make test; with a bare ^\Qdevkit.fixture\E it would pass.
 foreign_group() {
-  local proj=$work/foreign-group m2=$work/m2 dep=$work/foreign-dep
-  local -x MAVEN_ARGS="-Dmaven.repo.local=$m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
-  mkdir "$dep" && echo x >"$dep/x.txt" && jar cf "$dep/x.jar" -C "$dep" x.txt || return
-  mvn -B -q install:install-file -Dfile="$dep/x.jar" -DgroupId=devkit.fixture.other -DartifactId=x \
-    -Dversion=1.0 -Dpackaging=jar || return
-  setup "$root/tests/fixtures/java-multimodule" "$proj"
-  sed_into "$proj/app/pom.xml" 's|^  <dependencies>|&\n    <dependency>\n      <groupId>devkit.fixture.other</groupId>\n      <artifactId>x</artifactId>\n      <version>1.0</version>\n    </dependency>|'
+  local proj=$work/foreign-group
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
+  with_dep "$proj" || return
   # Twice: a failed run's THIRD-PARTY.txt let the next, un-cleaned one skip the license goal.
   ONLY=app make_says fail "$proj" test "There are some dependencies with no license" &&
     ONLY=app make_says fail "$proj" test "There are some dependencies with no license" || return
   # Declared as docs/contract.md says, committed: the plugin reads it and writes nothing to src.
   local override=app/src/license/override-THIRD-PARTY.properties changed
-  mkdir -p "$proj/${override%/*}" && echo 'devkit.fixture.other--x--1.0=MIT License' >"$proj/$override" &&
+  mkdir -p "$proj/${override%/*}" && echo "devkit.fixture.other--${proj##*/}--1.0=MIT License" >"$proj/$override" &&
     git -C "$proj" add "$override" && git -C "$proj" commit -q -m override &&
     ONLY=app make_says pass "$proj" test && changed=$(git -C "$proj" status --porcelain -- app/src) &&
     [[ -z $changed ]]
+}
+
+# The parent's excludedLicenses names "Business Source License"; it once wrapped inside that name,
+# which the plugin compares exactly, so a dependency under it passed.
+blacklisted() {
+  local proj=$work/blacklisted
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
+  with_dep "$proj" "Business Source License" || return
+  ONLY=app make_says fail "$proj" test "There are some forbidden licenses used" &&
+    ONLY=app make_says fail "$proj" test "There are some forbidden licenses used"
 }
 
 ruff_skips_devkit() { # ruff's walk of DIR lists files, none of them through the .devkit link
