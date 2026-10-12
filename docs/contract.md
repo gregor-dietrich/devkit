@@ -559,11 +559,15 @@ inherit it, and Maven reads it through the link:
   python3 3.11, and then `scripts/java/parent_check.py`.
   That fails, with one `ERROR` line and exit status 14, when
   - the root pom's `<parent>` is not devkit's;
-  - its `<relativePath>` is not exactly `.devkit/java/parent/pom.xml`;
-  - its `<version>` is not `devkit.toml`'s `version` without the `v`, or
-    the pinned checkout's parent POM declares another version (a defective
-    release);
-  - the root pom has no `<groupId>` of its own: it would inherit
+  - the `<relativePath>` of the root pom, or of any module pom
+    (`<modules>`, recursively, profiles included) whose `<parent>` is
+    devkit's, is not exactly the path from that pom's directory to
+    `.devkit/java/parent/pom.xml`: `.devkit/java/parent/pom.xml` for the
+    root pom, `../.devkit/java/parent/pom.xml` for `app-api/pom.xml`;
+  - the `<version>` of any of those poms is not `devkit.toml`'s `version`
+    without the `v`, or the pinned checkout's parent POM declares another
+    version (a defective release);
+  - any of those poms has no `<groupId>` of its own: it would inherit
     `de.vptr.devkit`, for its artifacts and for NullAway's default
     packages;
   - the root pom or any module pom (`<modules>`, recursively, profiles

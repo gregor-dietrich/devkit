@@ -233,6 +233,13 @@ program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`), so a project whose
 devkit fetch authenticated through one moves the credential into git
 configuration, such as `http.<url>.extraHeader`, or into `~/.netrc`.
 
+A module pom that inherits devkit's parent directly now gets the root pom's
+checks: its `<relativePath>` must be the path from its directory to
+`.devkit/java/parent/pom.xml` (`../.devkit/java/parent/pom.xml` for
+`app-api/pom.xml`), its parent `<version>` the pin's, and it needs a
+`<groupId>` of its own. A module that inherits the project's root pom is
+unaffected.
+
 devkit's caches (`~/.cache/devkit`, or `$XDG_CACHE_HOME/devkit`) are now
 read-only directories as well as files, so a plain `rm -rf` of one fails:
 a job or script that clears them runs `chmod -R u+w` on them first. An

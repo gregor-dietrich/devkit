@@ -4,7 +4,8 @@
 scripts/lib/get_maven.sh runs this before every Maven build: Maven reads the parent only
 through the .devkit link, and anything that makes it look de.vptr.devkit:devkit-parent up
 in a remote repository instead must fail here first. Every failure is one ERROR line on
-stderr; exit 14.
+stderr; exit 14. The root pom must inherit devkit's parent; a module pom that inherits it
+directly gets the root's relativePath, version and groupId rules.
 """
 
 import os
@@ -83,36 +84,50 @@ def check() -> str:
     devkit = load(DEVKIT / "java/parent/pom.xml")
     coordinate = f"{text(devkit, 'groupId')}:{text(devkit, 'artifactId')}"
     poms = project_poms(REPO_ROOT / "pom.xml")
-    root = poms[0][1]
 
-    parent = root.find("{*}parent")
-    if parent is None or f"{text(parent, 'groupId')}:{text(parent, 'artifactId')}" != coordinate:
+    def inherits(pom: ET.Element) -> ET.Element | None:
+        parent = pom.find("{*}parent")
+        found = None if parent is None else f"{text(parent, 'groupId')}:{text(parent, 'artifactId')}"
+        return parent if found == coordinate else None
+
+    def check_parent(path: Path, pom: ET.Element, parent: ET.Element) -> str:
+        """The rules for a pom that inherits devkit's parent; return the pin."""
+        # Physical: Maven opens <pom's dir>/<relativePath> as is, so .. leaves a symlinked directory.
+        required = os.path.relpath(REPO_ROOT / RELATIVE_PATH, path.parent.resolve())
+        relative_path = text(parent, "relativePath")
+        if relative_path != required:
+            raise Failure(
+                f"{shown(path)}'s <parent><relativePath> must be {required}, not {relative_path or 'empty or absent'}; "
+                f"any other path makes Maven look {coordinate} up in remote repositories."
+            )
+        pin = pinned_version()
+        expected = pin.removeprefix("v")
+        if text(devkit, "version") != expected:
+            raise Failure(
+                f"devkit {pin}'s parent POM declares version {text(devkit, 'version')}: the pinned tag does "
+                "not match its parent POM, which makes it a defective devkit release; pin another one."
+            )
+        found = text(parent, "version")
+        if found != expected:
+            raise Failure(
+                f"{shown(path)} inherits {coordinate} {found}, but devkit.toml pins {pin}; "
+                f"set <parent><version>{expected}</version>."
+            )
+        if text(pom, "groupId") is None:
+            code = "the project's" if path.parent == REPO_ROOT else "its"
+            raise Failure(
+                f"{shown(path)} has no <groupId> of its own: it would inherit devkit's, for its artifacts and for "
+                f"NullAway's annotated packages, which would then check none of {code} code."
+            )
+        return pin
+
+    root_parent = inherits(poms[0][1])
+    if root_parent is None:
         raise Failure(f"pom.xml does not inherit {coordinate}, which devkit requires since v0.2.0; {UPGRADE_HINT}.")
-    relative_path = text(parent, "relativePath")
-    if relative_path != RELATIVE_PATH:
-        raise Failure(
-            f"pom.xml's <parent><relativePath> must be {RELATIVE_PATH}, not {relative_path or 'empty or absent'}; "
-            f"any other path makes Maven look {coordinate} up in remote repositories."
-        )
-
-    pin = pinned_version()
-    expected = pin.removeprefix("v")
-    if text(devkit, "version") != expected:
-        raise Failure(
-            f"devkit {pin}'s parent POM declares version {text(devkit, 'version')}: the pinned tag does "
-            "not match its parent POM, which makes it a defective devkit release; pin another one."
-        )
-    found = text(parent, "version")
-    if found != expected:
-        raise Failure(
-            f"pom.xml inherits {coordinate} {found}, but devkit.toml pins {pin}; "
-            f"set <parent><version>{expected}</version>."
-        )
-    if text(root, "groupId") is None:
-        raise Failure(
-            "pom.xml has no <groupId> of its own: it would inherit devkit's, for its artifacts and for "
-            "NullAway's annotated packages, which would then check none of the project's code."
-        )
+    pin = check_parent(*poms[0], root_parent)
+    for path, pom in poms[1:]:
+        if (parent := inherits(pom)) is not None:
+            check_parent(path, pom, parent)
 
     owned = {local_name(p) for p in devkit.iterfind("{*}properties/*") if local_name(p).endswith(".version")}
     for path, pom in poms:
@@ -132,7 +147,7 @@ def check() -> str:
                             "Maven merges it with the parent's by position and drops the inherited "
                             "-Werror, Error Prone or NullAway."
                         )
-    return f"devkit parent version check passed. ({found} == {pin})"
+    return f"devkit parent version check passed. ({text(root_parent, 'version')} == {pin})"
 
 
 def main() -> None:

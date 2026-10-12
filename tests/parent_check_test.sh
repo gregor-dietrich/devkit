@@ -93,6 +93,41 @@ expect "a root pom without its own groupId fails" 14 "has no <groupId> of its ow
 project "$(parent)$own<properties><checkstyle.version>1.0</checkstyle.version></properties>"
 expect "the root pom redefining a tool version fails" 14 \
   "partial migration: remove <checkstyle.version> from pom.xml; the parent owns it"
+mpath=../.devkit/java/parent/pom.xml
+project "$(parent)$own"
+module "$(parent "$version" "$mpath")$own"
+expect "a module inheriting devkit's parent by its own path passes" 0 "$passed"
+project "$(parent)$own"
+module "$(parent "$version" "$mpath")$own<modules><module>api</module></modules>"
+mkdir -p "$proj/app-api/api"
+printf '<project>%s%s</project>\n' "$(parent "$version" ../.devkit/java/parent/pom.xml)" "$own" >"$proj/app-api/api/pom.xml"
+expect "a nested module inheriting devkit's parent by the path from a module fails" 14 \
+  "app-api/api/pom.xml's <parent><relativePath> must be ../../.devkit/java/parent/pom.xml"
+project "$(parent)$own"
+mkdir -p "$proj/x/app-api"
+ln -s x/app-api "$proj/app-api"
+module "$(parent "$version" "$mpath")$own"
+expect "a symlinked module inheriting devkit's parent by the path from its link fails" 14 \
+  "app-api/pom.xml's <parent><relativePath> must be ../../.devkit/java/parent/pom.xml"
+project "$(parent)$own"
+module "$(parent)$own"
+expect "a module inheriting devkit's parent by the root's path fails" 14 \
+  "app-api/pom.xml's <parent><relativePath> must be $mpath, not .devkit/java/parent/pom.xml"
+project "$(parent)$own"
+module "$(parent "$version" "")$own"
+expect "a module inheriting devkit's parent with an empty relativePath fails" 14 \
+  "app-api/pom.xml's <parent><relativePath> must be $mpath, not empty or absent"
+project "$(parent)$own"
+module "$(parent 0.0.0 "$mpath")$own"
+expect "a module inheriting devkit's parent off the pin fails" 14 \
+  "app-api/pom.xml inherits de.vptr.devkit:devkit-parent 0.0.0, but devkit.toml pins v$version"
+project "$(parent)$own"
+module "$(parent "$version" "$mpath")<artifactId>app-api</artifactId>"
+expect "a module inheriting devkit's parent without its own groupId fails" 14 \
+  "app-api/pom.xml has no <groupId> of its own"
+project "$(parent)$own"
+module "$(parent "$version" ../pom.xml "my.app:my-app")<artifactId>app-api</artifactId>"
+expect "a module inheriting the project's root pom is not checked" 0 "$passed"
 project "$(parent)$own"
 module '<properties><checkstyle.version>1.0</checkstyle.version></properties>'
 expect "a module pom redefining a tool version fails" 14 \
