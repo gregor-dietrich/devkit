@@ -42,7 +42,7 @@ root=${XDG_CACHE_HOME:-$HOME/.cache}/devkit
 case $root in /*) ;; *) die "cache root $root is not an absolute path" ;; esac
 dir=$root/$commit mark=.devkit-commit # the marker holds "<commit> <version>"
 
-# g ARGS...: git in the temp dir, without hooks, credential helpers or stalls.
+# g ARGS...: git in the temp dir, without hooks, credential helpers or prompts.
 g() {
   git -c core.hooksPath=/dev/null -c credential.helper= \
     -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 -C "$tmp" "$@"
@@ -106,7 +106,11 @@ elif [ -z "$cached" ]; then
   # Never touch a calling git hook's repository (GIT_DIR, GIT_INDEX_FILE, ...).
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
-  : "${GIT_SSH_COMMAND:=ssh -o BatchMode=yes -o ConnectTimeout=10}"
+  # ConnectTimeout bounds the connect and handshake; the keepalives drop a
+  # connection whose server stops answering. A live server whose git stalls
+  # is not bounded, over ssh or (above 1000 bytes/s) over HTTPS.
+  : "${GIT_SSH_COMMAND:=ssh -o BatchMode=yes -o ConnectTimeout=10 \
+    -o ServerAliveInterval=10 -o ServerAliveCountMax=2}"
   # Fail rather than prompt. GIT_TERMINAL_PROMPT=0 does not stop git asking an
   # askpass (GIT_ASKPASS, core.askPass, SSH_ASKPASS); an empty GIT_ASKPASS does.
   export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=

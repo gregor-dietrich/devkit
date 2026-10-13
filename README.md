@@ -316,6 +316,21 @@ fails on a file it cannot parse: a project using syntax newer than its CI's
 `python3` (`type X = …`, `def f[T]()` or `f"{d["k"]}"`, 3.12 and later, on
 a 3.11 image) puts a newer `python3` on `PATH` there.
 
+In a Maven project, `make check` now fails on a `FRONTEND_DIR` that is
+neither one of `MODULES` nor `.` in a monolith, which only an empty `ONLY`
+could select: set it to the frontend module's directory as `MODULES`
+spells it, to `.` when a monolith's root is the frontend, or empty.
+
+`make tag` now tags only the tip of origin's default branch, from a clean
+tree, and only a tag shaped `X.Y.Z`, optionally prefixed `v` and followed by
+`rcN` or `-rcN`. `REVISION` is checked the same way, so a
+`REVISION=1.0.0-SNAPSHOT` left in the environment is refused rather than
+tagged. Tags are ordered by git's version sort of the whole name, so a
+`v`-prefixed tag ranks above any bare one: where both exist, type the next
+tag instead of accepting the suggestion. A project that tags
+release branches or uses another scheme tags by hand: `git tag -a -s <tag>`,
+then `git push origin <tag>`.
+
 ### Upgrading from v0.5.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,

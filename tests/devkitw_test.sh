@@ -12,7 +12,7 @@ work=$(mktemp -d)
 uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # sealed trees
 trap 'uncache "$work"' EXIT
 # shellcheck disable=SC2046 # word splitting is intended
-unset $(git rev-parse --local-env-vars) GIT_SSH_COMMAND http_proxy all_proxy ALL_PROXY
+unset $(git rev-parse --local-env-vars) GIT_SSH_COMMAND SSH_AUTH_SOCK http_proxy all_proxy ALL_PROXY
 export HOME=$work/home XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=$HOME/.gitconfig # never the caller's, nor XDG's
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid
@@ -357,7 +357,9 @@ case_ssh_batch() {
   uncache "${cache:?}/$c2"
   pin "ssh://example.invalid/devkit.git" "file://$bare" v0.0.2 "$c2"
   run_with "$work/ssh" path
-  ok_at "$c2" && grep -q 'BatchMode=yes' "$work/ssh/args"
+  ok_at "$c2" && grep -q 'BatchMode=yes' "$work/ssh/args" &&
+    grep -qw 'ServerAliveInterval=10' "$work/ssh/args" &&
+    grep -qw 'ServerAliveCountMax=2' "$work/ssh/args"
 }
 case_askpass() { # a url that answers 401, and an askpass from every source
   uncache "${cache:?}/$c2"

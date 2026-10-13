@@ -6,14 +6,22 @@ echo "Starting untagging operation..."
 
 cd "$PROJECT_ROOT"
 
-git fetch
+git fetch origin
 
-LATEST_VERSION=$(git for-each-ref --count=1 --sort=-version:refname \
-    --format='%(refname:lstrip=2)' refs/tags)
-LATEST_VERSION=${LATEST_VERSION:-1.0.0-SNAPSHOT}
+# shellcheck source=SCRIPTDIR/lib/release_tag.sh
+. "$DEVKIT/scripts/lib/release_tag.sh"
+LATEST_TAG=$(latest_release_tag)
 
-read -r -p "Enter the tag to delete [${LATEST_VERSION}]: " VERSION
-VERSION=${VERSION:-$LATEST_VERSION}
+# End of input (Ctrl-D, or no terminal) is no answer, not the default.
+read -r -p "Enter the tag to delete${LATEST_TAG:+ [${LATEST_TAG}]}: " VERSION || [[ -n "$VERSION" ]] || {
+    echo "No answer; nothing deleted." >&2
+    exit 1
+}
+VERSION=${VERSION:-$LATEST_TAG}
+if [[ -z "$VERSION" ]]; then
+    echo "No tag given; nothing deleted." >&2
+    exit 1
+fi
 
 echo "Deleting tag ${VERSION}..."
 

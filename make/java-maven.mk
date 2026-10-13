@@ -27,7 +27,7 @@ FRONTEND_DIR := $(strip $(FRONTEND_DIR))
 
 check: check-java
 
-check-java: ## Verify the JDK, Maven >= 3.9.9, Python >= 3.11, checkstyle-project.xml, the devkit parent POM and the pom's version pins
+check-java: ## Verify the JDK, Maven >= 3.9.9, Python >= 3.11, checkstyle-project.xml, FRONTEND_DIR, the devkit parent POM and the pom's version pins
 	@"$(DEVKIT)/scripts/java/check.sh"
 
 install: check ## make check, then mvn clean install -DskipTests

@@ -11,6 +11,22 @@ if [[ ! -f checkstyle-project.xml ]]; then
     exit 12
 fi
 
+# select_modules.sh selects the frontend by this name, so a FRONTEND_DIR that
+# is neither a listed module nor a monolith's root would silently drop out.
+FRONTEND_ERROR=
+if [[ -n "${FRONTEND_DIR:-}" ]]; then
+    if [[ $FRONTEND_DIR == *[[:space:]]* ]]; then
+        FRONTEND_ERROR="names several directories; it is one directory"
+    elif [[ " ${MODULES:-.} " != *" $FRONTEND_DIR "* ]]; then
+        FRONTEND_ERROR="is neither one of MODULES (${MODULES:-empty}) nor . in a monolith"
+    fi
+fi
+if [[ -n "$FRONTEND_ERROR" ]]; then
+    echo "ERROR: FRONTEND_DIR := $FRONTEND_DIR in the project Makefile $FRONTEND_ERROR. Exiting."
+    echo "Set it to the frontend module's directory as MODULES lists it, to . when the monolith's root is the frontend, or empty; see .devkit/docs/contract.md."
+    exit 16
+fi
+
 REQUIRED_JDK_VERSION="${JAVA_VERSION:?set JAVA_VERSION in the project Makefile}"
 
 echo "Running environment checks..."

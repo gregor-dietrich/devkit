@@ -14,7 +14,8 @@
 #          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
 #          tests/python_clean_test.sh, tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/anchored_match_test.sh,
-#          tests/markdown_isolation_test.sh and tests/closure_audit_test.sh,
+#          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh
+#          and tests/tag_test.sh,
 #          and that no includedLicense of the parent is empty or holds a line
 #          break, a tab, a double space or edge whitespace, that no name is
 #          listed twice and that the allowlist names the licenses devkit's
@@ -51,7 +52,10 @@
 #          without its revision line) and expect lint or test to fail for
 #          that reason, and make format to
 #          fix the format break so that lint passes; expect check to fail
-#          without checkstyle-project.xml, without devkit's parent and on a
+#          without checkstyle-project.xml, on a FRONTEND_DIR that is neither
+#          one of MODULES nor . in a monolith (and to pass on . there,
+#          and on a listed module in java-multimodule),
+#          without devkit's parent and on a
 #          parent version that differs from the pin, and lint to fail on the
 #          latter too, before Maven runs. Expect test to fail on a profile
 #          MAVEN_ARGS requests, under mvn and under a script-only ./mvnw, and
@@ -148,6 +152,7 @@ shell_part() {
   check "anchored_match tests" "$root/tests/anchored_match_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
+  check "tag tests" "$root/tests/tag_test.sh"
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
@@ -338,6 +343,19 @@ negatives() {
   negative parent-version-lint lint "devkit.toml pins" pom.xml "$parent_off_pin"
   negative devkitw lint "cp .devkit/devkitw devkitw" devkitw '/^# devkitw revision/d'
   negative no-parent check "which devkit requires since v0.2.0" pom.xml '/<parent>/,/<\/parent>/d'
+  negative frontend-dir check "is neither one of MODULES" Makefile \
+    's/^FRONTEND_DIR .*/FRONTEND_DIR := web/'
+  negative frontend-root check "is neither one of MODULES" Makefile \
+    's/^MODULES .*/MODULES := core/; s/^FRONTEND_DIR .*/FRONTEND_DIR := ./'
+  negative frontend-words check "names several directories" Makefile \
+    's/^MODULES .*/MODULES := core app/; s/^FRONTEND_DIR .*/FRONTEND_DIR := core app/'
+  edited "$work/frontend-root" Makefile 's/^FRONTEND_DIR .*/FRONTEND_DIR := ./'
+  check "java-monolith: make check passes with FRONTEND_DIR := ." \
+    make_says pass "$work/frontend-root" check
+  setup "$root/tests/fixtures/java-multimodule" "$work/frontend-module"
+  sed_into "$work/frontend-module/Makefile" 's/^FRONTEND_DIR .*/FRONTEND_DIR := app/'
+  check "java-multimodule: make check passes with FRONTEND_DIR := app" \
+    make_says pass "$work/frontend-module" check
   local proj=$work/no-project-checkstyle
   setup "$root/tests/fixtures/java-monolith" "$proj"
   rm "$proj/checkstyle-project.xml"
@@ -419,7 +437,7 @@ prepare() { # once per run: the temp dir, a clean environment and the published 
   work=$(mktemp -d) tag=v$(parent_version) bare=$work/devkit.git
   trap 'uncache "$work"' EXIT
   # shellcheck disable=SC2046 # one argument per variable name
-  unset $(git rev-parse --local-env-vars) ONLY PROJECT_ROOT REVISION JUNIT_DIR COVERAGE_FLOOR MODULES
+  unset $(git rev-parse --local-env-vars) ONLY PROJECT_ROOT REVISION JUNIT_DIR COVERAGE_FLOOR MODULES SSH_AUTH_SOCK
   export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
   export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid

@@ -71,7 +71,7 @@ branch: ## create or reset a git branch from a source (prompts for names and pus
 rebase: ## interactive git rebase against a target (defaults to origin/main)
 	@"$(DEVKIT)/scripts/rebase.sh"
 
-tag: ## create, sign and push a new git tag (auto-increments latest tag suggestion)
+tag: ## sign and push a new release tag at the default branch tip (suggests the next version)
 	@"$(DEVKIT)/scripts/tag.sh"
 
 untag: ## delete a local and remote git tag (prompts for tag to delete)

@@ -119,7 +119,13 @@ include .devkit/make/java-maven.mk
   HTTPS remote's credentials come from git configuration such as
   `http.<url>.extraHeader`, or from `~/.netrc`, and a remote that rejects
   them counts as unreachable. ssh runs in batch mode unless the
-  environment sets `GIT_SSH_COMMAND`, which then brings its own prompting.
+  environment sets `GIT_SSH_COMMAND`, which then brings its own prompting
+  and timeouts.
+- A dead connection does not hang a fetch: HTTPS aborts below 1000
+  bytes/s for 20 seconds, and the default ssh command gives up on a connect
+  after 10 seconds and on a server that stops answering its keepalives
+  within about half a minute. A server that keeps answering while git
+  stalls is not bounded.
 - Two things are trusted. The release key decides which tags are releases;
   `main` on the remote that answers (`url`, or `mirror` when `url` is
   unreachable) decides which commits may be. A pinned commit needs both. The
@@ -198,6 +204,17 @@ include .devkit/make/python-uv.mk
   `coverage`, `audit`, `clean`, `kill`. `python-uv.mk` owns
   `check-python`, `install`, `lint`, `format`, `test`, `audit`, `clean`.
   None defines project-only targets.
+- `tag` signs and pushes a release tag at the tip of origin's default branch.
+  A tag is `X.Y.Z`, optionally prefixed `v` and followed by `rcN` or `-rcN`
+  (no leading zeros); anything else, `REVISION` included, is refused.
+  `REVISION`, when set, is the tag, and there is no prompt. The suggestion
+  is the highest such tag with its rc number, or else its patch,
+  incremented, and none without one. Tags are ordered by git's version sort
+  of the whole name, so a `v`-prefixed tag ranks above any bare one: a
+  project keeps to one prefix. Before the prompt, and under `REVISION` too,
+  it refuses unless HEAD is the tip as the remote reports it now and the
+  working tree is clean, untracked files included. `untag` offers the
+  highest such tag, an rc before its final, and no default without one.
 - `check`, `lint` and `format` are composed by prerequisites, never by two
   recipes: `common.mk` declares `check: check-devkit check-hooks`,
   `lint: lint-repo` and `format: format-md`; the language file adds
@@ -243,7 +260,7 @@ include .devkit/make/python-uv.mk
   (its `pom.xml`, `package.json` and, when committed, `package-lock.json`):
   one of `MODULES`, or
   `.` in a monolith whose frontend is the project root; empty when there is
-  none.
+  none. `make check` fails on any other value.
 - `ONLY` is read through `scripts/lib/select_modules.sh`, never parsed by
   hand. It normalizes each entry to its `MODULES` spelling (`./<dir>`,
   `<dir>/` and `:<dir>` as Maven's `-pl` accepts them) and keeps each module
