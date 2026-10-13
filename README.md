@@ -73,10 +73,12 @@ written against it. In short, a project:
    `commit`); when it has a frontend, its npm minimums in
    `[frontend.min-pins]`, which a project with a frontend requires (an
    empty table when it has no minimums); a uv project, what its copy-paste
-   gate scans in `[python.duplication] paths`, and the duplicated file
-   pairs it accepts; and, optionally, the image namespaces it publishes
-   itself in `[pins] first-party` and further YAML files `lint-pins` reads
-   as workflows in `[pins] extra`;
+   gate scans in `[python.duplication] paths`, the duplicated file pairs it
+   accepts, the anchored regex matches it accepts in
+   `[[python.anchored-match.accepted]]` entries and the files that gate skips
+   in `[[python.anchored-match.excluded]]` entries; and, optionally, the image
+   namespaces it publishes itself in `[pins] first-party` and further YAML
+   files `lint-pins` reads as workflows in `[pins] extra`;
 3. adds `/.devkit` to `.gitignore` (a uv project also `/.venv`);
 4. shapes its `Makefile` as the contract shows: profile variables,
    `DEVKIT := $(shell ./devkitw path)` and its empty-result guard,
@@ -108,9 +110,11 @@ later); fetching a devkit release on a cache miss also needs the running UID to
 have a passwd entry, which ssh-keygen requires (a container run with an
 arbitrary `-u` UID needs one added); a uv project needs python3's venv and
 pip only when no uv of the pinned version is on `PATH` or in devkit's
-cache. `make lint` also needs node (22.22.2 or later) with npm, for
-markdownlint and a uv project's copy-paste gate (jscpd), and `make format`
-needs them for `format-md`, which fixes the Markdown.
+cache, and a `python3` on `PATH` (not `.venv`'s) that parses the project's
+syntax, for the anchored-match gate. `make lint` also needs node (22.22.2
+or later) with npm, for markdownlint and a uv project's copy-paste gate
+(jscpd), and `make format` needs them for `format-md`, which fixes the
+Markdown.
 `make lint` also needs curl, tar and `sha256sum` or `shasum`, which fetch
 and verify the pinned gitleaks once. Windows is not targeted.
 
@@ -295,6 +299,22 @@ project that turned `failOnBlacklist` off has no allowlist check either: it
 turns the option back on and exempts the dependency it was turned off for,
 through `excludedGroups`, an override-file declaration, or by appending its
 license.
+
+In a uv project, `make lint` now fails on an anchored `.match()`, or a
+`.search()` anchored at both ends, since `$` also matches before a trailing
+newline ([uv projects](docs/contract.md#uv-projects)). Fix it with
+`re.fullmatch` on an unanchored pattern or with `\A…\Z`; a line parser over
+input that cannot carry a newline is accepted with a
+`[[python.anchored-match.accepted]]` entry (`file`, `function`, `reason`).
+A tracked `.py` that is not meant to parse (a fixture, a template) or
+vendored code is excluded file by file with a
+`[[python.anchored-match.excluded]]` entry (`file`, `reason`).
+The gate checks the call shapes the contract lists and skips the rest, so a
+project that keeps its own stricter check compares coverage before retiring
+it. It parses with the system `python3`, not the project's interpreter, and
+fails on a file it cannot parse: a project using syntax newer than its CI's
+`python3` (`type X = …`, `def f[T]()` or `f"{d["k"]}"`, 3.12 and later, on
+a 3.11 image) puts a newer `python3` on `PATH` there.
 
 ### Upgrading from v0.5.x
 

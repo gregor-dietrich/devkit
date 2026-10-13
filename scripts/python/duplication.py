@@ -18,9 +18,10 @@ import signal
 import subprocess
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
+
+from project_files import Failure, python_files, python_table
 
 ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 CONTROLS: Path = Path(__file__).resolve().parents[2] / "jscpd" / "controls"
@@ -35,10 +36,6 @@ DEFAULT_MIN_TOKENS = 50
 TIMEOUT = 600
 
 Pair = tuple[str, str]
-
-
-class Failure(Exception):
-    """A check that failed; its message is the ERROR line."""
 
 
 class Config(NamedTuple):
@@ -97,36 +94,8 @@ def accepted_pairs(entries: Any) -> set[Pair]:
     return found
 
 
-def python_files(paths: list[Path]) -> list[Path]:
-    """The *.py files git lists (tracked, plus untracked ones the project does not ignore) under
-    paths, each once; a tracked file deleted from disk, and a symlink, are skipped.
-
-    jscpd gets them as file arguments: a directory argument would let its walker apply the
-    .ignore files in and above the project, and skip tracked files that .gitignore matches.
-    The user's global excludes (core.excludesFile) do not apply.
-    """
-    command = ["git", "-c", "core.excludesFile=/dev/null", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-    try:
-        listed = subprocess.run(command, cwd=ROOT, capture_output=True, check=False)
-    except OSError as exc:
-        raise Failure(f"git cannot list the files in {ROOT}: {exc}") from exc
-    if listed.returncode != 0:
-        said = os.fsdecode(listed.stderr).strip().partition("\n")[0]
-        raise Failure(f"git cannot list the files in {ROOT}: {said or f'exit {listed.returncode}'}")
-    found = {ROOT / os.fsdecode(name) for name in listed.stdout.split(b"\0") if name.endswith(b".py")}
-    return sorted(
-        path for path in found if not path.is_symlink() and path.is_file() and any(path.is_relative_to(top) for top in paths)
-    )
-
-
 def config() -> Config:
-    try:
-        with (ROOT / "devkit.toml").open("rb") as handle:
-            python = tomllib.load(handle).get("python")
-    except FileNotFoundError as exc:
-        raise Failure(f"no devkit.toml in {ROOT}.") from exc
-    except (OSError, ValueError) as exc:  # TOMLDecodeError subclasses ValueError
-        raise Failure(f"cannot read devkit.toml: {exc}") from exc
+    python = python_table(ROOT)
     table = python.get("duplication") if isinstance(python, dict) else None
     example = 'e.g. paths = ["src", "tests"]'
     if not isinstance(table, dict):
@@ -147,7 +116,7 @@ def config() -> Config:
         raise Failure(f"{TABLE}: ignore pattern {comma} holds a comma, which jscpd splits on; list each glob on its own.")
     paths = [project_path(name) for name in table["paths"]]
     accepted = accepted_pairs(table.get("accepted", []))
-    if not (files := python_files(paths)):
+    if not (files := python_files(ROOT, paths)):
         listed = ", ".join(table["paths"])
         raise Failure(f"git lists no Python files under {TABLE}'s paths ({listed}); list the directories holding them.")
     return Config(paths, files, min_tokens, ignore, accepted)
@@ -155,6 +124,9 @@ def config() -> Config:
 
 def scan(jscpd: str, files: list[Path], min_tokens: int, ignore: list[str]) -> list[dict[str, Any]]:
     """The clones jscpd reports among files, run with every setting explicit.
+
+    jscpd gets the files as arguments: a directory argument would let its walker apply the
+    .ignore files in and above the project, and skip tracked files that .gitignore matches.
 
     It runs in an empty directory with an empty HOME: jscpd reads .jscpd.json and package.json
     from its working directory, and the user's git excludes from HOME and XDG_CONFIG_HOME;

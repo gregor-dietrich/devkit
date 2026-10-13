@@ -11,10 +11,14 @@
 # duplicated file pair not accepted there and on an accepted pair no longer duplicated; it
 # needs node and npm.
 #
+# Anchored-match gate: lint fails on every re.match, and re.search anchored at both ends, whose
+# pattern holds a $ (it also matches before a trailing newline), in a function devkit.toml's
+# [python.anchored-match] does not accept, and on an accepted function with no such call left.
+#
 # Module selection: ONLY=<member>[,<member>...] limits lint's ruff passes, format and test to
-# those MODULES. install, check, audit and clean always act on the whole project, and vulture
-# and jscpd always scan it whole. lint's repository gates (lint-repo) and format's format-md,
-# from common.mk, always cover the whole repository.
+# those MODULES. install, check, audit and clean always act on the whole project, and vulture,
+# the anchored-match gate and jscpd always scan it whole. lint's repository gates (lint-repo)
+# and format's format-md, from common.mk, always cover the whole repository.
 # Example: make test ONLY=<member-dir>
 #
 # Environment: JUNIT_DIR, when set, makes `test` write one JUnit XML report per package
@@ -27,13 +31,13 @@ COVERAGE_FLOOR := $(strip $(COVERAGE_FLOOR))
 
 check: check-python
 
-check-python: ## Verify python3, COVERAGE_FLOOR, .python-version, MODULES, [python.duplication], [tool.vulture] paths, the pinned uv and that .venv matches uv.lock
+check-python: ## Verify python3, COVERAGE_FLOOR, .python-version, MODULES, [python.duplication], [python.anchored-match], [tool.vulture] paths, the pinned uv and that .venv matches uv.lock
 	@"$(DEVKIT)/scripts/python/check.sh"
 
 install: ## Sync .venv from uv.lock (uv sync --locked), installing the pinned uv first when missing
 	@"$(DEVKIT)/scripts/python/install.sh"
 
-lint: ## Run lint-repo, then ruff check, ruff format --check, vulture and the jscpd copy-paste gate (needs node and npm)
+lint: ## Run lint-repo, then ruff check, ruff format --check, vulture, the anchored-match gate and the jscpd copy-paste gate (needs node and npm)
 	@"$(DEVKIT)/scripts/python/lint.sh"
 
 format: ## Run format-md, then apply ruff's fixes and format with ruff

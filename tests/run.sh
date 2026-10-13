@@ -13,12 +13,12 @@
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
 #          tests/python_clean_test.sh, tests/java_clean_test.sh,
-#          tests/duplication_test.sh, tests/markdown_isolation_test.sh and
-#          tests/closure_audit_test.sh, and that no includedLicense of the
-#          parent is empty or holds a line break, a tab, a double space or
-#          edge whitespace, that no name is listed twice and that the
-#          allowlist names the licenses devkit's own tests rely on, and that
-#          each of those failures is reported;
+#          tests/duplication_test.sh, tests/anchored_match_test.sh,
+#          tests/markdown_isolation_test.sh and tests/closure_audit_test.sh,
+#          and that no includedLicense of the parent is empty or holds a line
+#          break, a tab, a double space or edge whitespace, that no name is
+#          listed twice and that the allowlist names the licenses devkit's
+#          own tests rely on, and that each of those failures is reported;
 #          make lint-repo, not this, gates devkit's own tree. Needs git
 #          >= 2.34 (SSH signing), make, shellcheck, ssh-keygen (OpenSSH 8.1
 #          or later), bash >= 4 (shopt globstar; macOS ships 3.2), procps
@@ -145,6 +145,7 @@ shell_part() {
   check "python clean tests" "$root/tests/python_clean_test.sh"
   check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
+  check "anchored_match tests" "$root/tests/anchored_match_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
@@ -646,6 +647,11 @@ python_negatives() {
   check "python-uv-single: a duplication break fails make lint" py_duplicated
   check "python-uv-single: make format fixes a format and an unused-import break" py_formatted "$greeter" "$quotes; $import"
   py_negative duplication-config check "[python.duplication] in devkit.toml sets no paths" single "" devkit.toml '/^paths = /d'
+  py_negative anchored-match lint "anchored .match() not accepted in devkit.toml: $greeter:" single installed "$greeter" \
+    's/^"""Builds greetings."""$/&\n\nimport re/; s/if not name.strip():/if not name.strip() or re.match(r"^[a-z]+$", name):/'
+  # shellcheck disable=SC2016 # sed's own $ addresses the last line
+  py_negative anchored-match-config check "needs a reason saying why the match is safe" single "" devkit.toml \
+    '$s/$/\n\n[[python.anchored-match.accepted]]\nfile = "src\/devkit_fixture\/greeter.py"\nfunction = "greet"/'
   py_negative vulture-paths check "sets no [tool.vulture] paths" single "" pyproject.toml '/^paths = /d'
   py_negative coverage test "is below COVERAGE_FLOOR 100%" single installed "$test" "/^def test_rejects_a_blank_name/,\$d"
   py_negative coverage-activation test "wrote no coverage report" single installed pyproject.toml 's/--cov=src //'

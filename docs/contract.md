@@ -61,6 +61,17 @@ paths = ["src", "tests"]          # the Python files git lists under these
 [[python.duplication.accepted]]
 files = ["src/a.py", "src/b.py"]   # the same file twice for a clone within one file
 reason = "why this duplication is deliberate"
+
+# Optional, one per function the project accepts an anchored regex match in.
+[[python.anchored-match.accepted]]
+file = "src/a.py"                  # project-relative
+function = "parse_line"            # as the error line names it, or "<module>"
+reason = "why the input cannot carry a newline"
+
+# Optional, one per Python file the gate neither parses nor scans.
+[[python.anchored-match.excluded]]
+file = "src/fixtures/py2.py"       # project-relative, one file
+reason = "why the file is not scanned"
 ```
 
 ```make
@@ -754,7 +765,8 @@ run the tools from `.venv`.
   `uv.lock` (drift: run `make install`), and when a dev tool is missing
   from `.venv`. Before uv, it validates `devkit.toml`'s
   `[python.duplication]` (`duplication.py check-config`, see the
-  copy-paste gate below).
+  copy-paste gate below) and `[python.anchored-match]`
+  (`anchored_match.py check-config`, see the anchored-match gate below).
 - uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, the first of: `uv` on
   `PATH` when it reports the pinned version and is not the one inside
   `.venv` (each `uv` on `PATH` in turn; a link to that one, or any file
@@ -773,9 +785,10 @@ run the tools from `.venv`.
   the repair.
 - `make lint` runs, stopping at the first failure, `ruff check`,
   `ruff format --check`, vulture over the root `pyproject.toml`'s
-  `[tool.vulture] paths`, which must be set, then the copy-paste gate.
-  `ONLY` narrows the two ruff passes to the selected members; vulture and
-  the copy-paste gate always scan the whole project.
+  `[tool.vulture] paths`, which must be set, then the anchored-match gate,
+  then the copy-paste gate. `ONLY` narrows the two ruff passes to the
+  selected members; vulture, the anchored-match gate (every `*.py` git
+  lists) and the copy-paste gate always scan the whole project.
 - `make format` runs `ruff check --fix --exit-zero`, then `ruff format`, on
   the project or the `ONLY` selection: it rewrites and never judges.
 - `make test` runs one pytest session per member of the selection, in the
@@ -800,6 +813,53 @@ run the tools from `.venv`.
   `node_modules`, and any directory holding a `.git` (a nested checkout).
 - `ONLY` narrows `lint`'s ruff passes, `format` and `test`; `install`,
   `check`, `audit` and `clean` act on the whole project.
+- The anchored-match gate, after vulture in `make lint`, fails on a regex
+  that lets a trailing newline through: Python's `$` also matches before
+  one, so `re.match(r"^[a-z]+$", "admin\n")` passes. It parses every `*.py`
+  git lists (tracked, plus untracked ones the project does not ignore),
+  none through a symlink, and flags `re.match`, and `re.search` whose
+  pattern starts with `^` or `\A`, when the pattern holds a `$`; the
+  fix is `re.fullmatch` on an unanchored pattern, or `\A…\Z`. The start
+  anchor may follow whitespace, global inline flags such as `(?i)`, and
+  group openers (`(`, `(?:`, `(?P<name>`, `(?i:`). It
+  resolves `re.match` and `re.search` (also through import aliases),
+  `re.compile(…).match` and `.search` called inline, and
+  `NAME.match` and `.search` where `NAME` is bound once, in module scope or
+  the enclosing function, to `re.compile(…)`. The pattern must be a `str`
+  or `bytes` literal, also through a module-level constant bound once, or
+  the literal parts of an f-string; flags are ignored, and a `$` counts
+  unless escaped or inside `[…]`. Each optional
+  `[[python.anchored-match.accepted]]` entry names a `file`, a `function`
+  (the enclosing class and function names joined by `.`, as the error line
+  prints it: no `<locals>`, `<lambda>` for a lambda, `<module>` at top
+  level) and a non-empty `reason` saying why that input cannot carry a
+  newline. One entry accepts every definition of that name in the file (a
+  property's getter and setter, every lambda in one scope). The gate fails,
+  naming the call, on every anchored call no entry accepts, and on every
+  accepted entry that matches none any more. Each optional
+  `[[python.anchored-match.excluded]]` entry names one `file` the gate neither
+  parses nor scans (a fixture that is not meant to parse, vendored code) and a
+  non-empty `reason`; single files only, no directories or globs, so a file
+  added later is always scanned. The gate fails on an excluded entry naming a
+  file git no longer lists. It is a ratchet, not a proof: it skips every call it
+  cannot resolve, among them a parameter, an attribute such as `self._RE`, a
+  class-level constant, a return value, a name bound twice, a bound method kept
+  in a name (`v = re.compile(…).match`), a name imported from another module
+  (each file is read on its own, so a pattern compiled in one module and used in
+  another is not checked), the `regex` module and `PurePath.match`. A `$` in a
+  `(?x)` or `(?#…)` comment is a known false positive: accept it; an unbalanced
+  `[` inside such a comment can also hide a later `$`. It parses with the
+  `python3` on `PATH`, not `.venv`'s, so that one must parse the project's
+  syntax: a file it cannot parse, or cannot read, fails the run, naming the
+  file, the
+  version and the interpreter. The table is optional; a project without one
+  accepts nothing. `make check` fails, one `ERROR` line with its remedy each,
+  when `[python.anchored-match]` is not a table or holds a key other than
+  `accepted` or `excluded`, when either is not an array of tables, when an
+  entry sets an unknown key, when `file`, `function` or `reason` is missing
+  or blank, when two entries accept the same pair or exclude the same file
+  (`./src/a.py` counts as `src/a.py`), and when an accepted entry's `file` is
+  an excluded file (remove the accepted entry).
 - The copy-paste gate, the last step of `make lint`, runs jscpd at the
   closure `jscpd/package-lock.json` pins, installed and audited like
   markdownlint-cli (see `lint-md`); installed on first use, it needs `node`

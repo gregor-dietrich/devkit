@@ -45,6 +45,7 @@ if [[ $(LC_ALL=C sort -u <<< "$members") != "$modules" ]]; then
 fi
 
 python3 "$DEVKIT/scripts/python/duplication.py" check-config
+python3 "$DEVKIT/scripts/python/anchored_match.py" check-config
 python3 "$DEVKIT/scripts/python/uv_project.py" vulture-paths > /dev/null
 
 # shellcheck source=SCRIPTDIR/../lib/get_uv.sh

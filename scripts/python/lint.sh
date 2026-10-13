@@ -12,7 +12,7 @@ python3_floor || exit 1
 . "$DEVKIT/scripts/lib/get_venv.sh"
 ruff=$(venv_tool ruff)
 vulture=$(venv_tool vulture)
-# ONLY narrows the ruff passes to the selected members; vulture and jscpd always scan the whole project.
+# ONLY narrows the ruff passes to the selected members; vulture, the anchored-match gate and jscpd always scan the whole project.
 read -ra targets <<< "${ONLY:+$SELECTED}"
 [[ ${#targets[@]} -gt 0 ]] || targets=(.)
 
@@ -23,6 +23,8 @@ echo "Starting lint checks${ONLY:+ for $ONLY}..."
 # vulture reads its paths from [tool.vulture]; without them it would fail on its usage.
 python3 "$DEVKIT/scripts/python/uv_project.py" vulture-paths > /dev/null
 "$vulture"
+# The anchored-match gate: no $-anchored re.match or re.search beyond devkit.toml's [python.anchored-match] entries.
+python3 "$DEVKIT/scripts/python/anchored_match.py" run
 # The copy-paste gate: jscpd over devkit.toml's [python.duplication] paths.
 # shellcheck source=SCRIPTDIR/../lib/node_closure.sh
 . "$DEVKIT/scripts/lib/node_closure.sh"
