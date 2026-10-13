@@ -278,8 +278,9 @@ include .devkit/make/python-uv.mk
   version in `package.json` and `package-lock.json` against the Vaadin
   release's manifests (the core manifest, gaps filled from the dev bundle);
   for that it asks Maven (`MVN_CMD`, which `scripts/lib/get_maven.sh`
-  exports) for the local repository and the frontend module's
-  `vaadin.version` and resolves the dev bundle. It fails without `MVN_CMD`.
+  exports, with the keys of [Plugin checksums](#plugin-checksums)) for the
+  local repository and the frontend module's `vaadin.version` and resolves
+  the dev bundle. It fails without `MVN_CMD`.
 - A Maven project's `make clean` runs `mvn clean` on the selection, then
   removes each selected module's `logs` and, when the frontend is selected,
   `FRONTEND_DIR`'s `node_modules` and `src/main/frontend/generated`. devkit
@@ -624,7 +625,10 @@ inherit it, and Maven reads it through the link:
   - the root pom or any module pom (`<modules>`, recursively, profiles
     included) defines one of the parent's `*.version` properties: a
     partial migration. To try another tool version, pass it on the command
-    line (`./mvnw -Dcheckstyle.version=… verify`) instead;
+    line (`./mvnw -Dcheckstyle.version=… verify`) instead, which is
+    unchecked as a plain launcher is; through `MAVEN_ARGS` or
+    `.mvn/maven.config` the targets run it too, but the version is
+    unrecorded and so unchecked ([Plugin checksums](#plugin-checksums));
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
     `<annotationProcessorPaths>` without `combine.children="append"`.
 - It pins every gate tool's version, and flatten-maven-plugin's and
@@ -725,7 +729,8 @@ inherit it, and Maven reads it through the link:
 - `MAVEN_ARGS` reaches every Maven call of the targets above, under
   either launcher `get_maven.sh` picks: `MAVEN_ARGS=-Pproduction make
   install` applies a profile, and `MAVEN_ARGS=-DskipITs=false make test`
-  runs the integration tests once.
+  runs the integration tests once. The resolver keys of [Plugin
+  checksums](#plugin-checksums) override its own.
 
 - It commits the files the table above lists. `.mvn/jvm.config` carries
   the `jdk.compiler` `--add-exports` and `--add-opens` lines as devkit's
@@ -773,6 +778,73 @@ inherit it, and Maven reads it through the link:
   root pom or to Maven's settings. Maven must find the parent only through
   the link; a remote lookup of `de.vptr.devkit:devkit-parent` is the
   failure mode, and whatever serves it would configure the build.
+
+### Plugin checksums
+
+`java/checksums/checksums.sha256` holds the SHA-256 of every artifact that
+building devkit's `java-*` test fixtures through `make lint`, `test`,
+`coverage`, `install` and `format` resolves: the parent's plugins and their
+dependencies, the annotation processors (Error Prone, NullAway) and the
+fixtures' own test dependencies, plus the closure of dependency-check's goals
+(recorded without an NVD key through the plugin's `help` goal; the closure
+its analysis downloads at run time, not through Maven, is not) and of the
+help and dependency plugins that `check_frontend_deps.py` runs. Each line is
+`<sha256>  <repository path>`. Maven's resolver checks every artifact it
+resolves against the file, from a download or from the local repository,
+and fails the build on a mismatch, so a repository or mirror that serves
+other bytes for a listed coordinate, or a jar altered in the local
+repository, fails the build: Maven 3.9 says `trusted checksum mismatch`,
+Maven 3.10 `Checksum validation failed … (Trusted Checksums Source:
+summaryFile)`.
+
+- The scripts behind `install`, `lint`, `format`, `test`, `coverage`,
+  `audit` and `clean` run Maven through `scripts/lib/mvn_checked.sh`, which
+  `scripts/lib/get_maven.sh` exports as `MVN_CMD` (the launcher it picked
+  stays `MVN_LAUNCHER`, which version probes and error messages name). The
+  wrapper puts the resolver's `trustedChecksumsSource.summaryFile` and
+  `trustedChecksums` post-processor keys (SHA-256, basedir
+  `$DEVKIT/java/checksums`, `originAware=false` so that a mirror cannot
+  bypass the file) on Maven's command line, and pins the post-processor's
+  `record` to `false`, so that a project cannot switch verification off. A
+  command-line key beats `MAVEN_ARGS` and `.mvn/maven.config`, so for these
+  keys those calls ignore a project's own setting. The wrapper fails closed
+  when the file is missing or empty.
+- `failIfMissing` is off: an artifact the file does not list passes
+  unchecked. That is:
+  - a project's own artifact, unless it shares a recorded coordinate;
+  - a default lifecycle plugin (clean, install, jar, ...) at a version the
+    Maven in use binds but the recording Maven did not: the file records
+    them at the versions the recording Maven binds, so they are checked
+    under a Maven that binds the same versions;
+  - a gate plugin a project switches to another version through a
+    `-D<tool>.version` in `MAVEN_ARGS` or `.mvn/maven.config` (the file
+    records the pinned versions);
+  - a version resolved through repository metadata (a version range,
+    `LATEST`, `RELEASE`); none is in devkit's closure.
+
+  The file protects devkit's gate tooling at its pinned versions, not the
+  project's dependency graph.
+- The hashes are trust on first use: whatever Maven Central served over
+  https when `make maven-checksums` ran. They detect a later substitution by
+  a mirror, a proxy or the local repository, not an artifact that was
+  already malicious on Central. A re-record refuses to change the hash of a
+  path already in the file.
+- A plain `mvn` outside the targets is not checked, and neither is anything
+  downloaded outside Maven (the Eclipse formatter's P2 artifacts for
+  Spotless, dependency-check's vulnerability data).
+- Under `-q`, which `install`, `lint`, `format`, `test`, `coverage` and `clean`
+  pass (`audit` does not, and prints the error whichever way it names its
+  plugin), a mismatch on an artifact of a lifecycle plugin, a plugin dependency
+  or an annotation processor shows as that error. devkit invokes its gate
+  plugins by `groupId:artifactId:goal`, without a version, so that the
+  parent's pin applies and a mismatch shows as that error: invoked by prefix
+  (`spotless:check`), a mismatch would show only as `No plugin found for
+  prefix`. A consumer's own script that does the latter sees that message.
+- The file is devkit's, regenerated by `make maven-checksums` in devkit
+  when a plugin version in the parent changes; devkit's shell tests fail
+  otherwise, but only for the top-level jar of every plugin, plugin
+  dependency and annotation processor the parent pins and for the two
+  plugins of `check_frontend_deps.py`. It is no consumer's to edit.
 
 ## uv projects
 

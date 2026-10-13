@@ -13,7 +13,12 @@ REVISION=${REVISION:-1.0.0-SNAPSHOT}
 echo "Starting lint checks${ONLY:+ for $ONLY}..."
 
 # Run Maven from the root using the reactor; ONLY narrows it with -pl
-"${MVN_CMD}" -q compile test-compile spotless:check checkstyle:check checkstyle:check@project spotbugs:check pmd:check pmd:cpd-check ${ONLY:+-pl "$ONLY"} -Drevision="${REVISION}"
+# The plugins are named groupId:artifactId, not by prefix: under -q, a trusted-checksum mismatch on
+# a plugin found by prefix surfaces only as "No plugin found for prefix" (docs/contract.md, section
+# "Plugin checksums").
+spotless=com.diffplug.spotless:spotless-maven-plugin checkstyle=org.apache.maven.plugins:maven-checkstyle-plugin
+spotbugs=com.github.spotbugs:spotbugs-maven-plugin pmd=org.apache.maven.plugins:maven-pmd-plugin
+"${MVN_CMD}" -q compile test-compile "$spotless:check" "$checkstyle:check" "$checkstyle:check@project" "$spotbugs:check" "$pmd:check" "$pmd:cpd-check" ${ONLY:+-pl "$ONLY"} -Drevision="${REVISION}"
 
 # Skip when the selection leaves the frontend out: the gate is about its committed manifest.
 if [[ $FRONTEND_SELECTED == true ]]; then

@@ -10,9 +10,11 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
+. "$root/scripts/lib/tree.sh"
 work=$(mktemp -d)
 trap 'rm -rf -- "${work:?}"' EXIT
-version=$(sed -n 's|^  <version>\(.*\)</version>$|\1|p' "$root/java/parent/pom.xml")
+version=$(parent_version "$root")
 fails=0
 
 mkdir "$work/bin"

@@ -162,6 +162,19 @@ without a package or a reason fails, and so does one that matches no
 advisory, so a bump that fixes it forces its removal. Otherwise the fix is a
 bump of the closure.
 
+When a plugin's version, or parent configuration that changes what a plugin
+resolves, changes in `java/parent/pom.xml`, run `make maven-checksums` and
+commit `java/checksums/checksums.sha256` with the change. It needs JDK 25,
+`mvn` 3.9.9 or later on `PATH` and a direct route to Maven Central.
+`tests/run.sh shell` fails on a pinned jar the file lacks, but not on a
+changed transitive closure, which only the re-record catches. The hashes are
+trust on first use: whatever Central served over https when the target ran.
+They detect a later substitution by a mirror, a proxy or the local
+repository, not an artifact already malicious on Central; a re-record fails
+when it would change the hash of a path already in the file (release paths
+on Central are immutable), naming each path, and deleting that line and
+re-running is the escape hatch.
+
 ## Releasing
 
 A release is an annotated tag on `main`, signed with devkit's SSH release
@@ -176,9 +189,8 @@ version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
 version, and `tests/run.sh` tags the tree under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
-Before
-tagging, review the parent's pins against Maven Central (advisory, needs the
-network):
+Before tagging, review the parent's pins against Maven
+Central (advisory, needs the network):
 
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
@@ -262,6 +274,26 @@ macOS and most Linux installs carry; a CI image without it installs it
 cache miss ssh-keygen also needs the running UID to have a passwd entry: a
 container run with an arbitrary `-u` UID fails with "ssh-keygen failed
 verifying tag", naming ssh-keygen's own message.
+
+Maven now verifies the plugins and annotation processors devkit's parent pins
+against `.devkit/java/checksums/checksums.sha256` on every build the targets run
+([Plugin checksums](docs/contract.md#plugin-checksums)). No action is needed. A
+build that fails with a checksum error naming the summaryFile (Maven 3.9 words
+it `trusted checksum mismatch`) for a plugin or dependency means the bytes Maven
+got, from a repository, a mirror or the local repository, are not the ones
+devkit recorded: delete that artifact's directory from the local repository and
+retry, and treat a repeat as a tampered mirror or proxy. Artifacts the file does
+not list are not checked: a project's own artifact, unless it shares a
+recorded coordinate; a default lifecycle plugin under a Maven that binds other
+versions than the recording one; a version resolved through repository
+metadata (a range, `LATEST`, `RELEASE`). A project that sets its own aether
+`trustedChecksums` (`record` included) or `summaryFile` keys has them
+overridden for devkit's Maven calls (see the first bullet of the contract's
+[Plugin checksums](docs/contract.md#plugin-checksums)). The hashes are trust on
+first use: they detect a later substitution, not an artifact already malicious
+on Central. `MVN_CMD` now names devkit's checked wrapper; the launcher
+`get_maven.sh` picked is in `MVN_LAUNCHER`, which matters to a project script
+that sources `get_maven.sh` and inspects `MVN_CMD`.
 
 A remote that mirrors devkit must re-sync its `v*` tags with force (`git fetch
 --force --tags` or equivalent), since v0.1.0 through v0.6.0 were re-signed as

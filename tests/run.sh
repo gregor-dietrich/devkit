@@ -19,7 +19,13 @@
 #          and that no includedLicense of the parent is empty or holds a line
 #          break, a tab, a double space or edge whitespace, that no name is
 #          listed twice and that the allowlist names the licenses devkit's
-#          own tests rely on, and that each of those failures is reported;
+#          own tests rely on, and that each of those failures is reported,
+#          and that java/checksums/checksums.sha256 lists the jar of every
+#          plugin, plugin dependency and annotation processor the parent
+#          pins and of the plugins check_frontend_deps.py runs, and that a
+#          file without one is rejected, naming it and make
+#          maven-checksums, and that MVN_LAUNCHER is used only where it
+#          may be;
 #          make lint-repo, not this, gates devkit's own tree. Needs git
 #          >= 2.34 (SSH signing), make, shellcheck, ssh-keygen (OpenSSH 8.1
 #          or later), bash >= 4 (shopt globstar; macOS ships 3.2), procps
@@ -45,7 +51,10 @@
 #          same way, and to pass once the module appends that license to
 #          includedLicenses, and then, in that copy, two more jars each
 #          under an allowed and a commercial license to pass;
-#          then break copies of the monolith
+#          then alter the compiler plugin's jar in a copy's local repository
+#          (read-through to ~/.m2 otherwise) and expect lint to fail on a
+#          checksum mismatch (java/checksums), and
+#          break copies of the monolith
 #          (format, a shared and a project checkstyle rule, the project
 #          rule's suppression, coverage, an image digest, Markdown, a secret
 #          committed, staged or unstaged, a missing git object, a devkitw
@@ -70,9 +79,11 @@
 #          (OpenSSH 8.1 or later), to sign and verify the tag, curl, tar,
 #          node with npm and the network (Maven Central, Eclipse P2,
 #          github.com, the npm registry);
-#          ~/.m2 is used as is, and never installed into; the install checks
-#          assume ~/.m2/repository is the local repository, and their offline
-#          make test fails on missing plugins when settings.xml moves it.
+#          ~/.m2 is used as is, and never installed into; tampered_plugin
+#          copies the compiler plugin's jar from ~/.m2/repository, and the
+#          install checks assume it is the local repository, and their
+#          offline make test fails on missing plugins when settings.xml moves
+#          it.
 #   python run every tests/fixtures/python-* consumer, pinned the same way, in
 #          an environment no later part inherits: user-level uv configuration
 #          (XDG_CONFIG_HOME), the caches and uv's Python downloads in the temp
@@ -113,6 +124,8 @@ shopt -s globstar
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 fails=0
+# shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
+. "$root/scripts/lib/tree.sh"
 
 uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
 check() { # check LABEL COMMAND...: run COMMAND and report how it went
@@ -171,6 +184,73 @@ shell_part() {
     lists_reject 's|<includedLicense>Plexus</includedLicense>|&&|' "includedLicense entries listed twice"
   check "parent: the license lists check rejects an allowlist without a required name" \
     lists_reject '/<includedLicense>Unknown license</d' "required names missing from the allowlist"
+  check "parent: java/checksums lists the jar of every plugin and annotation processor the parent pins" \
+    checksums_cover "$root/java/parent/pom.xml" "$root/java/checksums/checksums.sha256" "$(frontend_plugins "$root")"
+  check "parent: the checksums check rejects a file without a pinned plugin's jar, naming it and make maven-checksums" \
+    checksums_reject '/\/maven-compiler-plugin\/.*\.jar$/d' "maven-compiler-plugin-" "make maven-checksums"
+  check "parent: the checksums check rejects a file without a pinned annotation processor's jar" \
+    checksums_reject '/\/nullaway\/.*\.jar$/d' "com/uber/nullaway/nullaway/" "make maven-checksums"
+  check "parent: the checksums check rejects a file without a pinned plugin dependency's jar" \
+    checksums_reject '/\/checkstyle\/[0-9.]*\/checkstyle-[0-9.]*\.jar$/d' "com/puppycrawl/tools/checkstyle/" "make maven-checksums"
+  check "scripts: MVN_LAUNCHER, which skips the checksums check, is used only by get_maven.sh, check.sh, mvn_checked.sh and maven_checksums.sh" \
+    launcher_uses scripts/lib/get_maven.sh scripts/java/check.sh scripts/lib/mvn_checked.sh scripts/maven_checksums.sh
+  check "parent: the checksums check rejects a file without the plugins check_frontend_deps.py runs" \
+    checksums_reject '/\/maven-help-plugin\/.*\.jar$/d;/\/maven-dependency-plugin\/.*\.jar$/d' \
+    "maven-help-plugin-" "maven-dependency-plugin-" "make maven-checksums"
+}
+
+# checksums_cover POM FILE FRONTEND: FILE, a trusted checksums file (scripts/lib/mvn_checked.sh),
+# lists the jar of every plugin POM declares with a version, of the dependencies of those plugins,
+# of the annotationProcessorPaths and of the plugins FRONTEND (frontend_plugins of
+# scripts/lib/tree.sh: groupId:artifactId:version, one per line) names, at the path the local
+# repository gives it. Only top-level jars are checked, not their transitive closure. A bump of a
+# version without scripts/maven_checksums.sh leaves an entry out and fails.
+checksums_cover() {
+  # shellcheck disable=SC2016 # the program's ${...} is a Maven property, not a shell expansion
+  python3 -c 'import re, sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+root = ET.parse(sys.argv[1]).getroot()
+props = {p.tag.split("}")[1]: (p.text or "").strip() for p in root.find("m:properties", ns)}
+def coordinate(e, group):
+    version = e.findtext("m:version", "", ns).strip()
+    version = re.sub(r"\$\{([^}]+)\}", lambda m: props.get(m[1], m[0]), version)
+    group = e.findtext("m:groupId", group, ns).strip().replace(".", "/")
+    artifact = e.findtext("m:artifactId", "", ns).strip()
+    return f"{group}/{artifact}/{version}/{artifact}-{version}.jar"
+pinned = set()
+for plugin in root.iterfind(".//m:plugin", ns):
+    if plugin.findtext("m:version", "", ns).strip():
+        pinned.add(coordinate(plugin, "org.apache.maven.plugins"))
+        pinned.update(coordinate(d, "") for d in plugin.iterfind("m:dependencies/m:dependency", ns) if d.findtext("m:version", "", ns).strip())
+pinned.update(coordinate(p, "") for p in root.iterfind(".//m:annotationProcessorPaths/m:path", ns))
+frontend = sys.argv[3].split()
+for coordinates in frontend:
+    group, artifact, version = coordinates.split(":")
+    pinned.add("/".join((group.replace(".", "/"), artifact, version, f"{artifact}-{version}.jar")))
+listed = {line.split("  ", 1)[1] for line in open(sys.argv[2]).read().splitlines() if "  " in line}
+missing = sorted(pinned - listed)
+# The parent pins well over 12 jars (plugins, their dependencies, processors) and FRONTEND two plugins:
+# fewer means this parse stopped matching the files, which no re-record fixes.
+sys.exit("the parent POM or check_frontend_deps.py was not parsed as expected (" + str(len(pinned)) + " jars, " + str(len(frontend)) + " frontend plugins): update this check, not the checksums file") if len(pinned) < 12 or len(frontend) != 2 else None
+sys.exit("java/checksums/checksums.sha256 lacks " + ", ".join(missing) + ": run make maven-checksums and commit the result") if missing else None' "$1" "$2" "$3"
+}
+
+# launcher_uses FILE...: no file of scripts/ and make/ but FILE... (relative to the root) names
+# MVN_LAUNCHER, the Maven that does not verify checksums: get_maven.sh sets it, check.sh probes
+# the version with it, mvn_checked.sh and maven_checksums.sh wrap or stand in for it. Any other
+# use would build unchecked.
+launcher_uses() {
+  local found extra
+  found=$(cd "$root" && grep -rlF MVN_LAUNCHER scripts make | LC_ALL=C sort) || return
+  extra=$(comm -23 <(printf '%s\n' "$found") <(printf '%s\n' "$@" | LC_ALL=C sort))
+  [[ -z $extra ]] || { echo "MVN_LAUNCHER is used by: $extra"; return 1; }
+}
+
+checksums_reject() { # checksums_reject SED TEXT...: the check fails on the checksums file run through SED (which must change it), saying each TEXT
+  local file=$root/java/checksums/checksums.sha256 edited err text
+  edited=$(sed "$1" "$file") && [[ $edited != "$(<"$file")" ]] &&
+    ! err=$(checksums_cover "$root/java/parent/pom.xml" /dev/stdin "$(frontend_plugins "$root")" <<<"$edited" 2>&1) || return
+  for text in "${@:2}"; do [[ $err == *"$text"* ]] || return; done
 }
 
 # license_lists_whole POM: each includedLicense is one name, compared to a license name exactly as
@@ -201,14 +281,6 @@ lists_reject() { # lists_reject SED TEXT: the check fails on the parent run thro
   local edited err
   edited=$(sed "$1" "$root/java/parent/pom.xml") && [[ $edited != "$(<"$root/java/parent/pom.xml")" ]] &&
     ! err=$(license_lists_whole /dev/stdin <<<"$edited" 2>&1) && [[ $err == *"$2"* ]]
-}
-
-listed() { # listed SRC DEST: copy to DEST what git lists in SRC, tracked or untracked but not ignored
-  mkdir "$2"
-  git -C "$1" ls-files -z --cached --others --exclude-standard |
-    while IFS= read -r -d '' f; do
-      [[ ! -e $1/$f ]] || printf '%s\0' "$f" # skip deleted tracked files
-    done | tar -C "$1" --null -T - -cf - | tar -C "$2" -xf -
 }
 
 # swap_signers FILE KEY.pub: replace the key type and blob of the signers= line
@@ -409,7 +481,33 @@ negatives() {
     make_says fail "$proj" check "checkstyle-project.xml"
   NVD_API_KEY='' check "java-monolith: make audit fails without an NVD key" \
     make_says fail "$work/java-monolith" audit "NVD_API_KEY not set"
+  check "java-monolith: a plugin jar altered in the local repository fails make lint on a checksum mismatch" \
+    tampered_plugin
   wrapper_checks
+}
+
+# The other checks pass with the shared checksums file (scripts/lib/mvn_checked.sh) dead too, as
+# every misconfiguration of it passes silently, so this one proves it live end to end. A lint
+# passes with the local repository empty and reading through to ~/.m2 (a hit there is verified too:
+# a tampered jar in a tail fails the same way). Then the compiler plugin's jar, copied from ~/.m2
+# into that repository with one byte added, must fail the build naming the plugin and the hash the
+# file lists (Maven 3.9 words it "trusted checksum mismatch", 3.10 "Checksum validation failed ...
+# Trusted Checksums Source: summaryFile"), not as a missing plugin. Once more with the resolver's
+# own keys in MAVEN_ARGS asking for record mode (which would write what the build resolves instead
+# of verifying it) and for verification off: the wrapper's keys, last on the command line, must win.
+tampered_plugin() {
+  local proj=$work/negative-checksum m2=$work/m2-checksum version dir jar hash
+  version=$(sed -n 's|.*<compiler-plugin.version>\(.*\)</compiler-plugin.version>.*|\1|p' "$root/java/parent/pom.xml")
+  [[ -n $version ]] || return
+  dir=org/apache/maven/plugins/maven-compiler-plugin/$version jar=maven-compiler-plugin-$version.jar
+  hash=$(sed -n "s|^\([0-9a-f]*\)  $dir/$jar\$|\1|p" "$root/java/checksums/checksums.sha256")
+  [[ -n $hash ]] || return
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$m2 -Dmaven.repo.local.tail=$HOME/.m2/repository"
+  setup "$root/tests/fixtures/java-monolith" "$proj" && make_says pass "$proj" lint "Lint checks completed." &&
+    mkdir -p "$m2/$dir" && cp "$HOME/.m2/repository/$dir/"* "$m2/$dir/" && echo x >>"$m2/$dir/$jar" &&
+    make_says fail "$proj" lint "maven-compiler-plugin:$version or one of its dependencies could not be resolved" "$hash" &&
+    MAVEN_ARGS="$MAVEN_ARGS -Daether.artifactResolver.postProcessor.trustedChecksums.record=true -Daether.artifactResolver.postProcessor.trustedChecksums=false -Daether.trustedChecksumsSource.summaryFile=false" \
+      make_says fail "$proj" lint "$hash"
 }
 
 wrapped() { # wrapped DIR TYPE: DIR gets ./mvnw of distribution TYPE, for Maven 3.9.9, from the plugin get_maven.sh names
@@ -471,19 +569,11 @@ secret_negatives() { # each scan of the real gitleaks reads what it should
     make_says fail "$proj" lint "git failed under gitleaks git --log-opts=HEAD"
 }
 
-parent_version() { # the literal <version> of devkit's parent POM
-  python3 -c 'import sys, xml.etree.ElementTree as ET
-version = ET.parse(sys.argv[1]).getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
-sys.exit("java/parent/pom.xml declares no <version>") if not version else print(version.strip())' \
-    "$root/java/parent/pom.xml"
-}
-
 prepare() { # once per run: the temp dir, a clean environment and the published tree under test
   [[ -z ${work:-} ]] || return 0
-  work=$(mktemp -d) tag=v$(parent_version) bare=$work/devkit.git
+  work=$(mktemp -d) tag=v$(parent_version "$root") bare=$work/devkit.git
   trap 'uncache "$work"' EXIT
-  # shellcheck disable=SC2046 # one argument per variable name
-  unset $(git rev-parse --local-env-vars) ONLY PROJECT_ROOT REVISION JUNIT_DIR COVERAGE_FLOOR MODULES SSH_AUTH_SOCK
+  clean_env
   export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
   export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid

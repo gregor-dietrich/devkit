@@ -7,6 +7,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
+. "$root/scripts/lib/tree.sh"
 check=$root/scripts/java/parent_check.py
 # Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
 # /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
@@ -14,7 +16,7 @@ work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
-version=$(sed -n 's|^  <version>\(.*\)</version>$|\1|p' "$root/java/parent/pom.xml")
+version=$(parent_version "$root")
 fails=0
 
 # parent [VERSION [RELATIVE-PATH [GROUP:ARTIFACT]]]: a <parent> block, devkit's by default

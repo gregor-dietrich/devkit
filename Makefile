@@ -22,10 +22,13 @@ else
 $(error GATES must be tree or release, not '$(GATES)')
 endif
 
-.PHONY: audit test
+.PHONY: audit maven-checksums test
 # The working tree's closures, whichever GATES: their lockfiles are this change's.
 audit: ## audit the markdown and jscpd closures with npm audit (needs the network)
 	@scripts/closure_audit.sh markdown jscpd
+
+maven-checksums: ## regenerate java/checksums/checksums.sha256 from a fresh build of the java fixtures (needs the network)
+	@scripts/maven_checksums.sh
 
 # Cleared, an outer make's flags, and its VAR=value as an override, cannot reach a fixture's make.
 test: ## run devkit's tests (tests/run.sh), the push gate's second stage

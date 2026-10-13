@@ -62,9 +62,13 @@ if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
         exit 5
     fi
 fi
-# check_frontend_deps.py asks the same Maven for its values and resolves the
-# Vaadin dev bundle with it (the build resolves the core jar).
-export MVN_CMD
+# Every build below runs through mvn_checked.sh, which adds the trusted-checksum keys to the launcher
+# picked above (MVN_LAUNCHER, the one version and error messages name). check_frontend_deps.py asks
+# the same Maven for its values and resolves the Vaadin dev bundle with it (the build resolves the
+# core jar). A wrapper script, not an argument variable: MVN_CMD is one word in the environment.
+MVN_LAUNCHER=$MVN_CMD
+MVN_CMD="$DEVKIT/scripts/lib/mvn_checked.sh"
+export MVN_CMD MVN_LAUNCHER
 
 # shellcheck source=SCRIPTDIR/python.sh
 . "$DEVKIT/scripts/lib/python.sh"

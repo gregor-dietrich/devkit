@@ -71,17 +71,17 @@ if [[ $JDK_MAJOR_VERSION -ne $REQUIRED_JDK_VERSION ]]; then
 fi
 echo "JDK version check passed. (== ${REQUIRED_JDK_VERSION})"
 
-echo "Checking version of $(command -v "${MVN_CMD}")..."
+echo "Checking version of $(command -v "${MVN_LAUNCHER}")..."
 
-if ! command -v "${MVN_CMD}" &> /dev/null; then
+if ! command -v "${MVN_LAUNCHER}" &> /dev/null; then
     echo "ERROR: Maven not found. Exiting."
     echo "Please install Maven version ${REQUIRED_MAVEN_VERSION} or higher and add it to PATH."
     exit 5
 fi
 
 # -B (batch mode) turns off the ANSI colour some builds put around the version.
-if ! MVN_VERSION_OUTPUT=$("${MVN_CMD}" -B -version); then
-    echo "ERROR: '${MVN_CMD} -version' failed. Exiting."
+if ! MVN_VERSION_OUTPUT=$("${MVN_LAUNCHER}" -B -version); then
+    echo "ERROR: '${MVN_LAUNCHER} -version' failed. Exiting."
     exit 6
 fi
 
@@ -121,7 +121,7 @@ else
 fi
 
 if [[ $MVN_JAVA_MAJOR_VERSION -ne $REQUIRED_JDK_VERSION ]]; then
-    echo "ERROR: Maven (${MVN_CMD}) runs on JDK ${MVN_JAVA_VERSION}, but exactly JDK ${REQUIRED_JDK_VERSION} is required. Exiting."
+    echo "ERROR: Maven (${MVN_LAUNCHER}) runs on JDK ${MVN_JAVA_VERSION}, but exactly JDK ${REQUIRED_JDK_VERSION} is required. Exiting."
     echo "Point JAVA_HOME at a JDK ${REQUIRED_JDK_VERSION} installation, e.g. on macOS: export JAVA_HOME=\"\$(/usr/libexec/java_home -v ${REQUIRED_JDK_VERSION})\"."
     exit 11
 fi

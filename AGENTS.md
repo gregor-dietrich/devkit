@@ -13,8 +13,8 @@ break a gate silently.
 | `docs/contract.md` | The consumer contract: what a consumer commits, `devkitw`, the Make targets, scripts, repository gates, git hooks, Maven and uv configuration. Every other file is written against it |
 | `devkitw` | The wrapper a consumer copies verbatim: fetches the pinned commit once per machine, fails closed |
 | `make/` | `common.mk` and the language files `java-maven.mk` and `python-uv.mk` a consumer's `Makefile` includes |
-| `scripts/` | The scripts behind the targets: repository gates and git tooling at the top (and `closure_audit.*`, devkit's own `make audit`, which no consumer target runs), `java/`, `python/`, shared helpers in `lib/`, the git hook bodies in `hooks/` |
-| `java/` | The shared Maven gate configurations (`config/`) and the parent POM that applies them (`parent/`) |
+| `scripts/` | The scripts behind the targets: repository gates and git tooling at the top (and `closure_audit.*` and `maven_checksums.sh`, devkit's own `make audit` and `make maven-checksums`, which no consumer target runs), `java/`, `python/`, shared helpers in `lib/`, the git hook bodies in `hooks/` |
+| `java/` | The shared Maven gate configurations (`config/`) and the parent POM that applies them (`parent/`), and the checksums of its plugin closure (`checksums/`) |
 | `markdown/`, `jscpd/` | The pinned Node closures of markdownlint (with devkit's default profile) and jscpd |
 | `tests/` | `run.sh`, the shell tests it runs, and the consumer fixtures in `fixtures/` |
 | `Makefile`, `devkit.toml` | devkit gating itself, and the release pin `GATES=release` uses |
@@ -43,7 +43,11 @@ break a gate silently.
   uv bootstrap's hashes, and the lockfiles in `markdown/` and `jscpd/`);
   what decides whether an advisory against them is silenced
   (`scripts/closure_audit.sh`, `scripts/closure_audit.py` and each
-  closure's `audit-ignore`);
+  closure's `audit-ignore`); what pins the Maven plugin closure
+  (`java/checksums/`, `scripts/maven_checksums.sh`,
+  `scripts/lib/get_maven.sh`, `scripts/lib/mvn_checked.sh` and
+  `scripts/java/check_frontend_deps.py`, whose constants name plugins the
+  file must hold);
   the git hooks and the record that lets `pre-push` skip
   (`scripts/hooks/`, `scripts/hooks.sh`, `scripts/gate.sh`); and
   `.gitea/workflows/`.
@@ -65,6 +69,9 @@ break a gate silently.
   push to `main`, `.gitea/workflows/audit.yml` weekly, and a release is
   tagged only after it passes. A new closure joins its list in the
   `Makefile`.
+- `make maven-checksums` regenerates `java/checksums/checksums.sha256`
+  after a plugin version in the parent changes (network; `tests/run.sh
+  shell` fails without it).
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
   run `make gate`, then push.
