@@ -52,20 +52,18 @@
     </rule>
 
     <!--
-        UnitTestShouldIncludeAssert, taught this codebase's assertion vocabulary rather
-        than switched off. The rule only recognises assert*/verify* by default, so two
-        common shapes here look assertion-free to it:
-          - REST Assured chains, whose terminal assertion is .then().statusCode(...)
-          - resource tests that delegate the whole request-and-assert to a TestUtil
-            test* helper
-        Both really do assert; naming them here keeps the rule live for tests that
-        genuinely assert nothing. This list is the known exception to the contract's
-        no-project-values rule; it moves to the project once PMD offers a way.
+        UnitTestShouldIncludeAssert is on with PMD's defaults (assert*, verify*, ...). A
+        project names its own assertion helpers, e.g. a REST Assured terminal call or a
+        test utility that asserts, in the pmd.extraAssertMethodNames property in the
+        <properties> of each pom that inherits devkit's parent (the root pom, and any
+        module that inherits it directly). The parent filters that value in, as a
+        comma-separated list, when it copies this file to the build directory; PMD reads
+        the copy.
     -->
     <rule ref="category/java/bestpractices.xml/UnitTestShouldIncludeAssert">
         <properties>
             <property name="extraAssertMethodNames"
-                value="statusCode,assertRateLimitResponse,testAuthorizedDeleteWithNotFound,testAuthorizedDeleteWithSuccess,testAuthorizedGetWithExistingResource,testAuthorizedGetWithExistingResourceAndJson,testAuthorizedGetWithJson,testAuthorizedGetWithNonExistentResource,testAuthorizedPatchWithJson,testAuthorizedPostWithConflict,testAuthorizedPostWithCreation,testAuthorizedPostWithInsufficientRole,testAuthorizedPostWithSyntaxError,testAuthorizedPostWithValidationError,testAuthorizedPutWithJson,testAuthorizedRequestWithInsufficientRole,testAuthorizedRequestWithRateLimit,testAuthorizedSearchWithJson,testPermitAllGetWithJson,testUnauthorizedAccess,testUnauthorizedDelete,testUnauthorizedPatch,testUnauthorizedPost,testUnauthorizedPut" />
+                value="${pmd.extraAssertMethodNames}" />
         </properties>
     </rule>
 

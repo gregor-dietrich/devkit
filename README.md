@@ -268,6 +268,23 @@ A remote that mirrors devkit must re-sync its `v*` tags with force (`git fetch
 new tag objects at the same commits; the new wrapper refuses a mirror still
 serving the old unsigned objects.
 
+In a Maven project ([Parent POM](docs/contract.md#parent-pom)), the shared PMD
+ruleset no longer accepts the old helper list as assertions, REST Assured's
+`statusCode` included: a test whose only check is `.then().statusCode(...)`
+now fails UnitTestShouldIncludeAssert too. Such a project sets
+`pmd.extraAssertMethodNames`, as a comma-separated list of method names, in
+the `<properties>` of each pom that inherits devkit's parent: the root pom,
+and any module that inherits it directly. It can copy the old value from
+`java/config/pmd-ruleset.xml` at the v0.6.0 tag. Without it, every target that
+runs PMD fails; the console says only "PMD … has found N violations", and the
+rule and file are in `target/pmd.xml`. The parent now runs PMD on a filtered
+copy of the ruleset, made at `initialize`, so a script of the project's own or
+a CI step that runs `pmd:check` without a lifecycle phase runs `mvn initialize
+pmd:check`. The parent also pins maven-resources-plugin: a project removes any
+`resources-plugin.version` property of its own, which the parent check
+rejects, and its own resource processing (default-resources and
+default-testResources) moves from Maven's default 3.3.1 to 3.5.0.
+
 The license check now allows only the licenses the parent lists in
 `includedLicenses` ([Parent POM](docs/contract.md#parent-pom)): a dependency
 under any other name fails the build, among them FSL-1.1-ALv2, vendor license

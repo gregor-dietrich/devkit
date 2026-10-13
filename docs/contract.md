@@ -551,21 +551,22 @@ one is missing or stale. A hook it did not write is never overwritten.
 Shared gate configs live in `java/config/` (`checkstyle.xml`,
 `pmd-ruleset.xml`, `eclipse-formatter.xml`). devkit's [parent
 POM](#parent-pom) reads them as
-`${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`.
+`${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD reads
+a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
 Project-specific files (`dependency-check-suppression.xml`,
 `spotbugs-exclude.xml`, `checkstyle-suppressions.xml`,
 `checkstyle-project.xml`) stay in the project.
 
 A rule that names a class, helper or field the project writes belongs to
-the project, not to the shared configs. The known exception is
-`pmd-ruleset.xml`'s `extraAssertMethodNames` for UnitTestShouldIncludeAssert,
-which a project cannot extend yet. The shared configs do keep the stack's
-conventions: JBoss Logging as the facade, a static `LOG` logger field and
-`jakarta.annotation.Nullable`. A project's own Checkstyle rules live in
-`checkstyle-project.xml` at the project root, a complete Checkstyle
-configuration (a `Checker` root). The parent runs it as the checkstyle
-plugin's execution `project`, with its own `configLocation`, `cacheFile`
-and `outputFile`, and the shared config at plugin level.
+the project, not to the shared configs: PMD's UnitTestShouldIncludeAssert runs
+with its defaults, and a project names its own assertion helpers in the
+`pmd.extraAssertMethodNames` property ([Parent POM](#parent-pom)). The shared
+configs do keep the stack's conventions: JBoss Logging as the facade, a
+static `LOG` logger field and `jakarta.annotation.Nullable`. A project's own
+Checkstyle rules live in `checkstyle-project.xml` at the project root, a
+complete Checkstyle configuration (a `Checker` root). The parent runs it as
+the checkstyle plugin's execution `project`, with its own `configLocation`,
+`cacheFile` and `outputFile`, and the shared config at plugin level.
 
 `make lint` runs `checkstyle:check` and `checkstyle:check@project`. The
 execution's `check` goal binds to `verify` by default, so `make test`,
@@ -626,22 +627,24 @@ inherit it, and Maven reads it through the link:
     line (`./mvnw -Dcheckstyle.version=… verify`) instead;
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
     `<annotationProcessorPaths>` without `combine.children="append"`.
-- It pins every gate tool's version, and flatten-maven-plugin's, as a
-  property (`checkstyle.version`,
+- It pins every gate tool's version, and flatten-maven-plugin's and
+  maven-resources-plugin's, as a property (`checkstyle.version`,
   `checkstyle-plugin.version`, `compiler-plugin.version`,
   `dependency-check-plugin.version`, `eclipse-formatter.version`,
   `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
   `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
-  `spotbugs-plugin.version`, `spotless-plugin.version`,
-  `surefire-plugin.version`), and manages the `org.jacoco` artifacts at the
-  JaCoCo plugin's version, so Quarkus' own JaCoCo matches the plugin's.
+  `resources-plugin.version`, `spotbugs-plugin.version`,
+  `spotless-plugin.version`, `surefire-plugin.version`), and manages the
+  `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
+  JaCoCo matches the plugin's.
 - It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
   `this-escape` and `classfile`, Error Prone with NullAway), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
   PMD (with CPD), Checkstyle (the shared config and the execution
   `project`), JaCoCo (agent, report and coverage check) and Spotless, whose
-  checks run at `verify`. dependency-check is configured but not
-  activated; `make audit` runs it by its coordinates. License skips every
+  checks run at `verify`, and resources, whose execution `pmd-ruleset` (the
+  copy PMD reads) runs at `initialize`. dependency-check is configured but
+  not activated; `make audit` runs it by its coordinates. License skips every
   artifact whose groupId is exactly the module's own: a sibling under it
   is not third party, and neither is any other artifact published under
   that groupId; a sibling under another groupId is. License allows only the
@@ -703,9 +706,21 @@ inherit it, and Maven reads it through the link:
   | `jacoco.check.branchMinimum` | `0.80` |
   | `jacoco.check.skip` | `false` |
   | `pmd-cpd.minTokens` | `65` |
+  | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
   | `nullaway.annotated.packages` | `${project.groupId}` |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
+
+- PMD does not read `pmd.extraAssertMethodNames` itself: at `initialize` the
+  parent's maven-resources-plugin execution `pmd-ruleset` copies
+  `pmd-ruleset.xml` to `target/devkit/` in each module, filling in
+  `${pmd.extraAssertMethodNames}` (the only placeholder the file carries; any
+  `${…}` added to it is expanded too), and PMD reads that copy. Every target
+  that runs PMD runs `initialize` first; a bare `mvn pmd:check` reads the
+  previous build's copy, or fails after a `clean`. A project's plugin-level
+  maven-resources-plugin configuration and its build filters do not reach the
+  copy, and `maven.resources.skip` does not skip it; a project that
+  redeclares the execution `pmd-ruleset` itself does reach it.
 
 - `MAVEN_ARGS` reaches every Maven call of the targets above, under
   either launcher `get_maven.sh` picks: `MAVEN_ARGS=-Pproduction make
@@ -752,8 +767,8 @@ inherit it, and Maven reads it through the link:
   one silently ignores a consumer's override. The ids are `prepare-agent`,
   `report` and `check` (JaCoCo), `pmd-check` and `cpd-check` (PMD),
   `checkstyle` and `project` (Checkstyle), `spotless-check` (Spotless),
-  `spotbugs-check` (SpotBugs), `add-third-party` (license) and `default`
-  (failsafe).
+  `spotbugs-check` (SpotBugs), `add-third-party` (license), `default`
+  (failsafe) and `pmd-ruleset` (resources).
 - Never add a repository whose namespace ownership is unverified to the
   root pom or to Maven's settings. Maven must find the parent only through
   the link; a remote lookup of `de.vptr.devkit:devkit-parent` is the

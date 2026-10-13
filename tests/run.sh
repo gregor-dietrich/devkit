@@ -60,6 +60,10 @@
 #          latter too, before Maven runs. Expect test to fail on a profile
 #          MAVEN_ARGS requests, under mvn and under a script-only ./mvnw, and
 #          check to fail on a ./mvnw that launches a maven-wrapper jar.
+#          Expect lint to fail on a test whose only check is an assertion
+#          helper PMD does not know, until the pom's pmd.extraAssertMethodNames
+#          names it, and then to pass whatever plugin-level resources
+#          configuration the pom carries.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, Maven >= 3.9.9, python3, git >= 2.34 and ssh-keygen
@@ -320,7 +324,49 @@ formatted() { # formatted FILE SED: make format undoes SED's break in a monolith
     make_says pass "$work/formatted" format && make_says pass "$work/formatted" lint
 }
 
+assert_helper_checks() { # a test whose only check is a helper PMD does not know fails lint until the pom names it
+  local dir=$work/negative-assert-helper testdir=src/test/java/devkit/fixture
+  setup "$root/tests/fixtures/java-monolith" "$dir"
+  # No assert*, verify* or check* in the names: PMD accepts those by default.
+  cat >"$dir/$testdir/GreetingIs.java" <<'JAVA'
+package devkit.fixture;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+final class GreetingIs {
+
+    private GreetingIs() {
+    }
+
+    static void greetingIs(String expected, String name) {
+        assertEquals(expected, new Greeter().greet(name));
+    }
+}
+JAVA
+  cat >"$dir/$testdir/HelperTest.java" <<'JAVA'
+package devkit.fixture;
+
+import org.junit.jupiter.api.Test;
+
+class HelperTest {
+
+    @Test
+    void greetsByHelper() {
+        GreetingIs.greetingIs("Hello, Ada", "Ada");
+    }
+}
+JAVA
+  check "java-monolith: an unknown assertion helper fails make lint, PMD finding one violation" \
+    make_says fail "$dir" lint "has found 1 violation"
+  sed_into "$dir/pom.xml" 's|<project.build.sourceEncoding>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
+  # A project's own resources configuration that would copy XML unfiltered must not reach the ruleset.
+  sed_into "$dir/pom.xml" 's|</project>|  <build><plugins><plugin><artifactId>maven-resources-plugin</artifactId><configuration><nonFilteredFileExtensions><nonFilteredFileExtension>xml</nonFilteredFileExtension></nonFilteredFileExtensions></configuration></plugin></plugins></build>\n&|'
+  check "java-monolith: pmd.extraAssertMethodNames makes make lint accept it, whatever the project's plugin-level resources configuration" \
+    make_says pass "$dir" lint
+}
+
 negatives() {
+  assert_helper_checks
   local main=src/main/java/devkit/fixture/Greeter.java
   local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
   negative format lint "format violations" "$main" "$indent"

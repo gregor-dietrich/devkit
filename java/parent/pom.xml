@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- devkit's parent POM: the shared Maven gate configuration (compiler with Error Prone and
      NullAway, surefire, failsafe, license, dependency-check, SpotBugs, PMD, Checkstyle, JaCoCo,
-     Spotless) with every gate tool's version. A consumer's root pom declares it as its <parent>
-     with <relativePath>.devkit/java/parent/pom.xml</relativePath>, so Maven reads it through the
-     link devkitw creates. Its version is the devkit release tag without the "v"; it is published
+     Spotless) with every gate tool's version, and the resources plugin that makes PMD's filtered
+     ruleset. A consumer's root pom declares it as its <parent> with
+     <relativePath>.devkit/java/parent/pom.xml</relativePath>, so Maven reads it through the link
+     devkitw creates. Its version is the devkit release tag without the "v"; it is published
      to no repository. The interface is docs/contract.md ("Parent POM").
 
      The version stays literal, never ${revision}: devkit's build scripts pass -Drevision for the
@@ -34,6 +35,7 @@
     <license-plugin.version>2.7.1</license-plugin.version>
     <nullaway.version>0.14.2</nullaway.version>
     <pmd-plugin.version>3.28.0</pmd-plugin.version>
+    <resources-plugin.version>3.5.0</resources-plugin.version>
     <spotbugs-plugin.version>4.10.4.1</spotbugs-plugin.version>
     <spotless-plugin.version>3.10.4</spotless-plugin.version>
     <surefire-plugin.version>3.6.0</surefire-plugin.version>
@@ -43,6 +45,9 @@
     <jacoco.check.branchMinimum>0.80</jacoco.check.branchMinimum>
     <jacoco.check.skip>false</jacoco.check.skip>
     <pmd-cpd.minTokens>65</pmd-cpd.minTokens>
+    <!-- Comma-separated names of the project's own assertion helpers, which PMD's
+         UnitTestShouldIncludeAssert accepts besides assert*/verify*. -->
+    <pmd.extraAssertMethodNames></pmd.extraAssertMethodNames>
     <skipITs>true</skipITs>
     <nullaway.annotated.packages>${project.groupId}</nullaway.annotated.packages>
     <!-- Appended to the Error Prone argument, e.g. -XepExcludedPaths:.*/generated-sources/.* -->
@@ -340,6 +345,46 @@
           </executions>
         </plugin>
         <plugin>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${resources-plugin.version}</version>
+          <executions>
+            <!-- PMD cannot read a property into a ruleset, so the ruleset is copied into the
+                 build directory with ${pmd.extraAssertMethodNames} filled in. initialize
+                 runs before PMD in make lint's goal list and in the lifecycle up to verify,
+                 and needs no generated source. Only the ${*}
+                 delimiter applies, so an @ an XPath rule may carry is never read as a
+                 property. combine.self keeps a project's plugin-level configuration, and its
+                 build filters, out of the copy. -->
+            <execution>
+              <id>pmd-ruleset</id>
+              <phase>initialize</phase>
+              <goals>
+                <goal>copy-resources</goal>
+              </goals>
+              <configuration combine.self="override">
+                <!-- A literal: maven.resources.skip cannot leave PMD reading a stale copy. -->
+                <skip>false</skip>
+                <outputDirectory>${project.build.directory}/devkit</outputDirectory>
+                <encoding>UTF-8</encoding>
+                <useBuildFilters>false</useBuildFilters>
+                <useDefaultDelimiters>false</useDefaultDelimiters>
+                <delimiters>
+                  <delimiter>${*}</delimiter>
+                </delimiters>
+                <resources>
+                  <resource>
+                    <directory>${maven.multiModuleProjectDirectory}/.devkit/java/config</directory>
+                    <includes>
+                      <include>pmd-ruleset.xml</include>
+                    </includes>
+                    <filtering>true</filtering>
+                  </resource>
+                </resources>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-pmd-plugin</artifactId>
           <version>${pmd-plugin.version}</version>
@@ -349,7 +394,7 @@
             <includeTests>true</includeTests>
             <linkXRef>false</linkXRef>
             <rulesets>
-              <ruleset>${maven.multiModuleProjectDirectory}/.devkit/java/config/pmd-ruleset.xml</ruleset>
+              <ruleset>${project.build.directory}/devkit/pmd-ruleset.xml</ruleset>
             </rulesets>
             <failOnViolation>true</failOnViolation>
           </configuration>
@@ -511,7 +556,8 @@
       </plugins>
     </pluginManagement>
 
-    <!-- Compiler and surefire run by default; the gates and flatten are activated here. -->
+    <!-- Compiler and surefire run by default; the gates, flatten and the resources plugin
+         (which makes the filtered PMD ruleset) are activated here. -->
     <plugins>
       <plugin>
         <artifactId>maven-failsafe-plugin</artifactId>
@@ -527,6 +573,9 @@
       <plugin>
         <groupId>com.github.spotbugs</groupId>
         <artifactId>spotbugs-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <artifactId>maven-resources-plugin</artifactId>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
