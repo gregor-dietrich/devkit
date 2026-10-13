@@ -226,10 +226,9 @@
                 <goal>add-third-party</goal>
               </goals>
               <configuration>
-                <!-- Without force the goal skips itself, the missing-license and blacklist
-                     checks included, whenever a previous run's THIRD-PARTY.txt is newer than
-                     the (flattened) project file: a failed build then turns green on the next
-                     one that does not clean. -->
+                <!-- Without force the goal skips itself, the license checks included, whenever
+                     a previous run's THIRD-PARTY.txt is newer than the (flattened) project
+                     file: a failed build then turns green on the next one that does not clean. -->
                 <force>true</force>
                 <failOnMissing>true</failOnMissing>
                 <failOnBlacklist>true</failOnBlacklist>
@@ -237,14 +236,10 @@
                      group pattern inside its own regex over groupId:artifactId, so (?=:)
                      ends the groupId where $ cannot. -->
                 <excludedGroups>^\Q${project.groupId}\E(?=:)</excludedGroups>
-                <!-- The plugin splits on | and compares each name exactly, so a name must not
-                     wrap: break lines only next to a |. -->
-                <excludedLicenses>
-                  Commercial|Proprietary|SSPL|Elastic License|
-                  Business Source License|Commons Clause|Elastic License 2.0|
-                  Server Side Public License|BUSL-1.1|Polyform|PolyForm
-                </excludedLicenses>
-                <!-- Only these licenses are allowed. The plugin passes a dependency when any one
+                <!-- No excludedLicenses: every name the list below omits already fails, and
+                     with both set, plugin 2.7.1 throws a ConcurrentModificationException once
+                     two dependencies each declare an allowed name and the same excluded one.
+                     Only these licenses are allowed. The plugin passes a dependency when any one
                      of its licenses is listed, as Maven reads a pom's licenses as alternatives,
                      and the exact, case-sensitive name is all it compares: one element per
                      name, never a | list. "Unknown license" is the plugin's key for a dependency

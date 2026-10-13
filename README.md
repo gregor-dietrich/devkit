@@ -265,19 +265,26 @@ new tag objects at the same commits; the new wrapper refuses a mirror still
 serving the old unsigned objects.
 
 The license check now allows only the licenses the parent lists in
-`includedLicenses` ([Parent POM](docs/contract.md#parent-pom)), and keeps its
-`excludedLicenses` blacklist: a dependency under any other name fails the build,
-among them FSL-1.1-ALv2, vendor license agreements and GPL with the Universal
-FOSS Exception, which only a FOSS project appends. After the bump
-`make test` shows only "There are some forbidden licenses used"; `mvn verify`
-without `-q` shows each license and its dependencies. Add another spelling of an
-allowed license to `<includedLicenses combine.children="append">` in
-`add-third-party`, one `<includedLicense>` per name. A name in
-`excludedLicenses` stays forbidden even then: exempt the artifact through
-`excludedGroups`, or override `excludedLicenses` in `add-third-party`. Declare a
-dependency whose pom misstates its license in the module's
+`includedLicenses` ([Parent POM](docs/contract.md#parent-pom)): a dependency
+under any other name fails the build, among them FSL-1.1-ALv2, vendor license
+agreements and GPL with the Universal FOSS Exception, which only a FOSS project
+appends. After the bump `make test` shows only "There are some forbidden
+licenses used"; `mvn verify` without `-q` shows each license and its
+dependencies. Add another spelling of an allowed license to `<includedLicenses
+combine.children="append">` in `add-third-party`, one `<includedLicense>` per
+name. Declare a dependency whose pom misstates its license in the module's
 `src/license/override-THIRD-PARTY.properties`, under a name the parent lists or
 the project appended.
+
+The parent no longer sets `excludedLicenses`, so every name it does not list
+fails, and a project's own `excludedLicenses` now applies at any level: one at
+plugin level or as the `license.excludedLicenses` property, which the parent's
+used to replace, takes effect again. While a project keeps one, plugin 2.7.1 can
+fail with a `ConcurrentModificationException` on dependencies declaring an
+allowed and an excluded name. Such a project, including one that set its own in
+`add-third-party` as earlier upgrade notes suggested, deletes it and appends to
+`includedLicenses` any name it let through, such as "Commercial" for an accepted
+vendor dependency.
 
 A project that set its own `includedLicenses` at plugin level or as the
 `license.includedLicenses` property has it silently replaced by the parent's: it
@@ -286,7 +293,8 @@ extend the parent's list. Without the attribute its list replaces the parent's,
 so it also keeps "Unknown license" and every name its dependencies need. A
 project that turned `failOnBlacklist` off has no allowlist check either: it
 turns the option back on and exempts the dependency it was turned off for,
-through `excludedGroups` or an `excludedLicenses` override.
+through `excludedGroups`, an override-file declaration, or by appending its
+license.
 
 ### Upgrading from v0.5.x
 

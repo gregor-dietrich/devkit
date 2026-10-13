@@ -14,12 +14,11 @@
 #          tests/sealed_dir_test.sh, tests/coverage_floor_test.sh,
 #          tests/python_clean_test.sh, tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/markdown_isolation_test.sh and
-#          tests/closure_audit_test.sh, and that no entry of the parent's
-#          excludedLicenses or includedLicense is empty or holds a line
-#          break, a tab or a double space (nor edge whitespace, for the
-#          latter), that no name is in both lists or listed twice and that
-#          the allowlist names the licenses devkit's own tests rely on, and
-#          that each of those failures is reported;
+#          tests/closure_audit_test.sh, and that no includedLicense of the
+#          parent is empty or holds a line break, a tab, a double space or
+#          edge whitespace, that no name is listed twice and that the
+#          allowlist names the licenses devkit's own tests rely on, and that
+#          each of those failures is reported;
 #          make lint-repo, not this, gates devkit's own tree. Needs git
 #          >= 2.34 (SSH signing), make, shellcheck, ssh-keygen (OpenSSH 8.1
 #          or later), bash >= 4 (shopt globstar; macOS ships 3.2), procps
@@ -43,7 +42,8 @@
 #          sources unchanged, and of a copy whose app depends on a jar under
 #          a license the parent does not list to fail twice in a row the
 #          same way, and to pass once the module appends that license to
-#          includedLicenses;
+#          includedLicenses, and then, in that copy, two more jars each
+#          under an allowed and a commercial license to pass;
 #          then break copies of the monolith
 #          (format, a shared and a project checkstyle rule, the project
 #          rule's suppression, coverage, an image digest, Markdown, a secret
@@ -147,10 +147,8 @@ shell_part() {
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
-  check "parent: no excludedLicenses or includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is in both lists or twice, and the allowlist names the required licenses" \
+  check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
-  check "parent: the license lists check rejects an excludedLicenses name wrapped over a line" \
-    lists_reject 's|Server Side Public License|Server Side Public\n                  License|' "excludedLicenses entries that can never match"
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
     lists_reject 's|<includedLicense>Plexus<|<includedLicense>Plex\nus<|' "includedLicense entries that can never match"
   check "parent: the license lists check rejects an includedLicense name with a tab" \
@@ -159,41 +157,34 @@ shell_part() {
     lists_reject 's|<includedLicense>MIT License<|<includedLicense>MIT  License<|' "includedLicense entries that can never match"
   check "parent: the license lists check rejects an includedLicense name with edge whitespace" \
     lists_reject 's|<includedLicense>Plexus<|<includedLicense> Plexus<|' "includedLicense entries that can never match"
-  check "parent: the license lists check rejects a name in both lists" \
-    lists_reject 's|<includedLicense>Plexus<|<includedLicense>Commercial</includedLicense>&|' "names in both lists"
   check "parent: the license lists check rejects an includedLicense name listed twice" \
     lists_reject 's|<includedLicense>Plexus</includedLicense>|&&|' "includedLicense entries listed twice"
   check "parent: the license lists check rejects an allowlist without a required name" \
     lists_reject '/<includedLicense>Unknown license</d' "required names missing from the allowlist"
 }
 
-# license_lists_whole POM: the license plugin splits each excludedLicenses on \s*\|\s* and
-# compares each piece, untrimmed, to a license name exactly: a name wrapped over lines never matches.
-# Each includedLicense is one name, compared as it stands, so it must not carry whitespace (Maven
-# trims edge whitespace in element text, so that is harmless to the plugin, but kept out of the
-# pom). The allowlist keeps the names devkit's own tests and fixtures rely on: "MIT License", for
-# foreign_group's override; "Unknown license", the plugin's key for a dependency with no license,
-# which failOnMissing must keep reporting as foreign_group expects; "Eclipse Public License v2.0",
-# the license of the fixtures' junit jars; "The Apache License, Version 2.0", that of their
-# opentest4j and apiguardian jars. No name is in both lists and none is listed twice.
+# license_lists_whole POM: each includedLicense is one name, compared to a license name exactly as
+# it stands, so it must not carry whitespace (Maven trims edge whitespace in element text, so that
+# is harmless to the plugin, but kept out of the pom). The allowlist keeps the names devkit's own
+# tests and fixtures rely on: "MIT License", for foreign_group's override; "Unknown license", the
+# plugin's key for a dependency with no license, which failOnMissing must keep reporting as
+# foreign_group expects; "Eclipse Public License v2.0", the license of the fixtures' junit jars;
+# "The Apache License, Version 2.0", that of their opentest4j and apiguardian jars. No name is
+# listed twice.
 license_lists_whole() {
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 root = ET.parse(sys.argv[1]).getroot()
-lists = [e.text or "" for e in root.iterfind(".//m:excludedLicenses", ns)]
-excluded = [e for t in lists for e in re.split(r"\s*\|\s*", t.strip())]
 included = [e.text or "" for e in root.iterfind(".//m:includedLicense", ns)]
 odd = lambda e: not e or re.search(r"[\n\t]|  |^\s|\s$", e)
 required = {"Eclipse Public License v2.0", "The Apache License, Version 2.0", "MIT License", "Unknown license"}
 problems = {
-    "excludedLicenses entries that can never match": [e for e in excluded if odd(e)],
     "includedLicense entries that can never match": [e for e in included if odd(e)],
-    "names in both lists": sorted(set(excluded) & set(included)),
     "includedLicense entries listed twice": sorted({e for e in included if included.count(e) > 1}),
     "required names missing from the allowlist": sorted(required - set(included)),
 }
 bad = {k: v for k, v in problems.items() if v}
-sys.exit(f"license lists: {bad!r}") if bad or not lists or not included else None' "$1"
+sys.exit(f"license lists: {bad!r}") if bad or not included else None' "$1"
 }
 
 lists_reject() { # lists_reject SED TEXT: the check fails on the parent run through SED (which must change it), saying TEXT
@@ -443,7 +434,7 @@ java_part() {
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group
-  check "java-multimodule: a dependency under an unlisted license fails every make test, until the module appends it to includedLicenses" \
+  check "java-multimodule: a dependency under an unlisted license fails every make test, until the module appends it to includedLicenses, and two dependencies under an allowed and a commercial license pass" \
     unlisted
   negatives
 }
@@ -520,9 +511,9 @@ foreign_group() {
 # parent's first listed name, keeps passing only if the module's list is appended: without the
 # attribute the module's names replace the parent's whole list. A third, under an unlisted name
 # and the parent's first listed one, passes throughout: the plugin passes a dependency when any
-# one of its licenses is listed. Last, a blacklisted name appended to includedLicenses does not
-# allow its dependency: excludedLicenses wins. (No dependency gets an allowed and a blacklisted
-# name at once: plugin 2.7.1 can crash with a ConcurrentModificationException on those.)
+# one of its licenses is listed. Last, two dependencies each under the parent's first listed name
+# and "Commercial" pass: the parent sets no excludedLicenses, which plugin 2.7.1 would crash on
+# (ConcurrentModificationException) with two such dependencies.
 unlisted() {
   local proj=$work/unlisted first
   local -x MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
@@ -539,10 +530,11 @@ print(ET.parse(sys.argv[1]).getroot().find(".//{http://maven.apache.org/POM/4.0.
   sed_into "$proj/app/pom.xml" "s|^</project>|  <build>\\n    <plugins>\\n      <plugin>\\n        <groupId>org.codehaus.mojo</groupId>\\n        <artifactId>license-maven-plugin</artifactId>\\n        <executions>\\n          <execution>\\n            <id>add-third-party</id>\\n            <configuration>\\n              <includedLicenses combine.children=\"append\">\\n                <includedLicense>FSL-1.1-ALv2</includedLicense>\\n              </includedLicenses>\\n            </configuration>\\n          </execution>\\n        </executions>\\n      </plugin>\\n    </plugins>\\n  </build>\\n&|" &&
     git -C "$proj" add app/pom.xml && git -C "$proj" commit -q -m append &&
     ONLY=app make_says pass "$proj" test || return
-  # A blacklisted name appended as well still fails its dependency.
-  sed_into "$proj/app/pom.xml" "s|<includedLicense>FSL-1.1-ALv2</includedLicense>|&\\n                <includedLicense>Business Source License</includedLicense>|" &&
-    install_dep unlisted-excluded "Business Source License" && depend_on "$proj" unlisted-excluded &&
-    ONLY=app make_says fail "$proj" test "There are some forbidden licenses used"
+  # Dual-licensed under an allowed and a commercial name, two of them: the pass the parent keeps by
+  # setting no excludedLicenses.
+  install_dep unlisted-dual-1 "$first" "Commercial" && install_dep unlisted-dual-2 "$first" "Commercial" &&
+    depend_on "$proj" unlisted-dual-1 && depend_on "$proj" unlisted-dual-2 &&
+    ONLY=app make_says pass "$proj" test
 }
 
 ruff_skips_devkit() { # ruff's walk of DIR lists files, none of them through the .devkit link

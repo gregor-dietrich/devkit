@@ -625,19 +625,20 @@ inherit it, and Maven reads it through the link:
   which is listed), and so does a system-scope dependency. The
   "Unknown license" entry lets `failOnMissing` report a dependency with no
   license; a project that replaces the list keeps it, or such a dependency
-  fails as forbidden instead. `excludedLicenses` stays a blacklist beside the
-  list: a name in both fails, so a project clears one in `excludedLicenses`
-  through `excludedGroups` or its own `excludedLicenses`, not by appending it.
-  The plugin (2.7.1) fails with a `ConcurrentModificationException`, not a
-  license message, when two or more dependencies each declare an allowed
-  license and the same `excludedLicenses` name: declare each in the override
-  file with its allowed license, or exempt it through `excludedGroups`. A
-  dependency whose pom names licenses that all apply, or misstates its
-  license, is declared in the override file below, whose line replaces every
-  license of that artifact; the check then reads the declared name, so it
-  must be a listed one. A dependency whose pom declares no license gets one
-  in the module's
-  `src/license/override-THIRD-PARTY.properties`, one
+  fails as forbidden instead. The parent sets no `excludedLicenses`: every name
+  the allowlist omits already fails, and one a project appends is allowed,
+  whatever it is. A project's own `excludedLicenses` therefore applies at any
+  level, in the execution, at plugin level or as the `license.excludedLicenses`
+  property; its names are separated by `|` and compared exactly, so none may
+  wrap over a line. Beside the allowlist, plugin 2.7.1 then throws a
+  `ConcurrentModificationException`, not a license message, when two or more
+  dependencies declare an allowed license and the same excluded name. The
+  project deletes that `excludedLicenses` and appends to the allowlist any name
+  it let through instead. A dependency whose pom names licenses that all apply,
+  or misstates its license, is declared in the override file below, whose line
+  replaces every license of that artifact; the check then reads the declared
+  name, so it must be a listed one. A dependency whose pom declares no license
+  gets one in the module's `src/license/override-THIRD-PARTY.properties`, one
   `groupId--artifactId--version=License name` line each, which the plugin
   reads by default and never writes. Its error message names
   `THIRD-PARTY.properties` instead, which it reads only under
@@ -702,16 +703,14 @@ inherit it, and Maven reads it through the link:
 - Some settings live at execution level, where a plugin-level override does not
   reach them; override them inside the execution with the id below: license's
   `force` (`true`, so that every build runs the license checks, not only the
-  first after a clean), `failOnMissing`, `failOnBlacklist`, `excludedGroups`,
-  `excludedLicenses` and `includedLicenses` (`add-third-party`;
-  `excludedLicenses` names are separated by `|` and compared exactly, so none
-  may wrap over a line; a project adds names to the allowlist as
-  `<includedLicenses combine.children="append">` with one `<includedLicense>`
-  per name, which replaces the parent's list without the attribute and
-  belongs in the execution, as a plugin-level or `license.includedLicenses`
-  value is ignored; `failOnBlacklist` governs the allowlist as well as
-  `excludedLicenses`, so turning it off disables both; an `excludedGroups`
-  of the project's own replaces the one that skips its groupId, so it keeps
+  first after a clean), `failOnMissing`, `failOnBlacklist`, `excludedGroups` and
+  `includedLicenses` (`add-third-party`; a project adds names to the allowlist
+  as `<includedLicenses combine.children="append">` with one `<includedLicense>`
+  per name, which replaces the parent's list without the attribute and belongs
+  in the execution, as a plugin-level or `license.includedLicenses` value is
+  ignored; `failOnBlacklist` governs the allowlist as well as any
+  `excludedLicenses`, so turning it off disables both; an `excludedGroups` of
+  the project's own replaces the one that skips its groupId, so it keeps
   `^\Q${project.groupId}\E(?=:)|` before its own groups: the plugin embeds the
   pattern in a regular expression over `groupId:artifactId`, so
   `^\Qcom.example\E(?=:)` matches exactly that groupId, where a bare
