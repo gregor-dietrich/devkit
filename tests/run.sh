@@ -22,6 +22,9 @@
 #          break, a tab, a double space or edge whitespace, that no name is
 #          listed twice and that the allowlist names the licenses devkit's
 #          own tests rely on, and that each of those failures is reported,
+#          and that docs/contract.md lists the parent's *.version properties
+#          and execution ids, no more and no fewer, and that each way of
+#          drifting is reported,
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin, plugin dependency and annotation processor the parent
 #          pins and of the plugins check_frontend_deps.py runs, and that a
@@ -197,6 +200,34 @@ shell_part() {
     lists_reject 's|<includedLicense>Plexus</includedLicense>|&&|' "includedLicense entries listed twice"
   check "parent: the license lists check rejects an allowlist without a required name" \
     lists_reject '/<includedLicense>Unknown license</d' "required names missing from the allowlist"
+  check "parent: docs/contract.md lists the parent's version properties and execution ids, no more and no fewer" \
+    contract_lists_match "$root/java/parent/pom.xml" "$root/docs/contract.md"
+  check "parent: the contract lists check rejects a version property the contract does not list" \
+    contract_lists_reject pom 's|<jacoco-plugin.version>|<extra-plugin.version>1</extra-plugin.version>&|' "lacks the parent's version propert(ies): extra-plugin.version"
+  check "parent: the contract lists check rejects a listed version property the parent lacks" \
+    contract_lists_reject pom 's|jacoco-plugin.version>|jacoco-gone.version>|g' "has no version propert(ies) the contract lists: jacoco-plugin.version"
+  check "parent: the contract lists check rejects an execution id the contract does not list" \
+    contract_lists_reject pom 's|<id>environment</id>|<id>environment</id></execution><execution><id>extra-id</id>|' "lacks the parent's execution id(s): extra-id"
+  check "parent: the contract lists check rejects a listed execution id the parent lacks" \
+    contract_lists_reject pom 's|<id>pmd-ruleset</id>|<id>pmd-renamed</id>|' "has no execution with the id(s) the contract lists: pmd-ruleset"
+  check "parent: the contract lists check rejects an execution id held by two executions" \
+    contract_lists_reject pom 's|<id>flatten</id>|&</execution><execution>|' "has more than one execution with the id(s): default"
+  check "parent: the contract lists check rejects a contract whose id list is reworded" \
+    contract_lists_reject contract 's|The ids are|The names are|' "no \"The ids are\""
+  check "parent: the contract lists check rejects a contract whose pin list is reworded" \
+    contract_lists_reject contract 's|^- It pins every gate tool|- It sets every gate tool|' "no bullet starts with"
+  check "parent: the contract lists check rejects a list too short to be the real one" \
+    contract_lists_reject pom '/<properties>/,/<\/properties>/d' "parsed 0 properties"
+  check "parent: the contract lists check rejects a parent without a non-override execution id" \
+    contract_lists_reject pom 's|<id>flatten</id>|<id>flatten-x</id>|' "has lost the non-override execution id(s): flatten"
+  # shellcheck disable=SC2016 # backticks of the sed pattern are literal
+  check "parent: the contract lists check rejects an execution id only the contract lists" \
+    contract_lists_reject contract 's|`pmd-ruleset`|`pmd-ruleset`, `ghost-id`|' "has no execution with the id(s) the contract lists: ghost-id"
+  # shellcheck disable=SC2016 # backticks of the sed pattern are literal
+  check "parent: the contract lists check rejects a listed execution id that is no override point" \
+    contract_lists_reject contract 's|`pmd-ruleset`|`pmd-ruleset`, `flatten`|' "lists execution id(s) that are no override point: flatten"
+  check "parent: the contract lists check rejects an execution id the contract places in another plugin" \
+    contract_lists_reject contract 's|(JaCoCo)|(SpotBugs)|' "names another plugin than the parent's for the execution id(s): check, prepare-agent, report"
   check "parent: java/checksums lists the jar of every plugin and annotation processor the parent pins" \
     checksums_cover "$root/java/parent/pom.xml" "$root/java/checksums/checksums.sha256" "$(frontend_plugins "$root")" "$(maven_pin "$root")"
   check "parent: the checksums check rejects a file without a pinned plugin's jar, naming it and make maven-checksums" \
@@ -306,6 +337,69 @@ lists_reject() { # lists_reject SED TEXT: the check fails on the parent run thro
   local edited err
   edited=$(sed "$1" "$root/java/parent/pom.xml") && [[ $edited != "$(<"$root/java/parent/pom.xml")" ]] &&
     ! err=$(license_lists_whole /dev/stdin <<<"$edited" 2>&1) && [[ $err == *"$2"* ]]
+}
+
+# contract_lists_match POM CONTRACT: docs/contract.md lists, by hand, the parent's version properties
+# (the bullet "It pins every gate tool's version") and its execution ids (after "The ids are"): a
+# consumer's override of either silently stops working when the name drifts. Both lists must equal
+# the POM's: every project property ending in .version, and every execution id (an execution
+# without one has Maven's implicit id, default). Two executions must not share an id even across
+# plugins, which Maven allows: the contract's list is flat, so a shared id would hide one plugin's
+# rename behind another's. Each id must sit in the plugin the contract names after it: the name,
+# lowercased, is part of that plugin's artifactId. The ids in
+# not_override are no override point (the contract's flatten bullet: its configuration is not
+# one), so the contract does not list them; each must still exist, so the set cannot go stale. An
+# anchor not found or a list of fewer than 10 entries means the contract was reworded, which fails
+# here rather than passing vacuously.
+contract_lists_match() {
+  python3 -c 'import re, sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+not_override = {"flatten"}
+root = ET.parse(sys.argv[1]).getroot()
+props = {e.tag.split("}")[1] for e in root.iterfind("m:properties/*", ns) if e.tag.endswith(".version")}
+execs = [(p.findtext("m:artifactId", "", ns), e.findtext("m:id", "default", ns))
+         for p in root.iterfind(".//m:plugin", ns) for e in p.iterfind("m:executions/m:execution", ns)]
+all_ids = [i for _, i in execs]
+ids = set(all_ids) - not_override
+lines = open(sys.argv[2]).read().split("\n")
+def bullet(start):
+    first = [i for i, l in enumerate(lines) if l.startswith(start)]
+    if not first:
+        sys.exit(f"contract lists: no bullet starts with {start!r}: update this check")
+    end = next((i for i in range(first[0] + 1, len(lines)) if lines[i] and lines[i][0] != " "), len(lines))
+    return "\n".join(lines[first[0]:end])
+ticks = lambda t: set(re.findall(r"\x60([^\x60]+)\x60", t))
+pins = bullet("- It pins every gate tool\x27s version")
+listed = bullet("- The property names above and the execution ids are contract")
+if "The ids are" not in listed:
+    sys.exit("contract lists: no \"The ids are\" in the contract bullet: update this check")
+c_props = {t for t in ticks(pins) if t.endswith(".version")}
+c_ids = ticks(listed.split("The ids are", 1)[1])
+owner = {i: name.lower() for g, name in re.findall(r"((?:\x60[^\x60]+\x60[\s,]*(?:and\s+)?)+)\(([^)]+)\)", listed) for i in ticks(g)}
+if min(len(props), len(ids), len(c_props), len(c_ids)) < 10:
+    sys.exit(f"contract lists: parsed {len(props)} properties, {len(ids)} ids from the pom, {len(c_props)} and {len(c_ids)} from the contract: update this check")
+sep = ", "
+msgs = [f"{who} {what}: {sep.join(sorted(d))}" for who, what, d in (
+    ("docs/contract.md", "lacks the parent\x27s version propert(ies)", props - c_props),
+    ("java/parent/pom.xml", "has no version propert(ies) the contract lists", c_props - props),
+    ("docs/contract.md", "lacks the parent\x27s execution id(s)", ids - c_ids),
+    ("java/parent/pom.xml", "has no execution with the id(s) the contract lists", c_ids - set(all_ids)),
+    ("docs/contract.md", "lists execution id(s) that are no override point", c_ids & not_override),
+    ("docs/contract.md", "names another plugin than the parent\x27s for the execution id(s)",
+     {i for a, i in execs if i in c_ids and owner.get(i, "(none)") not in a}),
+    ("java/parent/pom.xml", "has more than one execution with the id(s)", {i for i in all_ids if all_ids.count(i) > 1}),
+    ("java/parent/pom.xml", "has lost the non-override execution id(s)", not_override - set(all_ids))) if d]
+sys.exit("\n".join(msgs)) if msgs else None' "$1" "$2"
+}
+
+contract_lists_reject() { # contract_lists_reject pom|contract SED TEXT: the check fails on that file run through SED (which must change it), saying TEXT
+  local pom=$root/java/parent/pom.xml contract=$root/docs/contract.md edited err
+  case $1 in
+    pom) edited=$(sed "$2" "$pom") && [[ $edited != "$(<"$pom")" ]] &&
+      ! err=$(contract_lists_match /dev/stdin "$contract" <<<"$edited" 2>&1) ;;
+    *) edited=$(sed "$2" "$contract") && [[ $edited != "$(<"$contract")" ]] &&
+      ! err=$(contract_lists_match "$pom" /dev/stdin <<<"$edited" 2>&1) ;;
+  esac && [[ $err == *"$3"* ]]
 }
 
 # swap_signers FILE KEY.pub: replace the key type and blob of the signers= line
