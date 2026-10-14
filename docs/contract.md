@@ -156,7 +156,14 @@ include .devkit/make/java-maven.mk
   change what a later job's gates run, through these caches as through `~/.m2`
   or the user's git configuration; give each job its own `HOME`, and `chmod -R
   u+w` it before removing it. An entry cached by an older devkit keeps writable
-  directories until it is removed.
+  directories until it is removed. Nothing removes an entry a bump supersedes,
+  nor the `.tmp.*` stage a fetch leaves when it is killed outright (SIGKILL, an
+  OOM kill, a power loss). To reclaim the space, remove the whole cache with
+  the recipe above, applied to `${XDG_CACHE_HOME:-$HOME/.cache}/devkit`, while
+  no devkit run on the machine is in progress; each project's next run fetches
+  what it pins again, the checkout needing the network and `ssh-keygen`.
+  Removing a single entry is safe on the same terms, but "not pinned here" is
+  not "unused": another project on the machine may pin it.
 - It reads only the `[devkit]` table, one `key = "value"` per line; every
   other table in `devkit.toml` belongs to devkit's scripts.
 
