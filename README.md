@@ -116,10 +116,15 @@ or later) with npm, for markdownlint and a uv project's copy-paste gate
 (jscpd), and `make format` needs them for `format-md`, which fixes the
 Markdown.
 `make lint` also needs curl, tar and `sha256sum` or `shasum`, which fetch
-and verify the pinned gitleaks once. Windows is not targeted.
+and verify the pinned gitleaks once. So does the first target of a Maven
+project on a machine, which fetches and verifies the pinned Maven the same
+way (`DEVKIT_MAVEN_MIRROR`: [Parent POM](docs/contract.md#parent-pom));
+every Java target runs that Maven, never `mvn` on `PATH`. Windows is not
+targeted.
 
-On a fresh clone, run any `make` target once: a bare `./mvnw` or an IDE's
-Maven import fails until the wrapper has created `.devkit`.
+On a fresh clone, run any `make` target once: a bare `mvn`, an optional
+`./mvnw` or an IDE's Maven import fails until the wrapper has created
+`.devkit`.
 "Non-resolvable parent POM … devkit-parent" means `.devkit` is missing or
 points at another pin: run `make check`.
 
@@ -164,10 +169,13 @@ bump of the closure.
 
 When a plugin's version, or parent configuration that changes what a plugin
 resolves, changes in `java/parent/pom.xml`, run `make maven-checksums` and
-commit `java/checksums/checksums.sha256` with the change. It needs JDK 25,
-`mvn` 3.9.9 or later on `PATH` and a direct route to Maven Central.
-`tests/run.sh shell` fails on a pinned jar the file lacks, but not on a
-changed transitive closure, which only the re-record catches. The hashes are
+commit `java/checksums/checksums.sha256` with the change; so does a bump of
+the Maven `scripts/lib/pinned_maven.sh` pins. It records under that Maven,
+so it needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
+Maven Central, but no Maven on `PATH`.
+`tests/run.sh shell` fails on a pinned jar, or the pinned Maven
+distribution's line, that the file lacks, but not on a changed transitive
+closure, which only the re-record catches. The hashes are
 trust on first use: whatever Central served over https when the target ran.
 They detect a later substitution by a mirror, a proxy or the local
 repository, not an artifact already malicious on Central; a re-record fails
@@ -278,22 +286,68 @@ verifying tag", naming ssh-keygen's own message.
 Maven now verifies the plugins and annotation processors devkit's parent pins
 against `.devkit/java/checksums/checksums.sha256` on every build the targets run
 ([Plugin checksums](docs/contract.md#plugin-checksums)). No action is needed. A
-build that fails with a checksum error naming the summaryFile (Maven 3.9 words
-it `trusted checksum mismatch`) for a plugin or dependency means the bytes Maven
-got, from a repository, a mirror or the local repository, are not the ones
-devkit recorded: delete that artifact's directory from the local repository and
-retry, and treat a repeat as a tampered mirror or proxy. Artifacts the file does
-not list are not checked: a project's own artifact, unless it shares a
-recorded coordinate; a default lifecycle plugin under a Maven that binds other
-versions than the recording one; a version resolved through repository
-metadata (a range, `LATEST`, `RELEASE`). A project that sets its own aether
-`trustedChecksums` (`record` included) or `summaryFile` keys has them
+build that fails with a checksum error naming the summaryFile for a plugin or
+dependency means the bytes Maven got, from a repository, a mirror or the local
+repository, are not the ones devkit recorded: delete that artifact's directory
+from the local repository and retry, and treat a repeat as a tampered mirror or
+proxy. Artifacts the file does not list are not checked: a project's own
+artifact, unless it shares a recorded coordinate; a version resolved through
+repository metadata (a range, `LATEST`, `RELEASE`). A project that sets its own
+aether `trustedChecksums` (`record` included) or `summaryFile` keys has them
 overridden for devkit's Maven calls (see the first bullet of the contract's
 [Plugin checksums](docs/contract.md#plugin-checksums)). The hashes are trust on
 first use: they detect a later substitution, not an artifact already malicious
-on Central. `MVN_CMD` now names devkit's checked wrapper; the launcher
-`get_maven.sh` picked is in `MVN_LAUNCHER`, which matters to a project script
+on Central. `MVN_CMD` now names devkit's checked wrapper; the pinned
+launcher is in `MVN_LAUNCHER`, which matters to a project script
 that sources `get_maven.sh` and inspects `MVN_CMD`.
+
+Every Java target now runs the Maven 3.10.0 that devkit pins, never `mvn` on
+`PATH` or `./mvnw`:
+
+- The first target on a machine downloads it from Maven Central into
+  devkit's tools cache, checks its sha256 and needs curl, tar, and `sha256sum`
+  or `shasum`; later runs need no network for it. A network that reaches
+  Central only through a mirror sets `DEVKIT_MAVEN_MIRROR` to the mirror's
+  base URL: `https://`, a host and an optional path, with no `@`, `?`, `#` or
+  whitespace anywhere, which every Java target refuses without printing it,
+  since devkit prints the URL on a download and a path token would show.
+  Authenticated mirrors and air-gapped seeding are unsupported (#134). The
+  download uses curl, so a proxy comes from `https_proxy` or `HTTPS_PROXY`,
+  not from Maven's `settings.xml`.
+- A CI image drops a Maven install that served only devkit's targets, but only
+  once the bump has landed: v0.6.x needs a Maven on `PATH`, so a rollback
+  before then fails without it. A cache hit is not re-verified, so the tools
+  directory is not restored from a shared CI cache; each fresh job downloads
+  the roughly 9 MB once.
+- Under make, the pinned Maven reads its own `conf/`, so a previously
+  installed Maven's global `settings.xml` (mirrors, proxies, `<servers>`
+  credentials) and its `lib/ext` no longer apply. Move them to
+  `~/.m2/settings.xml`, or pass `-gs <file>` in `.mvn/maven.config`.
+- An IDE or bare `mvn` lifecycle build now needs Maven 3.9.9 or later
+  (`requireMavenVersion`): Maven 3.9.8 built Quarkus projects that passed the
+  build and failed at runtime. `devkit.maven.range` can move that floor; a
+  project that lowers it takes that risk back on itself.
+- A project that does not pin maven-clean-plugin, maven-install-plugin or
+  maven-jar-plugin itself now gets the versions the pinned Maven binds: 3.5.0,
+  3.2.0 and 3.5.1.
+- `./mvnw` stays optional, for an IDE or a bare build, and no target runs it.
+  The refusal of a maven-wrapper jar (exit 15) is gone.
+- `JAVA_VERSION` must be a plain JDK major number (`25`), and a trailing
+  `# comment` on its line is fine; `make check` and `make install` exit 11
+  otherwise, the other targets 1. A script of the project's own that calls
+  `MVN_CMD` outside make exports it.
+- The JDK check now runs in `make check` and in every lifecycle target
+  (`install`, `lint`, `test`, `coverage`), through maven-enforcer-plugin, on
+  the JDK Maven runs on: point `JAVA_HOME` at it, in CI too. `java` on `PATH`
+  is no longer checked, and `make check` exits 11 when the enforcer fails.
+  The check no longer obeys `enforcer.skip`, `enforcer.fail`,
+  `enforcer.skipRules` or `enforcer.rules`, for a project that set them for
+  its own executions.
+- A pom that already declares maven-enforcer-plugin keeps its own
+  executions; the parent's `environment` execution merges in by id. The
+  parent also pins the plugin: a project removes any `enforcer-plugin.version`
+  property of its own, which the parent check rejects, and any literal
+  `<version>` on its declaration, so the parent's recorded 3.6.3 applies.
 
 A remote that mirrors devkit must re-sync its `v*` tags with force (`git fetch
 --force --tags` or equivalent), since v0.1.0 through v0.6.0 were re-signed as

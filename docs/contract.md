@@ -12,7 +12,7 @@ devkit is written against this page; change it here first.
 | `Makefile` | Profile variables, the two includes, project-only targets |
 | `pom.xml` | Maven: the root pom inherits devkit's parent POM, with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
 | `.mvn/jvm.config` | Maven: the `jdk.compiler` exports and opens Error Prone needs |
-| `mvnw`, `.mvn/wrapper/maven-wrapper.properties` | Maven, optional: the Maven wrapper, as an `mvnw` that launches no maven-wrapper jar (`-Dtype=only-script`); see Parent POM |
+| `mvnw`, `.mvn/wrapper/maven-wrapper.properties` | Maven, optional: the Maven wrapper, of any distribution type, for an IDE or a bare build; no devkit target runs it (see Parent POM) |
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
 | `checkstyle-suppressions.xml` | Maven: the project's Checkstyle exemptions, in every module, the root included; required (`<suppressions/>` when none) |
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
@@ -185,9 +185,11 @@ include .devkit/make/python-uv.mk
   since it is what reports a failed `devkitw`.
 - `make/common.mk` sets `PROJECT_ROOT := $(CURDIR)`, so an inherited
   environment value never wins (a command-line `PROJECT_ROOT=...` still
-  does), strips `MODULES` of the blanks a trailing comment leaves, and
-  exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
-  COVERAGE_FLOOR ONLY DEVKIT` to every recipe.
+  does), strips `MODULES` and `JAVA_VERSION` of the blanks a trailing comment
+  leaves, and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
+  COVERAGE_FLOOR ONLY DEVKIT` to every recipe. In a Maven project
+  `JAVA_VERSION` is the JDK major Maven must run on, exactly, a plain number
+  (`25`): `check` and every lifecycle build enforce it (see Parent POM).
 - `make/common.mk` sets `SHELL := /bin/bash`, so recipes (devkit's and the
   project's) and every `$(shell ...)` expanded after the includes run under
   non-interactive bash on every machine: bash 3.2 on macOS, and it sources
@@ -247,10 +249,13 @@ include .devkit/make/python-uv.mk
 - They act on the project, never on devkit: `cd "$PROJECT_ROOT"` first, and
   resolve project files from `$PROJECT_ROOT`, devkit files from `$DEVKIT`.
 - Shared helpers live in `scripts/lib/` and are sourced as
-  `"$DEVKIT/scripts/lib/<name>.sh"`. `node_closure.sh` checks `node`
-  against a devkit directory's `package.json` `engines.node` and installs
-  that directory's `package-lock.json` closure once (see `lint-md`), for
-  markdownlint-cli (`markdown/`) and jscpd (`jscpd/`).
+  `"$DEVKIT/scripts/lib/<name>.sh"`; the exception is `fetch.sh` and
+  `pinned_maven.sh`, which source their siblings relative to themselves,
+  because they also run without `DEVKIT` (`maven_checksums.sh`, the tests).
+  `node_closure.sh` checks `node` against a devkit directory's `package.json`
+  `engines.node` and installs that directory's `package-lock.json` closure
+  once (see `lint-md`), for markdownlint-cli (`markdown/`) and jscpd
+  (`jscpd/`).
 - `MODULES` empty means a single module or package at the root (a Maven
   monolith, a single uv package); otherwise Maven module selection maps
   each listed module to `-pl` as the Java scripts document. For uv,
@@ -597,19 +602,31 @@ inherit it, and Maven reads it through the link:
   literal, never a property. A bump edits it together with `version` and
   `commit` in `devkit.toml`. The parent is published to no repository: the
   link is the only way to reach it.
-- Every target that runs Maven (`check`, `install`, `lint`, `format`,
-  `test`, `coverage`, `audit`, `clean`, and a consumer's own script that
-  sources `scripts/lib/get_maven.sh`) fails before choosing Maven, with
-  exit status 15, on a `./mvnw` that launches a maven-wrapper jar (any
-  `distributionType` but `only-script`): that launcher ignores
-  `MAVEN_ARGS`, which `mvn`'s and an only-script wrapper's read, so a
-  profile requested there would silently not apply. It fails even where
-  `mvn` would be picked or `MAVEN_ARGS` is unset, so that every machine
-  fails at the bump instead of a later build that first runs `./mvnw`
-  with a profile. It then picks `mvn` from `PATH`, or `./mvnw` when `mvn` is
-  missing or older than 3.9.9, runs `python3_floor`, which exits 13 below
-  python3 3.11, and then `scripts/java/parent_check.py`.
-  That fails, with one `ERROR` line and exit status 14, when
+- Every target that runs Maven (`check`, `install`, `lint`, `format`, `test`,
+  `coverage`, `audit`, `clean`, and a consumer's own script that sources
+  `scripts/lib/get_maven.sh`) runs the Maven that `scripts/lib/pinned_maven.sh`
+  pins (the version and the SHA-256 of its distribution tarball live there),
+  never `mvn` on `PATH` and never `./mvnw`. The first such target on a machine
+  downloads it from Maven Central, which needs curl, tar, and `sha256sum` or
+  `shasum`, refuses it unless the SHA-256 matches, and keeps it, read-only, in
+  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/maven-<version>/`; later runs
+  need no network for it. `DEVKIT_MAVEN_MIRROR`, an environment variable,
+  replaces Central's base URL; empty means Central. Every Java target validates
+  it, not only a download: `https://`, a non-empty host and an optional path,
+  with no `@`, `?`, `#` or whitespace anywhere, and it is refused otherwise
+  without being printed. devkit prints the URL on a download, so it must hold no
+  secret anywhere, a path token included. Authenticated mirrors and air-gapped
+  seeding are unsupported (#134). A download is capped at 100M. The pin and the
+  cache path stay. A cache entry without a launcher fails with the command that
+  removes it, for a retry. A project's `mvnw` is optional, of any distribution
+  type, for an IDE or a bare build.
+  `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs on
+  (`$JAVA_HOME/bin/java`, else `java` on `PATH`; the probe follows the caller's
+  `JAVA_HOME`, so one set in `/etc/mavenrc` or `~/.mavenrc` is not seen), then
+  runs `python3_floor`, which exits 13 below python3 3.11, then
+  `scripts/java/parent_check.py`, and only then the download, so a bad python3
+  or parent fails offline. That fails, with one `ERROR` line and exit status
+  14, when
   - the root pom's `<parent>` is not devkit's;
   - the `<relativePath>` of the root pom, or of any module pom
     (`<modules>`, recursively, profiles included) whose `<parent>` is
@@ -625,16 +642,37 @@ inherit it, and Maven reads it through the link:
   - the root pom or any module pom (`<modules>`, recursively, profiles
     included) defines one of the parent's `*.version` properties: a
     partial migration. To try another tool version, pass it on the command
-    line (`./mvnw -Dcheckstyle.version=… verify`) instead, which is
-    unchecked as a plain launcher is; through `MAVEN_ARGS` or
+    line (`mvn -Dcheckstyle.version=… verify`) instead, which is
+    unchecked as a bare build is; through `MAVEN_ARGS` or
     `.mvn/maven.config` the targets run it too, but the version is
     unrecorded and so unchecked ([Plugin checksums](#plugin-checksums));
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
     `<annotationProcessorPaths>` without `combine.children="append"`.
-- It pins every gate tool's version, and flatten-maven-plugin's and
-  maven-resources-plugin's, as a property (`checkstyle.version`,
-  `checkstyle-plugin.version`, `compiler-plugin.version`,
-  `dependency-check-plugin.version`, `eclipse-formatter.version`,
+- maven-enforcer-plugin (execution `environment`, goal `enforce`, at `validate`)
+  checks the environment with two rules. `requireJavaVersion` holds the JDK
+  Maven runs on to `devkit.jdk.range`, default `[0,)`, any JDK; make passes
+  `-Ddevkit.jdk.range=[N,N+1)` for the project's `JAVA_VERSION` N, so under make
+  that JDK is required exactly, and the message names `JAVA_VERSION` and
+  `JAVA_HOME`. `requireMavenVersion` holds Maven to `devkit.maven.range`,
+  default `[3.9.9,)`, the floor of a bare or IDE build. The default goes no
+  lower because Maven 3.9.8 built Quarkus projects that passed the build and
+  failed at runtime. An override is the project's call, and lowering it is at
+  its own risk; it must still admit the pinned Maven, which passes at the
+  default. `make check` runs the execution directly (`enforce@environment`),
+  which resolves the enforcer's closure: on a cold `~/.m2` it needs Central or
+  the project's mirror, and a resolution failure shows as exit 11 too, as does
+  a failed rule.
+  `install`, `lint`, `test` and `coverage` enforce it at `validate`; `clean`,
+  `format`, `audit` and a bare goal do not. `devkit.jdk.range` is no override
+  point: the command line beats the POM. Nor do `enforcer.skip`, `enforcer.fail`,
+  `enforcer.skipRules` or `enforcer.rules` reach the execution, whatever a
+  project set them to for its own executions. A project that declares the
+  plugin itself keeps its own executions beside this one, which merges by id.
+- It pins every gate tool's version, and flatten-maven-plugin's,
+  maven-enforcer-plugin's and maven-resources-plugin's, as a property
+  (`checkstyle.version`, `checkstyle-plugin.version`,
+  `compiler-plugin.version`, `dependency-check-plugin.version`,
+  `eclipse-formatter.version`, `enforcer-plugin.version`,
   `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
   `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
   `resources-plugin.version`, `spotbugs-plugin.version`,
@@ -712,6 +750,7 @@ inherit it, and Maven reads it through the link:
   | `pmd-cpd.minTokens` | `65` |
   | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
+  | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
   | `nullaway.annotated.packages` | `${project.groupId}` |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
 
@@ -726,11 +765,11 @@ inherit it, and Maven reads it through the link:
   copy, and `maven.resources.skip` does not skip it; a project that
   redeclares the execution `pmd-ruleset` itself does reach it.
 
-- `MAVEN_ARGS` reaches every Maven call of the targets above, under
-  either launcher `get_maven.sh` picks: `MAVEN_ARGS=-Pproduction make
-  install` applies a profile, and `MAVEN_ARGS=-DskipITs=false make test`
-  runs the integration tests once. The resolver keys of [Plugin
-  checksums](#plugin-checksums) override its own.
+- `MAVEN_ARGS` reaches every Maven call of the targets above:
+  `MAVEN_ARGS=-Pproduction make install` applies a profile, and
+  `MAVEN_ARGS=-DskipITs=false make test` runs the integration tests once.
+  The resolver keys of [Plugin checksums](#plugin-checksums) override its
+  own.
 
 - It commits the files the table above lists. `.mvn/jvm.config` carries
   the `jdk.compiler` `--add-exports` and `--add-opens` lines as devkit's
@@ -771,9 +810,10 @@ inherit it, and Maven reads it through the link:
 - The property names above and the execution ids are contract: a renamed
   one silently ignores a consumer's override. The ids are `prepare-agent`,
   `report` and `check` (JaCoCo), `pmd-check` and `cpd-check` (PMD),
-  `checkstyle` and `project` (Checkstyle), `spotless-check` (Spotless),
-  `spotbugs-check` (SpotBugs), `add-third-party` (license), `default`
-  (failsafe) and `pmd-ruleset` (resources).
+  `checkstyle` and `project` (Checkstyle), `environment` (enforcer),
+  `spotless-check` (Spotless), `spotbugs-check` (SpotBugs),
+  `add-third-party` (license), `default` (failsafe) and `pmd-ruleset`
+  (resources).
 - Never add a repository whose namespace ownership is unverified to the
   root pom or to Maven's settings. Maven must find the parent only through
   the link; a remote lookup of `de.vptr.devkit:devkit-parent` is the
@@ -793,29 +833,28 @@ help and dependency plugins that `check_frontend_deps.py` runs. Each line is
 resolves against the file, from a download or from the local repository,
 and fails the build on a mismatch, so a repository or mirror that serves
 other bytes for a listed coordinate, or a jar altered in the local
-repository, fails the build: Maven 3.9 says `trusted checksum mismatch`,
-Maven 3.10 `Checksum validation failed … (Trusted Checksums Source:
-summaryFile)`.
+repository, fails the build with `Checksum validation failed … (Trusted
+Checksums Source: summaryFile)`.
 
-- The scripts behind `install`, `lint`, `format`, `test`, `coverage`,
+- The scripts behind `check`, `install`, `lint`, `format`, `test`, `coverage`,
   `audit` and `clean` run Maven through `scripts/lib/mvn_checked.sh`, which
-  `scripts/lib/get_maven.sh` exports as `MVN_CMD` (the launcher it picked
-  stays `MVN_LAUNCHER`, which version probes and error messages name). The
-  wrapper puts the resolver's `trustedChecksumsSource.summaryFile` and
-  `trustedChecksums` post-processor keys (SHA-256, basedir
-  `$DEVKIT/java/checksums`, `originAware=false` so that a mirror cannot
-  bypass the file) on Maven's command line, and pins the post-processor's
-  `record` to `false`, so that a project cannot switch verification off. A
-  command-line key beats `MAVEN_ARGS` and `.mvn/maven.config`, so for these
-  keys those calls ignore a project's own setting. The wrapper fails closed
-  when the file is missing or empty.
+  `scripts/lib/get_maven.sh` exports as `MVN_CMD` (the pinned launcher stays
+  `MVN_LAUNCHER`). It requires `JAVA_VERSION` to be a plain JDK major number,
+  exiting 1 with an `ERROR` otherwise (`check`, which maps every failure of
+  its enforcer run to 11, exits 11), and passes the enforcer its JDK range;
+  make exports `JAVA_VERSION` from the project `Makefile`, and a consumer script
+  that calls `MVN_CMD` outside make exports it. The wrapper puts the resolver's
+  `trustedChecksumsSource.summaryFile` and `trustedChecksums` post-processor
+  keys (SHA-256, basedir `$DEVKIT/java/checksums`, `originAware=false` so that a
+  mirror cannot bypass the file, `scope=all` so that it covers every artifact)
+  on Maven's command line, and pins the post-processor's `record` to `false`, so
+  that a project cannot switch verification off. A command-line key beats
+  `MAVEN_ARGS` and `.mvn/maven.config`, so for these keys those calls ignore a
+  project's own setting. The wrapper fails closed when the file is missing or
+  empty.
 - `failIfMissing` is off: an artifact the file does not list passes
   unchecked. That is:
   - a project's own artifact, unless it shares a recorded coordinate;
-  - a default lifecycle plugin (clean, install, jar, ...) at a version the
-    Maven in use binds but the recording Maven did not: the file records
-    them at the versions the recording Maven binds, so they are checked
-    under a Maven that binds the same versions;
   - a gate plugin a project switches to another version through a
     `-D<tool>.version` in `MAVEN_ARGS` or `.mvn/maven.config` (the file
     records the pinned versions);
@@ -832,19 +871,24 @@ summaryFile)`.
 - A plain `mvn` outside the targets is not checked, and neither is anything
   downloaded outside Maven (the Eclipse formatter's P2 artifacts for
   Spotless, dependency-check's vulnerability data).
-- Under `-q`, which `install`, `lint`, `format`, `test`, `coverage` and `clean`
-  pass (`audit` does not, and prints the error whichever way it names its
-  plugin), a mismatch on an artifact of a lifecycle plugin, a plugin dependency
-  or an annotation processor shows as that error. devkit invokes its gate
-  plugins by `groupId:artifactId:goal`, without a version, so that the
+- Under `-q`, which `check`, `install`, `lint`, `format`, `test`, `coverage`
+  and `clean` pass (`audit` does not, and prints the error whichever way it
+  names its plugin), a mismatch on an artifact of a lifecycle plugin, a plugin
+  dependency or an annotation processor shows as that error. devkit invokes its
+  gate plugins by `groupId:artifactId:goal`, without a version, so that the
   parent's pin applies and a mismatch shows as that error: invoked by prefix
   (`spotless:check`), a mismatch would show only as `No plugin found for
   prefix`. A consumer's own script that does the latter sees that message.
+- The file also lists the pinned Maven's distribution
+  (`org/apache/maven/apache-maven/<version>/apache-maven-<version>-bin.tar.gz`)
+  and is recorded under that Maven, so the default lifecycle plugins it
+  binds are checked.
 - The file is devkit's, regenerated by `make maven-checksums` in devkit
-  when a plugin version in the parent changes; devkit's shell tests fail
-  otherwise, but only for the top-level jar of every plugin, plugin
-  dependency and annotation processor the parent pins and for the two
-  plugins of `check_frontend_deps.py`. It is no consumer's to edit.
+  when a plugin version in the parent or the pinned Maven changes; devkit's
+  shell tests fail otherwise, but only for the top-level jar of every
+  plugin, plugin dependency and annotation processor the parent pins, for
+  the two plugins of `check_frontend_deps.py` and for the pinned Maven. It
+  is no consumer's to edit.
 
 ## uv projects
 

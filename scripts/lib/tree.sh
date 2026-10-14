@@ -27,6 +27,18 @@ frontend_plugins() {
     "$1/scripts/java/check_frontend_deps.py"
 }
 
+# maven_version ROOT: the Maven version scripts/lib/pinned_maven.sh of the devkit tree at ROOT pins
+maven_version() { sed -n 's/^version=//p' "$1/scripts/lib/pinned_maven.sh"; }
+
+# maven_pin ROOT: the line of java/checksums/checksums.sha256 for the Maven distribution that
+# scripts/lib/pinned_maven.sh of the devkit tree at ROOT pins; fails if it pins none
+maven_pin() {
+  local v s
+  v=$(maven_version "$1") s=$(sed -n 's/^sha256=//p' "$1/scripts/lib/pinned_maven.sh")
+  [[ -n $v && -n $s ]] || return 1
+  echo "$s  org/apache/maven/apache-maven/$v/apache-maven-$v-bin.tar.gz"
+}
+
 # clean_env: unset what the caller's environment could use to steer a build, a git call or the JVM
 # (MAVEN_SKIP_RC, which leaves out ~/.mavenrc and /etc/mavenrc, is for the caller to export)
 clean_env() {

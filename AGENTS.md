@@ -38,7 +38,9 @@ break a gate silently.
   rather than one reviewer: `devkitw` and the gate that delivers it
   (`scripts/devkitw.sh`); what fetches, verifies and seals a tool
   (`scripts/lib/get_uv.sh`, `scripts/lib/node_closure.sh`,
-  `scripts/lib/sha256.sh`, `scripts/lib/sealed_dir.sh`,
+  `scripts/lib/fetch.sh`, `scripts/lib/pinned_maven.sh`, which pins the
+  Maven every Java target runs, `scripts/lib/sha256.sh`,
+  `scripts/lib/sealed_dir.sh`,
   `scripts/secrets.sh`, `scripts/python/uv_project.py`, which writes the
   uv bootstrap's hashes, and the lockfiles in `markdown/` and `jscpd/`);
   what decides whether an advisory against them is silenced
@@ -70,7 +72,8 @@ break a gate silently.
   tagged only after it passes. A new closure joins its list in the
   `Makefile`.
 - `make maven-checksums` regenerates `java/checksums/checksums.sha256`
-  after a plugin version in the parent changes (network; `tests/run.sh
+  after a plugin version in the parent, or the Maven version
+  `pinned_maven.sh` pins, changes (network; `tests/run.sh
   shell` fails without it).
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
@@ -100,3 +103,5 @@ Generic method is agent-kit's and is not restated here: its skills
 (reviews), `debugging`, `design-exploration`, and `plan-create` /
 `plan-run` (planning and executing a change). This file holds only what
 is specific to devkit.
+
+<!-- agent-kit:codex-bridge -->

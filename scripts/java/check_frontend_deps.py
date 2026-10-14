@@ -197,7 +197,7 @@ def load_expected_versions(repo: Path, version: str) -> Dict[str, str]:
     if not core_jar.is_file():
         raise FileNotFoundError(
             f"Vaadin manifest jar not found: {core_jar}\n"
-            "Run 'mvn compile' or 'make install' first so the Vaadin jars are resolved locally."
+            "Run 'make install' first so the Vaadin jars are resolved locally."
         )
     expected: Dict[str, str] = {}
     with zipfile.ZipFile(core_jar) as jar:
@@ -225,7 +225,7 @@ def find_bundle_jar(repo: Path, version: str) -> Path:
     if not jar.is_file():
         raise FileNotFoundError(
             f"Vaadin bundle jar not found: {jar}\n"
-            f"It carries the @vaadin/* versions the core manifest omits. Resolve it with 'mvn {' '.join(resolve)}'."
+            "It carries the @vaadin/* versions the core manifest omits. Resolve it with 'make install'."
         )
     return jar
 

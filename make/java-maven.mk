@@ -1,7 +1,7 @@
 # devkit: Java/Maven targets. Include after common.mk (docs/contract.md).
 #
 # Profile, set by the project Makefile before the includes:
-#   JAVA_VERSION  JDK major that `check` requires exactly
+#   JAVA_VERSION  JDK major Maven must run on, exactly (the parent's enforcer)
 #   MODULES       Maven module directories, space-separated; empty = monolith
 #   FRONTEND_DIR  directory holding the Vaadin frontend: one of MODULES, or `.`
 #                 in a monolith whose frontend is the root; empty = none
@@ -22,12 +22,13 @@
 
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
 FRONTEND_DIR := $(strip $(FRONTEND_DIR))
+JAVA_VERSION := $(strip $(JAVA_VERSION))
 
 .PHONY: check check-java install lint format test coverage audit clean kill
 
 check: check-java
 
-check-java: ## Verify the JDK, Maven >= 3.9.9, Python >= 3.11, checkstyle-project.xml, FRONTEND_DIR, the devkit parent POM and the pom's version pins
+check-java: ## Verify checkstyle-project.xml, FRONTEND_DIR, Python >= 3.11, the devkit parent POM, then (the first run downloads devkit's pinned Maven) the JDK and Maven versions and the pom's version pins
 	@"$(DEVKIT)/scripts/java/check.sh"
 
 install: check ## make check, then mvn clean install -DskipTests

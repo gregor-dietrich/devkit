@@ -27,8 +27,6 @@ if [[ -n "$FRONTEND_ERROR" ]]; then
     exit 16
 fi
 
-REQUIRED_JDK_VERSION="${JAVA_VERSION:?set JAVA_VERSION in the project Makefile}"
-
 echo "Running environment checks..."
 
 echo "Checking version of $(command -v python3)..."
@@ -40,92 +38,16 @@ echo "Python version check passed. (>= 3.11)"
 # shellcheck source=SCRIPTDIR/../lib/get_maven.sh
 . "$DEVKIT/scripts/lib/get_maven.sh"
 
-echo "Checking version of $(command -v java)..."
+REVISION=${REVISION:-1.0.0-SNAPSHOT}
 
-if ! command -v java &> /dev/null; then
-    echo "ERROR: Java is not installed or not in PATH. Exiting."
-    echo "Please install JDK version ${REQUIRED_JDK_VERSION} and add it to PATH."
-    exit 1
-fi
-
-JDK_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}') || true
-if [[ -z "$JDK_VERSION" ]]; then
-    echo "ERROR: Could not determine Java version. Exiting."
-    exit 2
-fi
-echo "Detected Java version: ${JDK_VERSION}"
-
-if [[ $JDK_VERSION =~ ^1\.([0-9]+) ]]; then
-    JDK_MAJOR_VERSION=${BASH_REMATCH[1]}
-elif [[ $JDK_VERSION =~ ^([0-9]+) ]]; then
-    JDK_MAJOR_VERSION=${BASH_REMATCH[1]}
-else
-    echo "ERROR: Could not parse Java version format. Exiting."
-    exit 3
-fi
-
-if [[ $JDK_MAJOR_VERSION -ne $REQUIRED_JDK_VERSION ]]; then
-    echo "ERROR: Java version ${JDK_VERSION} on PATH is not the required JDK ${REQUIRED_JDK_VERSION}. Exiting."
-    echo "Please install JDK ${REQUIRED_JDK_VERSION} and make it the default on PATH."
-    exit 4
-fi
-echo "JDK version check passed. (== ${REQUIRED_JDK_VERSION})"
-
-echo "Checking version of $(command -v "${MVN_LAUNCHER}")..."
-
-if ! command -v "${MVN_LAUNCHER}" &> /dev/null; then
-    echo "ERROR: Maven not found. Exiting."
-    echo "Please install Maven version ${REQUIRED_MAVEN_VERSION} or higher and add it to PATH."
-    exit 5
-fi
-
-# -B (batch mode) turns off the ANSI colour some builds put around the version.
-if ! MVN_VERSION_OUTPUT=$("${MVN_LAUNCHER}" -B -version); then
-    echo "ERROR: '${MVN_LAUNCHER} -version' failed. Exiting."
-    exit 6
-fi
-
-MAVEN_VERSION=$(head -n 1 <<< "${MVN_VERSION_OUTPUT}" | awk '{print $3}')
-if [[ -z "$MAVEN_VERSION" ]]; then
-    echo "ERROR: Could not determine Maven version. Exiting."
-    exit 7
-fi
-echo "Detected Maven version: ${MAVEN_VERSION}"
-
-printf -v versions '%s\n%s' "$REQUIRED_MAVEN_VERSION" "$MAVEN_VERSION"
-if [[ $versions != "$(sort -V <<< "$versions")" ]]; then
-    echo "ERROR: Maven version ${MAVEN_VERSION} is below the required version ${REQUIRED_MAVEN_VERSION}. Exiting."
-    echo "Please upgrade Maven to version ${REQUIRED_MAVEN_VERSION} or higher and add it to PATH."
-    exit 8
-fi
-echo "Maven version check passed. (>= ${REQUIRED_MAVEN_VERSION})"
-
-# The build runs through Maven, whose JDK can differ from `java` on PATH (e.g.
-# Homebrew's mvn wrapper picks its own bundled JDK when JAVA_HOME is unset).
-# The build tooling (PMD, Error Prone, ...) is only guaranteed to work on the
-# pinned JDK, so the JVM Maven actually runs on must match it exactly too.
-MVN_JAVA_VERSION=$(awk '/^Java version:/ {print $3}' <<< "${MVN_VERSION_OUTPUT}" | tr -d ',')
-if [[ -z "$MVN_JAVA_VERSION" ]]; then
-    echo "ERROR: Could not determine the JDK Maven runs on. Exiting."
-    exit 9
-fi
-echo "Detected Maven JDK version: ${MVN_JAVA_VERSION}"
-
-if [[ $MVN_JAVA_VERSION =~ ^1\.([0-9]+) ]]; then
-    MVN_JAVA_MAJOR_VERSION=${BASH_REMATCH[1]}
-elif [[ $MVN_JAVA_VERSION =~ ^([0-9]+) ]]; then
-    MVN_JAVA_MAJOR_VERSION=${BASH_REMATCH[1]}
-else
-    echo "ERROR: Could not parse the Maven JDK version format. Exiting."
-    exit 10
-fi
-
-if [[ $MVN_JAVA_MAJOR_VERSION -ne $REQUIRED_JDK_VERSION ]]; then
-    echo "ERROR: Maven (${MVN_LAUNCHER}) runs on JDK ${MVN_JAVA_VERSION}, but exactly JDK ${REQUIRED_JDK_VERSION} is required. Exiting."
-    echo "Point JAVA_HOME at a JDK ${REQUIRED_JDK_VERSION} installation, e.g. on macOS: export JAVA_HOME=\"\$(/usr/libexec/java_home -v ${REQUIRED_JDK_VERSION})\"."
+# The parent's enforcer execution: the JDK Maven runs on (JAVA_HOME's, else java on PATH) must be
+# JAVA_VERSION's and Maven inside devkit.maven.range. mvn_checked.sh passes the JDK range.
+echo "Checking the JDK and Maven versions..."
+"${MVN_CMD}" -B -q -N org.apache.maven.plugins:maven-enforcer-plugin:enforce@environment -Drevision="${REVISION}" || {
+    echo "Maven ran on: $("${JAVA_HOME:+$JAVA_HOME/bin/}java" -version 2>&1 | head -n 1)"
     exit 11
-fi
-echo "Maven JDK version check passed. (== ${REQUIRED_JDK_VERSION})"
+}
+echo "JDK and Maven version checks passed. (JDK == ${JAVA_VERSION})"
 
 echo "Environment checks completed."
 

@@ -28,10 +28,8 @@
 # the ERR [git] log format scan() matches (tests/run.sh java provokes it).
 set -euo pipefail
 
-# shellcheck source=SCRIPTDIR/lib/sha256.sh
-. "$DEVKIT/scripts/lib/sha256.sh"
-# shellcheck source=SCRIPTDIR/lib/sealed_dir.sh
-. "$DEVKIT/scripts/lib/sealed_dir.sh"
+# shellcheck source=SCRIPTDIR/lib/fetch.sh
+. "$DEVKIT/scripts/lib/fetch.sh"
 
 die() {
   echo "ERROR: lint-secrets: $*" >&2
@@ -61,20 +59,8 @@ dir=$tools/gitleaks-$version-$platform gitleaks=$dir/gitleaks
 if [[ ! -e $gitleaks ]]; then
   [[ ! -e $dir && ! -L $dir ]] || die "$dir has no gitleaks; remove it (chmod -R u+w '$dir'; rm -rf '$dir') and retry"
   url=https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_$platform.tar.gz
-  mkdir -p "$tools"
-  tmp=$(mktemp -d "$tools/.tmp.XXXXXX")
-  trap 'sealed_remove "$tmp"' EXIT
-  trap 'exit 1' HUP INT TERM
   echo "lint-secrets: downloading gitleaks $version ($platform)"
-  curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 \
-    -o "$tmp/asset.tar.gz" "$url" || die "cannot download $url"
-  got=$(sha256_of "$tmp/asset.tar.gz")
-  [[ $got == "$sha256" ]] ||
-    die "sha256 mismatch for $url: got $got, devkit pins $sha256; nothing was unpacked"
-  tar -xzf "$tmp/asset.tar.gz" -C "$tmp" gitleaks
-  rm "$tmp/asset.tar.gz"
-  # Read-only, directories too, like the devkit checkout.
-  sealed_place "$tmp" "$dir" || die "cannot move the downloaded gitleaks into $dir"
+  fetch_sealed lint-secrets "$url" "$sha256" "$dir" gitleaks || exit 1
 fi
 
 # Only the project's own .gitleaks.toml and .gitleaksignore, which gitleaks

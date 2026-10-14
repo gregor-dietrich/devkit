@@ -11,10 +11,15 @@
 # the file, sorted by path, and nothing else stays behind; one path recorded with two hashes
 # fails the run, and so does a path the committed file lists with another hash (a release path on
 # Central never changes: delete that line from the file to accept the new bytes, then re-run).
-# Needs JDK 25, Maven >= 3.9.9, python3 3.11 or later, git and a direct route to Maven Central:
-# no ~/.m2/settings.xml, mirror or proxy setting is read, since a build would record whatever
-# bytes such a setting served, so a network that reaches Central only through a proxy cannot
-# record.
+# The recording runs under the Maven scripts/lib/pinned_maven.sh pins, whose default lifecycle
+# plugins it records, and the file also lists that distribution's own checksum, so that a Maven
+# bump without a re-record fails tests/run.sh shell. Needs JDK 25, curl, tar, sha256sum or shasum,
+# python3 3.11 or later, git and a direct route to Maven Central:
+# no ~/.m2/settings.xml, mirror or proxy setting is read by the recording, since a build would
+# record whatever bytes such a setting served, so a network that reaches Central only through a
+# proxy cannot record. The one exception is the distribution itself: it is fetched before
+# clean_env, so it may come through DEVKIT_MAVEN_MIRROR or a curl proxy, and is checked against
+# the pin either way.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -23,10 +28,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=SCRIPTDIR/lib/tree.sh
 . "$root/scripts/lib/tree.sh"
 python3_floor
-real=$(command -v mvn) || {
-    echo "ERROR: mvn not found; recording needs Maven on PATH." >&2
-    exit 1
-}
+real=$("$root/scripts/lib/pinned_maven.sh")
 tmp=$(mktemp -d)
 trap 'rm -rf -- "${tmp:?}"' EXIT
 trap 'exit 1' HUP INT TERM
@@ -48,23 +50,24 @@ printf '%s\n' '<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"><mirrors
     '<id>central</id><mirrorOf>*</mirrorOf><url>https://repo.maven.apache.org/maven2</url>' \
     '</mirror></mirrors></settings>' >"$tmp/global-settings.xml"
 
-# get_maven.sh picks this mvn, ahead of the real one, and every Maven call of the targets below goes
-# through mvn_checked.sh (MVN_CMD), which puts its verify keys first; the keys after the build's own
-# arguments win. So only what differs from them is set here: the file is recorded into
-# $tmp/basedir, from a local repository that reads through to nothing.
-mkdir "$tmp/bin" "$tmp/basedir"
+# get_maven.sh picks this mvn as the pinned one: it stands at the launcher's place in a throwaway
+# tools cache. Every Maven call of the targets below goes through mvn_checked.sh (MVN_CMD), which
+# puts its verify keys first; the keys after the build's own arguments win. So only what differs
+# from them is set here: the file is recorded into $tmp/basedir, from a local repository that reads
+# through to nothing.
+shim=$tmp/cache/${real#"${XDG_CACHE_HOME:-$HOME/.cache}/"}
+mkdir -p "${shim%/*}" "$tmp/basedir"
 printf '%s\n' '#!/bin/bash' \
-    "[[ \$* == '-B -version' ]] && exec $(printf %q "$real") \"\$@\"" \
     "exec $(printf %q "$real") \"\$@\" \\" \
     "    -s $(printf %q "$tmp/settings.xml") -gs $(printf %q "$tmp/global-settings.xml") --strict-checksums \\" \
     "    -Dmaven.repo.local=$(printf %q "$tmp/repo") \\" \
     "    -Daether.trustedChecksumsSource.summaryFile.basedir=$(printf %q "$tmp/basedir") \\" \
-    "    -Daether.artifactResolver.postProcessor.trustedChecksums.record=true" >"$tmp/bin/mvn"
-chmod +x "$tmp/bin/mvn"
+    "    -Daether.artifactResolver.postProcessor.trustedChecksums.record=true" >"$shim"
+chmod +x "$shim"
 
 # The Maven goals of the java targets, without the repository gates (lint-repo, format-md). The
 # fixture's Makefile exports the profile the scripts read; the help goals run through the same
-# wrapper, MVN_LAUNCHER being the recording mvn.
+# wrapper, MVN_LAUNCHER being the recording mvn, as get_maven.sh picks it for the targets.
 cat >"$tmp/record.mk" <<'MK'
 record:
 	@set -e; for t in lint test coverage install format; do "$(DEVKIT)/scripts/java/$$t.sh"; done; \
@@ -76,7 +79,7 @@ MK
 # repository variables, devkit's own inputs, the Maven options and the JVM option variables
 # (MAVEN_SKIP_RC leaves out ~/.mavenrc and /etc/mavenrc).
 clean_env
-export MAVEN_SKIP_RC=1 PATH=$tmp/bin:$PATH MVN_LAUNCHER=$tmp/bin/mvn
+export MAVEN_SKIP_RC=1 XDG_CACHE_HOME=$tmp/cache MVN_LAUNCHER=$shim
 
 for fixture in "$root"/tests/fixtures/java-*/; do
     name=$(basename "$fixture")
@@ -93,7 +96,9 @@ done
     echo "ERROR: nothing was recorded; the resolver's keys did not take effect." >&2
     exit 1
 }
-LC_ALL=C sort -u "$tmp/basedir/checksums.sha256" | LC_ALL=C sort -s -k2,2 >"$tmp/sorted"
+# A file of its own: the resolver ends its file without a line break.
+maven_pin "$root" >"$tmp/dist"
+LC_ALL=C sort -u "$tmp/basedir/checksums.sha256" "$tmp/dist" | LC_ALL=C sort -s -k2,2 >"$tmp/sorted"
 conflicts=$(cut -d' ' -f3 "$tmp/sorted" | uniq -d)
 [[ -z $conflicts ]] || {
     echo "ERROR: recorded with two different hashes: $conflicts" >&2
