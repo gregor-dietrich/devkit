@@ -10,7 +10,9 @@
 # Bumping: download apache-maven-<version>-bin.tar.gz with its .sha512 and .asc from Maven
 # Central; verify the .asc against https://downloads.apache.org/maven/KEYS and the .sha512; record
 # the tarball's sha256 here; run `make maven-checksums`, as the default lifecycle plugins a Maven
-# binds change with it.
+# binds change with it; review the variables its bin/mvn reads, and the Java-side facts
+# launcher_inputs' harmless list and comment rest on (MAVEN_CONFIG, env.MAVEN_REPO_CENTRAL), then
+# raise `reviewed=` in tests/run.sh's launcher_inputs.
 set -euo pipefail
 
 version=3.10.0

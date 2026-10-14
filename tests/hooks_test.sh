@@ -18,7 +18,7 @@ trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) CI FAIL GIT_CEILING_DIRECTORIES
 # What the hooks and make gate react to: an ambient one would change the cases.
-unset ONLY MAVEN_ARGS MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS PYTEST_ADDOPTS MAVEN_SKIP_RC \
+unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS MAVEN_SKIP_RC \
   MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 export HOME=$work/home GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
@@ -338,10 +338,14 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
   install
   local spec var n=0 ok=0
   for spec in "MAVEN_ARGS=-q|MAVEN_ARGS is set (it can skip tests)." \
+    "MAVEN_BASEDIR=/x|MAVEN_BASEDIR is set (it moves .mvn/ and the gate configurations, which can skip tests)." \
     "MAVEN_OPTS=-Dx=y|MAVEN_OPTS holds a -D (it can skip tests)." \
+    "MAVEN_DEBUG_OPTS=-version|MAVEN_DEBUG_OPTS is set (the launcher hands it to java, which can skip tests)." \
     "JAVA_TOOL_OPTIONS=-Dx=y|JAVA_TOOL_OPTIONS holds a -D (it can skip tests)." \
     "JDK_JAVA_OPTIONS=-Dx=y|JDK_JAVA_OPTIONS holds a -D (it can skip tests)." \
     "_JAVA_OPTIONS=-Dx=y|_JAVA_OPTIONS holds a -D (it can skip tests)." \
+    "OPENJ9_JAVA_OPTIONS=-Dx=y|OPENJ9_JAVA_OPTIONS holds a -D (it can skip tests)." \
+    "IBM_JAVA_OPTIONS=-Dx=y|IBM_JAVA_OPTIONS holds a -D (it can skip tests)." \
     "PYTEST_ADDOPTS=-k x|PYTEST_ADDOPTS is set (it can deselect tests)."; do
     n=$((n + 1))
     var=${spec%%|*}
@@ -783,8 +787,12 @@ case_gate_environment() { # variables that can skip or deselect tests
   fresh
   norecord "MAVEN_ARGS is set (it can skip tests)" MAVEN_ARGS=-q || return 1
   : >"$HOOK_LOG"
+  norecord "MAVEN_BASEDIR is set (it moves .mvn/ and the gate configurations, which can skip tests)" MAVEN_BASEDIR=/x || return 1
+  : >"$HOOK_LOG"
+  norecord "MAVEN_DEBUG_OPTS is set (the launcher hands it to java, which can skip tests)" MAVEN_DEBUG_OPTS=-version || return 1
+  : >"$HOOK_LOG"
   local var
-  for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
+  for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS; do
     norecord "$var holds a -D (it can skip tests)" "$var=-Dx=y" || return 1
     : >"$HOOK_LOG"
   done
@@ -955,7 +963,7 @@ t "pre-push still gates after another commit, and on any not strictly clean tree
 t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
 t "make gate refuses ONLY, also on the make command line" case_gate_only
 t "make gate records nothing from a tree not strictly clean at the start" case_gate_dirty_start
-t "make gate records nothing under MAVEN_ARGS, PYTEST_ADDOPTS or a JVM option -D" case_gate_environment
+t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS or a JVM option -D" case_gate_environment
 t "make gate records nothing without a HEAD reflog" case_gate_no_reflog
 t "make gate records nothing for a project below the git top level" case_gate_nested
 t "make gate records nothing when the tree changed during the run" case_gate_tree_changed

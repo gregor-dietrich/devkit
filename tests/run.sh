@@ -74,7 +74,12 @@
 #          parent version that differs from the pin, and lint to fail on the
 #          latter too, before Maven runs. Expect test to fail on a profile
 #          MAVEN_ARGS requests, under the Maven devkit pins, which the first
-#          make target downloads into the temp dir's tools cache.
+#          make target downloads into the temp dir's tools cache. Expect
+#          every upper-case variable Maven's launcher expands to be one it
+#          sets itself, one listed as harmless, or one make gate and
+#          pre-push screen, hooks_test.sh tests and clean_env clears, and
+#          the check to fail on a Maven other than the one the lists were
+#          reviewed against.
 #          Expect lint to fail on a test whose only check is an assertion
 #          helper PMD does not know, until the pom's pmd.extraAssertMethodNames
 #          names it, and then to pass whatever plugin-level resources
@@ -545,7 +550,8 @@ tampered_plugin() {
 
 # A profile MAVEN_ARGS requests applies under devkit's Maven. The probe profile asks for a release no
 # javac knows, so make test fails at compile only when the profile applies (javac's own message is
-# localized).
+# localized). A Maven outside devkit.maven.range fails make check, and launcher_inputs checks that
+# the pinned launcher reads no variable the screen and clean_env leave unaccounted for.
 launcher_checks() {
   local proj=$work/profile
   edited "$proj" pom.xml \
@@ -554,6 +560,44 @@ launcher_checks() {
     make_says fail "$proj" test "Fatal error compiling" 99
   MAVEN_ARGS='-Ddevkit.maven.range=[99,)' check "java-monolith: Maven outside devkit.maven.range fails make check" \
     make_says fail "$proj" check "RequireMavenVersion"
+  check "scripts: the pinned Maven launcher reads no variable make gate, pre-push and clean_env leave unaccounted for" \
+    launcher_inputs
+}
+
+# launcher_inputs: every upper-case variable the pinned bin/mvn expands (outside a comment) is one it
+# sets before reading, one listed here as harmless, or one that make gate and pre-push screen (outside
+# a comment), hooks_test.sh tests in a `VAR=` case and clean_env clears. The lists are reviewed against
+# one launcher, so a Maven bump fails here until they are reviewed again, naming any variable the new
+# launcher adds. Only the launcher's own expansions count: what Maven's Java side reads is not a
+# launcher input (env.MAVEN_REPO_CENTRAL relocates Central but cannot skip tests, and the checksums
+# file is origin-unaware).
+launcher_inputs() {
+  local mvn var file names unknown="" reviewed=3.10.0 screened="MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR"
+  # Set by the launcher itself before it reads them.
+  local own="PRG MAVEN_HOME JAVACMD CLASSWORLDS_JAR CLASSWORLDS_LAUNCHER JLINE_NATIVE_PATH MAVEN_PROJECTBASEDIR"
+  # HOME and MAVEN_SKIP_RC pick the rc files the screen checks; JAVA_HOME's JDK has its major version
+  # checked by the parent's enforcer on every Maven call; CLASSPATH is read only under Cygwin or MinGW;
+  # MAVEN_CONFIG reaches only MAVEN_CMD_LINE_ARGS, which Maven does not read (clean_env clears it all
+  # the same).
+  local harmless="HOME MAVEN_SKIP_RC JAVA_HOME CLASSPATH MAVEN_CONFIG"
+  # uncommented: stdin without its full-line and trailing comments
+  uncommented() { sed -e '/^[[:space:]]*#/d' -e 's/[[:space:]]#.*//'; }
+  mvn=$("$root/scripts/lib/pinned_maven.sh") || return
+  names=" $(sed '/^[[:space:]]*#/d' "$mvn" | LC_ALL=C grep -oE '\$\{?[A-Z_][A-Z0-9_]*' | tr -d '{$' | LC_ALL=C sort -u | tr '\n' ' ')"
+  for var in $names; do
+    [[ " $screened $own $harmless " == *" $var "* ]] || unknown="$unknown $var"
+  done
+  [[ -z $unknown ]] || { echo "$mvn reads:$unknown"; return 1; }
+  [[ $(maven_version "$root") == "$reviewed" ]] ||
+    { echo "launcher_inputs' lists were reviewed against Maven $reviewed's bin/mvn: review them for $mvn, then raise reviewed="; return 1; }
+  for var in $screened; do
+    [[ $names == *" $var "* ]] || { echo "$mvn no longer reads $var: drop it from screened"; return 1; }
+    for file in scripts/gate.sh scripts/hooks/pre-push.sh; do
+      grep -qw "$var" <<<"$(uncommented <"$root/$file")" || { echo "$file does not screen $var"; return 1; }
+    done
+    grep -qE "(^|[^A-Za-z0-9_])$var=" <<<"$(uncommented <"$root/tests/hooks_test.sh")" || { echo "tests/hooks_test.sh has no case setting $var="; return 1; }
+    grep -qw "$var" <<<"$(sed -n '/^clean_env()/,/^}/p' "$root/scripts/lib/tree.sh" | uncommented)" || { echo "clean_env keeps $var"; return 1; }
+  done
 }
 
 secret_negatives() { # each scan of the real gitleaks reads what it should

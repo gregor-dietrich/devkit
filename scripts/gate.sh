@@ -80,11 +80,18 @@ else
     why "this is not a git work tree"
 fi
 # These variables and files are listed again in scripts/hooks/pre-push.sh, which
-# warns on the same ones; keep the two in step.
+# warns on the same ones; keep the two in step. tests/run.sh's launcher_inputs
+# fails when the pinned bin/mvn reads a variable it does not account for.
 [[ -z "${MAVEN_ARGS-}" ]] || why "MAVEN_ARGS is set (it can skip tests)"
+# MAVEN_BASEDIR replaces the project directory .mvn/ and the parent's gate
+# configurations are read from.
+[[ -z "${MAVEN_BASEDIR-}" ]] || why "MAVEN_BASEDIR is set (it moves .mvn/ and the gate configurations, which can skip tests)"
+# MAVEN_DEBUG_OPTS: any value counts. It is for mvnDebug's debugger, and an
+# @argfile, -XX:VMOptionsFile or -version can skip tests without a -D.
+[[ -z "${MAVEN_DEBUG_OPTS-}" ]] || why "MAVEN_DEBUG_OPTS is set (the launcher hands it to java, which can skip tests)"
 # JVM options: -D sets a system property. Only an option that starts with -D,
 # quoted or not, so a negated -XX:-D... flag does not count.
-for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
+for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS; do
     [[ " ${!var-}" != *[[:space:]\"\']-D* ]] || why "$var holds a -D (it can skip tests)"
 done
 [[ -z "${PYTEST_ADDOPTS-}" ]] || why "PYTEST_ADDOPTS is set (it can deselect tests)"

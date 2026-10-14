@@ -107,7 +107,10 @@ fi
 # the gate unseen, so the hook says so and runs the whole gate.
 [[ -z "${ONLY-}" ]] || echo "pre-push: ignoring ONLY (it is '$ONLY'); the push gate is never narrowed"
 [[ -z "${MAVEN_ARGS-}" ]] || echo "WARNING: MAVEN_ARGS is set (it can skip tests)."
-for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do # as in gate.sh
+[[ -z "${MAVEN_BASEDIR-}" ]] || echo "WARNING: MAVEN_BASEDIR is set (it moves .mvn/ and the gate configurations, which can skip tests)."
+# Any value counts, as in gate.sh.
+[[ -z "${MAVEN_DEBUG_OPTS-}" ]] || echo "WARNING: MAVEN_DEBUG_OPTS is set (the launcher hands it to java, which can skip tests)."
+for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS; do # as in gate.sh
     [[ " ${!var-}" != *[[:space:]\"\']-D* ]] || echo "WARNING: $var holds a -D (it can skip tests)."
 done
 [[ -z "${PYTEST_ADDOPTS-}" ]] || echo "WARNING: PYTEST_ADDOPTS is set (it can deselect tests)."

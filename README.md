@@ -291,14 +291,17 @@ dependency means the bytes Maven got, from a repository, a mirror or the local
 repository, are not the ones devkit recorded: delete that artifact's directory
 from the local repository and retry, and treat a repeat as a tampered mirror or
 proxy. Artifacts the file does not list are not checked: a project's own
-artifact, unless it shares a recorded coordinate; a version resolved through
-repository metadata (a range, `LATEST`, `RELEASE`). A project that sets its own
-aether `trustedChecksums` (`record` included) or `summaryFile` keys has them
-overridden for devkit's Maven calls (see the first bullet of the contract's
-[Plugin checksums](docs/contract.md#plugin-checksums)). The hashes are trust on
-first use: they detect a later substitution, not an artifact already malicious
-on Central. `MVN_CMD` now names devkit's checked wrapper; the pinned
-launcher is in `MVN_LAUNCHER`, which matters to a project script
+artifact, unless it shares a recorded coordinate; a gate plugin a project
+switches to another version through a `-D<tool>.version` in `MAVEN_ARGS` or
+`.mvn/maven.config` (the file records the pinned versions); a version
+resolved through repository metadata (a range, `LATEST`, `RELEASE`). A
+project that sets its own aether `trustedChecksums` (`record` included) or
+`summaryFile` keys has them overridden for devkit's Maven calls (see the
+first bullet of the contract's
+[Plugin checksums](docs/contract.md#plugin-checksums)). The hashes are trust
+on first use: they detect a later substitution, not an artifact already
+malicious on Central. `MVN_CMD` now names devkit's checked wrapper; the
+pinned launcher is in `MVN_LAUNCHER`, which matters to a project script
 that sources `get_maven.sh` and inspects `MVN_CMD`.
 
 Every Java target now runs the Maven 3.10.0 that devkit pins, never `mvn` on
@@ -433,6 +436,12 @@ tagged. Tags are ordered by git's version sort of the whole name, so a
 tag instead of accepting the suggestion. A project that tags
 release branches or uses another scheme tags by hand: `git tag -a -s <tag>`,
 then `git push origin <tag>`.
+
+Run `make hooks` to refresh the git hooks, so `pre-push` also warns on
+`MAVEN_BASEDIR` and `MAVEN_DEBUG_OPTS` whenever they are set, and on a `-D`
+option in `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, which the launcher of
+devkit's Maven or its JVM reads; `make check` warns until then. `make gate`
+no longer records under any of them; unsetting them restores the record.
 
 ### Upgrading from v0.5.x
 

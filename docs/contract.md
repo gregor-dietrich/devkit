@@ -528,12 +528,16 @@ one is missing or stale. A hook it did not write is never overwritten.
   `make lint-repo test` with `ONLY` unset (it says so) and `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, as
   `make gate` does. It warns on, but still runs under, `MAVEN_ARGS`,
-  `PYTEST_ADDOPTS`, an option starting with `-D` (quoted or not) in
-  `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` or `_JAVA_OPTIONS`,
-  a mavenrc file Maven runs (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or
-  `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a `~/.m2/settings.xml`
-  that defines profile properties (`<properties>` outside XML comments),
-  which are often set on purpose.
+  `MAVEN_BASEDIR` (Maven's project directory, where `.mvn/` and the
+  parent's gate configurations are read from), `MAVEN_DEBUG_OPTS` (any
+  value counts: it is for mvnDebug's debugger, and the launcher hands it
+  to java), `PYTEST_ADDOPTS`, an option starting with `-D` (quoted or
+  not) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`,
+  `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc
+  file Maven runs (`/usr/local/etc/mavenrc`,
+  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
+  `~/.m2/settings.xml` that defines profile properties (`<properties>`
+  outside XML comments), which are often set on purpose.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -545,14 +549,16 @@ one is missing or stale. A hook it did not write is never overwritten.
   dirty submodule, no assume-unchanged or skip-worktree entry; ignored files
   are fine), HEAD did not move during the run (detected through HEAD and its
   reflog, so a move away and back counts, and no reflog means no record), the
-  ref backend is not reftable, and none of `MAVEN_ARGS`, `PYTEST_ADDOPTS`,
-  an option starting with `-D` (quoted or not) in `MAVEN_OPTS`,
-  `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` or `_JAVA_OPTIONS`, a mavenrc file
-  Maven runs (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`,
-  unless `MAVEN_SKIP_RC` is set) and a `~/.m2/settings.xml` that defines
-  profile properties is present. Recording never changes the exit status, and
-  a passing run that records nothing says why. `pre-push` skips its gate only
-  while HEAD equals the record and the tree is still strictly clean.
+  ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
+  `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`, an option
+  starting with `-D` (quoted or not) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`,
+  `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or
+  `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs (`/usr/local/etc/mavenrc`,
+  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
+  `~/.m2/settings.xml` that defines profile properties is present.
+  Recording never changes the exit status, and a passing run that records
+  nothing says why. `pre-push` skips its gate only while HEAD equals the
+  record and the tree is still strictly clean.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.
@@ -855,7 +861,8 @@ Checksums Source: summaryFile)`.
   keys (SHA-256, basedir `$DEVKIT/java/checksums`, `originAware=false` so that a
   mirror cannot bypass the file, `scope=all` so that it covers every artifact)
   on Maven's command line, and pins the post-processor's `record` to `false`, so
-  that a project cannot switch verification off. A command-line key beats
+  that a project cannot switch verification off through these keys (unlisted
+  code inside Maven still can, below). A command-line key beats
   `MAVEN_ARGS` and `.mvn/maven.config`, so for these keys those calls ignore a
   project's own setting. The wrapper fails closed when the file is missing or
   empty.
@@ -869,7 +876,14 @@ Checksums Source: summaryFile)`.
     `LATEST`, `RELEASE`); none is in devkit's closure.
 
   The file protects devkit's gate tooling at its pinned versions, not the
-  project's dependency graph.
+  project's dependency graph, and only while no unlisted code runs inside
+  Maven: code in Maven's JVM can replace the resolver components that do
+  the checking, so an unlisted core extension (`.mvn/extensions.xml`), a jar
+  on `maven.ext.class.path` (set through any `-D`), a Java agent
+  (`-javaagent:` in a JVM options variable or `.mvn/jvm.config`), a build
+  extension or plugin the project adds, or a plugin the parent manages whose
+  version the project overrides with a literal `<version>` can defeat
+  verification of the listed tools too.
 - The hashes are trust on first use: whatever Maven Central served over
   https when `make maven-checksums` ran. They detect a later substitution by
   a mirror, a proxy or the local repository, not an artifact that was
