@@ -183,6 +183,21 @@ when it would change the hash of a path already in the file (release paths
 on Central are immutable), naming each path, and deleting that line and
 re-running is the escape hatch.
 
+A pin bump in devkit takes only a release published at least 24 hours before
+the bump's commit (the cutoff), so a compromised release is likelier to be
+caught and withdrawn before it ships: a plugin or tool version in
+`java/parent/pom.xml`, the Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
+in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
+commit in `.gitea/workflows/`, and a fixture's `junit.version` or `uv.lock`
+in `tests/fixtures/`. A closure's lockfile is deleted and regenerated with
+`npm install --package-lock-only --registry=https://registry.npmjs.org/
+--before=<cutoff>`, since over an existing lockfile `--before` filters
+nothing. A fixture's `uv.lock` is regenerated with `uv lock --upgrade
+--exclude-newer <cutoff>`, then a plain `uv lock`, which keeps the versions
+and drops the cutoff the first one records (`uv sync --locked` fails while it
+is there). Either way the transitive versions are as old. `version_check.py`
+reports a newer release whatever its age; a younger one waits.
+
 ## Releasing
 
 A release is an annotated tag on `main`, signed with devkit's SSH release
@@ -193,8 +208,9 @@ been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
 protected, and pull requests squash-merged. The release commit sets the
 version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
 `tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
-`version` and the `<parent>` snippet's version; the tag is `v` + that
-version, and `tests/run.sh` tags the tree under test under the same name.
+`version`, the `<parent>` snippet's version and the tag-to-version example
+below it; the tag is `v` + that version, and `tests/run.sh` tags the tree
+under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
 Before tagging, review the parent's pins against Maven
@@ -405,6 +421,19 @@ project that turned `failOnBlacklist` off has no allowlist check either: it
 turns the option back on and exempts the dependency it was turned off for,
 through `excludedGroups`, an override-file declaration, or by appending its
 license.
+
+The parent now formats Java with Eclipse 4.41 rather than 4.40, and runs
+spotbugs-maven-plugin 4.10.5.0 rather than 4.10.4.1. Where the newer
+formatter lays code out differently, `make lint`, `make test` and `make
+install` fail on code that passed before: run `make format` and commit its
+result with the bump. A new SpotBugs finding is fixed, or excluded in the
+module's `spotbugs-exclude.xml`.
+
+The duplication gate now runs jscpd 5.4.1 rather than 5.1.2, which reports
+some clones differently: in a uv project `make lint` can name a file pair it
+did not find before, or an accepted pair it no longer finds. The first is
+fixed or accepted with a `[[python.duplication.accepted]]` entry; the
+second's entry is deleted.
 
 In a uv project, `make lint` now fails on an anchored `.match()`, or a
 `.search()` anchored at both ends, since `$` also matches before a trailing
