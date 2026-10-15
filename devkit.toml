@@ -2,5 +2,5 @@
 # (README, "Gating devkit itself").
 [devkit]
 url = "ssh://git@git.vptr.de:222/gregor/devkit.git"
-version = "v0.6.0"
-commit = "eb2f04723e97228996ac9d69b7937a3fc1ab6cf8"
+version = "v0.7.0"
+commit = "69baa79c1ef916f3309e55b94fdbe7d894496f2e"

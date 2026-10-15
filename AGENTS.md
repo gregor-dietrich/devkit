@@ -31,8 +31,9 @@ break a gate silently.
   the next release (`### Upgrading from vX.Y.x`).
 - Name no consumer repository or person in shipped files; describe a
   consumer by its shape (a Maven monolith, a uv workspace).
-- A pin bump takes only a release published at least 24 hours before the
-  bump's commit (README, "Gating devkit itself").
+- A dependency pin bump takes only a release published at least 24 hours
+  before the bump's commit (README, "Gating devkit itself", lists the pins
+  it covers). `devkit.toml`'s pin of devkit's own release is not one.
 - Shell scripts pass shellcheck; Python helpers run on python3 3.11 or
   later (`scripts/lib/python.sh` checks the floor before any helper).
 - Markdown is hard-wrapped at 80 columns (`markdown/markdownlint.jsonc`).

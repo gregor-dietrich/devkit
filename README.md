@@ -183,9 +183,9 @@ when it would change the hash of a path already in the file (release paths
 on Central are immutable), naming each path, and deleting that line and
 re-running is the escape hatch.
 
-A pin bump in devkit takes only a release published at least 24 hours before
-the bump's commit (the cutoff), so a compromised release is likelier to be
-caught and withdrawn before it ships: a plugin or tool version in
+A dependency pin bump in devkit takes only a release published at least 24
+hours before the bump's commit (the cutoff), so a compromised release is
+likelier to be caught and withdrawn before it ships: a plugin or tool version in
 `java/parent/pom.xml`, the Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
 in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
 commit in `.gitea/workflows/`, and a fixture's `junit.version` or `uv.lock`
@@ -226,15 +226,19 @@ fixed or justified in the closure's `audit-ignore`, in a pull request of its
 own, first.
 
 Then tag, from `main`'s tip, with this snippet rather than `make tag`. It
-needs git 2.34 or later and ssh-keygen (OpenSSH 8.1 or later), and
-`user.signingKey` set to the release key in the clone's own config first:
+needs git 2.35 or later, ssh-keygen (OpenSSH 8.1 or later), and the release
+key loaded in ssh-agent: it signs with the key of `devkitw`'s
+allowed-signers line, whatever `user.signingKey` says, so a tag can only be
+signed by the key the wrapper trusts:
 
 ```sh
 git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
+key=$(sed -n "s/^signers='devkit-release namespaces=\"git\" \(.*\)'$/\1/p" devkitw) &&
+  : "${key:?devkitw carries no one-line allowed-signers value}" &&
 tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
 version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
 print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
-  git -c gpg.format=ssh tag -a -s "$tag" -m "devkit $tag" &&
+  git -c gpg.format=ssh -c user.signingKey="key::$key" tag -a -s "$tag" -m "devkit $tag" &&
   git push origin "$tag"
 ```
 
@@ -244,10 +248,11 @@ binds the commit, type, tag name and namespace, not the repository.
 Then, in a pull request of its own, point `devkit.toml` at the new release,
 so that CI's `GATES=release` run gates the next changes with it: `version`
 the tag, `commit` the peeled commit the tag names (as for a consumer's bump,
-below):
+below). The snippet takes the highest `v*` tag on the remote:
 
 ```sh
-commit=$(git ls-remote origin "refs/tags/${tag:?}^{}" | cut -f1) &&
+tag=$(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/v*' | sed -n '1s|.*refs/tags/||p') &&
+  commit=$(git ls-remote origin "refs/tags/${tag:?no v* tag on origin}^{}" | cut -f1) &&
   [ -n "$commit" ] && sed -i.bak -e "/^\[devkit\]/,/^\[/s/^version = .*/version = \"$tag\"/" \
     -e "/^\[devkit\]/,/^\[/s/^commit = .*/commit = \"$commit\"/" devkit.toml &&
   rm devkit.toml.bak && make lint-repo GATES=release
@@ -264,12 +269,13 @@ pinned tag, and then every project without a cached copy fails closed.
 
 A new release key ships in `devkitw` as a second allowed-signers line (the
 single-quoted `signers` value may span lines; the rotation release loosens the
-one-line guards in both `swap_signers` copies, in `tests/`), in a release the
-old key signs. Every existing `v*` tag is re-signed with the new key at its
-same commit, so a newer wrapper still fetches older releases, and later
-releases are signed with the new key. A consumer bumps through the release
-that carries both lines: a wrapper that knows only the old key, bumped
-straight past it, refuses the tag as "not signed by devkit's release key".
+one-line guards in both `swap_signers` copies, in `tests/`, and has the tagging
+snippet take the key that signs), in a release the old key signs. Every
+existing `v*` tag is re-signed with the new key at its same commit, so a newer
+wrapper still fetches older releases, and later releases are signed with the
+new key. A consumer bumps through the release that carries both lines: a
+wrapper that knows only the old key, bumped straight past it, refuses the tag
+as "not signed by devkit's release key".
 The old line goes once every tag is re-signed and that release has shipped.
 
 A consumer bumps by editing `version` and `commit` in `devkit.toml` and,
