@@ -339,13 +339,55 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
   local spec var n=0 ok=0
   for spec in "MAVEN_ARGS=-q|MAVEN_ARGS is set (it can skip tests)." \
     "MAVEN_BASEDIR=/x|MAVEN_BASEDIR is set (it moves .mvn/ and the gate configurations, which can skip tests)." \
-    "MAVEN_OPTS=-Dx=y|MAVEN_OPTS holds a -D (it can skip tests)." \
+    "MAVEN_OPTS=-Dx=y|MAVEN_OPTS holds -D (it can skip tests)." \
     "MAVEN_DEBUG_OPTS=-version|MAVEN_DEBUG_OPTS is set (the launcher hands it to java, which can skip tests)." \
-    "JAVA_TOOL_OPTIONS=-Dx=y|JAVA_TOOL_OPTIONS holds a -D (it can skip tests)." \
-    "JDK_JAVA_OPTIONS=-Dx=y|JDK_JAVA_OPTIONS holds a -D (it can skip tests)." \
-    "_JAVA_OPTIONS=-Dx=y|_JAVA_OPTIONS holds a -D (it can skip tests)." \
-    "OPENJ9_JAVA_OPTIONS=-Dx=y|OPENJ9_JAVA_OPTIONS holds a -D (it can skip tests)." \
-    "IBM_JAVA_OPTIONS=-Dx=y|IBM_JAVA_OPTIONS holds a -D (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-Dx=y|JAVA_TOOL_OPTIONS holds -D (it can skip tests)." \
+    "JDK_JAVA_OPTIONS=-Dx=y|JDK_JAVA_OPTIONS holds -D (it can skip tests)." \
+    "_JAVA_OPTIONS=-Dx=y|_JAVA_OPTIONS holds -D (it can skip tests)." \
+    "OPENJ9_JAVA_OPTIONS=-Dx=y|OPENJ9_JAVA_OPTIONS holds -D (it can skip tests)." \
+    "IBM_JAVA_OPTIONS=-Dx=y|IBM_JAVA_OPTIONS holds -D (it can skip tests)." \
+    "MAVEN_OPTS=@file|MAVEN_OPTS holds @argfile (it can skip tests)." \
+    "JDK_JAVA_OPTIONS=\"@file\"|JDK_JAVA_OPTIONS holds @argfile (it can skip tests)." \
+    "JDK_JAVA_OPTIONS=--list-modules|JDK_JAVA_OPTIONS holds --list-modules (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-XX:VMOptionsFile=x|JAVA_TOOL_OPTIONS holds -XX:VMOptionsFile (it can skip tests)." \
+    "_JAVA_OPTIONS=-XX:Flags=x|_JAVA_OPTIONS holds -XX:Flags (it can skip tests)." \
+    "MAVEN_OPTS=-version|MAVEN_OPTS holds -version (it can skip tests)." \
+    "MAVEN_OPTS=-Xmx1g --dry-run|MAVEN_OPTS holds --dry-run (it can skip tests)." \
+    "MAVEN_OPTS=-Xshare:dump|MAVEN_OPTS holds -Xshare:dump (it can skip tests)." \
+    "MAVEN_OPTS=-XX:AOTMode=create|MAVEN_OPTS holds -XX:AOTMode=create (it can skip tests)." \
+    "MAVEN_OPTS=--module=x/y|MAVEN_OPTS holds --module (it can skip tests)." \
+    "MAVEN_OPTS=-?|MAVEN_OPTS holds -? (it can skip tests)." \
+    "MAVEN_OPTS=-fullversion|MAVEN_OPTS holds -fullversion (it can skip tests)." \
+    "MAVEN_OPTS=--full-version|MAVEN_OPTS holds --full-version (it can skip tests)." \
+    "MAVEN_OPTS=-Xinternalversion|MAVEN_OPTS holds -Xinternalversion (it can skip tests)." \
+    "MAVEN_OPTS=-XX:+PrintFlagsInitial|MAVEN_OPTS holds -XX:+PrintFlagsInitial (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-XX:+PrintSharedArchiveAndExit|JAVA_TOOL_OPTIONS holds -XX:+PrintSharedArchiveAndExit (it can skip tests)." \
+    "MAVEN_OPTS=-Xoptionsfile=x|MAVEN_OPTS holds -Xoptionsfile (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-\"D\"x=y|JAVA_TOOL_OPTIONS holds -D (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-XX:AOTMode=\"create\"|JAVA_TOOL_OPTIONS holds -XX:AOTMode=create (it can skip tests)." \
+    "JDK_JAVA_OPTIONS='-version'|JDK_JAVA_OPTIONS holds -version (it can skip tests)." \
+    "MAVEN_OPTS=$(printf -- '-Xmx1g\t-version')|MAVEN_OPTS holds -version (it can skip tests)." \
+    "MAVEN_OPTS=--version|MAVEN_OPTS holds --version (it can skip tests)." \
+    "MAVEN_OPTS=-help|MAVEN_OPTS holds -help (it can skip tests)." \
+    "MAVEN_OPTS=--help|MAVEN_OPTS holds --help (it can skip tests)." \
+    "MAVEN_OPTS=-h|MAVEN_OPTS holds -h (it can skip tests)." \
+    "MAVEN_OPTS=-X|MAVEN_OPTS holds -X (it can skip tests)." \
+    "MAVEN_OPTS=--help-extra|MAVEN_OPTS holds --help-extra (it can skip tests)." \
+    "MAVEN_OPTS=-d|MAVEN_OPTS holds -d (it can skip tests)." \
+    "MAVEN_OPTS=--describe-module|MAVEN_OPTS holds --describe-module (it can skip tests)." \
+    "MAVEN_OPTS=--validate-modules|MAVEN_OPTS holds --validate-modules (it can skip tests)." \
+    "MAVEN_OPTS=-jar|MAVEN_OPTS holds -jar (it can skip tests)." \
+    "MAVEN_OPTS=-m|MAVEN_OPTS holds -m (it can skip tests)." \
+    "MAVEN_OPTS=--module|MAVEN_OPTS holds --module (it can skip tests)." \
+    "MAVEN_OPTS=-XX:+JVMCIPrintProperties|MAVEN_OPTS holds -XX:+JVMCIPrintProperties (it can skip tests)." \
+    "MAVEN_OPTS=-javaagent:/x.jar|MAVEN_OPTS holds -javaagent (it can skip tests)." \
+    "JDK_JAVA_OPTIONS=-agentpath:/x.so|JDK_JAVA_OPTIONS holds -agentpath (it can skip tests)." \
+    "MAVEN_OPTS=-agentlib:jdwp=transport=dt_socket|MAVEN_OPTS holds -agentlib (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-Xrunjdwp:transport=dt_socket|JAVA_TOOL_OPTIONS holds -Xrun (it can skip tests)." \
+    "MAVEN_OPTS=-Xlog:help|MAVEN_OPTS holds -Xlog:help (it can skip tests)." \
+    "MAVEN_OPTS=-XX:StartFlightRecording:help|MAVEN_OPTS holds -XX:StartFlightRecording:help (it can skip tests)." \
+    "JAVA_TOOL_OPTIONS=-Xmx1g -XX:StartFlightRecording=help|JAVA_TOOL_OPTIONS holds -XX:StartFlightRecording=help (it can skip tests)." \
+    "MAVEN_OPTS=-Dfoo=help|MAVEN_OPTS holds -D (it can skip tests)." \
     "PYTEST_ADDOPTS=-k x|PYTEST_ADDOPTS is set (it can deselect tests)."; do
     n=$((n + 1))
     var=${spec%%|*}
@@ -354,6 +396,20 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
     say env "$var" git push -q origin main
     [[ $rc == 0 && $out == *"WARNING: ${spec#*|}"* ]] && logged "$both" || return 1
   done
+  g commit -q --no-verify --allow-empty -m ignoredmvn
+  : >"$HOOK_LOG"
+  mkdir -p "$clone/.mvn"
+  echo -DskipTests >"$clone/.mvn/maven.config"
+  echo .mvn/maven.config >>"$clone/.git/info/exclude"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: git ignores .mvn/ files Maven reads: .mvn/maven.config (they can skip tests)."* ]] && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m ignoredext
+  : >"$HOOK_LOG"
+  echo '<extensions/>' >"$clone/.mvn/extensions.xml"
+  echo .mvn/extensions.xml >>"$clone/.git/info/exclude"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: git ignores .mvn/ files Maven reads: .mvn/extensions.xml, .mvn/maven.config (they can skip tests)."* ]] && logged "$both" || return 1
+  rm "$clone/.mvn/maven.config" "$clone/.mvn/extensions.xml"
   g commit -q --no-verify --allow-empty -m last
   : >"$HOOK_LOG"
   say env MAVEN_OPTS=-Xmx1g git push -q origin main # no -D: no warning
@@ -362,10 +418,19 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
   : >"$HOOK_LOG"
   say env JAVA_TOOL_OPTIONS=-XX:-DisableExplicitGC git push -q origin main # -D inside a word
   [[ $rc == 0 ]] && { unwarned || [[ $out != *WARNING* ]]; } && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m notterminal
+  : >"$HOOK_LOG"
+  say env MAVEN_OPTS='-Xmx1g -Xss1m -Xshare:auto -XX:AOTMode=auto --module-path=x -showversion -da -XX:-DisableExplicitGC -XX:+PrintFlagsFinal -XshowSettings:all -Xlog:gc -verbose:gc --add-opens=java.base/java.lang=ALL-UNNAMED -ea' git push -q origin main # none ends java, reads a file or loads code
+  [[ $rc == 0 ]] && { unwarned || [[ $out != *WARNING* ]]; } && logged "$both" || return 1
   g commit -q --no-verify --allow-empty -m quoted
   : >"$HOOK_LOG"
   say env JAVA_TOOL_OPTIONS='-Xmx1g "-Dx=a b"' git push -q origin main
-  [[ $rc == 0 && $out == *"WARNING: JAVA_TOOL_OPTIONS holds a -D"* ]] && logged "$both" || return 1
+  [[ $rc == 0 && $out == *"WARNING: JAVA_TOOL_OPTIONS holds -D"* ]] && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m badbyte
+  : >"$HOOK_LOG"
+  # An invalid byte under a UTF-8 locale must not make the match fail open.
+  say env LC_ALL=C.UTF-8 MAVEN_OPTS=$'\xe9 -version' git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: MAVEN_OPTS holds -version (it can skip tests)."* ]] && logged "$both" || return 1
   g commit -q --no-verify --allow-empty -m rc
   : >"$HOOK_LOG"
   echo 'MAVEN_OPTS=-DskipTests' >"$HOME/.mavenrc"
@@ -394,7 +459,58 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
   say git push -q origin main # a mirror, and properties only in a comment
   [[ $rc == 0 && $out != *"settings.xml"* ]] && logged "$both" || ok=1
   rm -f "$HOME/.m2/settings.xml"
+  [[ $ok == 0 ]] || return 1
+  g commit -q --no-verify --allow-empty -m extensions
+  : >"$HOOK_LOG"
+  mkdir -p "$HOME/.m2"
+  : >"$HOME/.m2/extensions.xml" # any content; MAVEN_SKIP_RC does not matter
+  say env MAVEN_SKIP_RC=1 git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: $HOME/.m2/extensions.xml exists, and Maven loads its core extensions (they can skip tests)."* ]] && logged "$both" || ok=1
+  rm -f "$HOME/.m2/extensions.xml"
   [[ $ok == 0 ]]
+}
+case_pre_push_home_files() { # settings.xml activeProfiles, a directory at extensions.xml, ignored .mvn/ files
+  fresh
+  install
+  local spec n=0 kind want text="WARNING: $HOME/.m2/settings.xml activates a profile it does not define (a project profile can skip tests)."
+  for spec in act_none:warn act_own:quiet act_comment:quiet act_mixed:warn act_ws:quiet; do
+    n=$((n + 1))
+    kind=${spec%:*} want=${spec#*:}
+    g commit -q --no-verify --allow-empty -m "act$n"
+    : >"$HOOK_LOG"
+    settings_xml "$kind"
+    say git push -q origin main
+    rm -f "$HOME/.m2/settings.xml"
+    [[ $rc == 0 ]] && logged "$both" || return 1
+    if [[ $want == warn ]]; then [[ $out == *"$text"* ]] || return 1; else [[ $out != *"activates a profile"* ]] || return 1; fi
+  done
+  g commit -q --no-verify --allow-empty -m extdir
+  : >"$HOOK_LOG"
+  mkdir -p "$HOME/.m2/extensions.xml" # Maven loads only a regular file
+  say env MAVEN_SKIP_RC=1 git push -q origin main
+  rmdir "$HOME/.m2/extensions.xml"
+  [[ $rc == 0 && $out != *"extensions.xml"* ]] && logged "$both" || return 1
+  local ex=$clone/.git/info/exclude pre="WARNING: git ignores .mvn/ files Maven reads:" post="(they can skip tests)."
+  mkdir -p "$clone/.mvn/wrapper"
+  g commit -q --no-verify --allow-empty -m jvmconfig
+  : >"$HOOK_LOG"
+  echo -Xmx1g >"$clone/.mvn/jvm.config"
+  echo .mvn/jvm.config >"$ex"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"$pre .mvn/jvm.config $post"* ]] && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m mvndir
+  : >"$HOOK_LOG"
+  echo x >"$clone/.mvn/maven.config"
+  echo .mvn/ >"$ex"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"$pre .mvn/jvm.config, .mvn/maven.config $post"* ]] && logged "$both" || return 1
+  g commit -q --no-verify --allow-empty -m wrapper
+  : >"$HOOK_LOG"
+  rm "$clone/.mvn/jvm.config" "$clone/.mvn/maven.config"
+  echo jar >"$clone/.mvn/wrapper/maven-wrapper.jar"
+  echo .mvn/wrapper/ >"$ex"
+  say git push -q origin main # Maven does not read .mvn/wrapper/
+  [[ $rc == 0 && $out != *".mvn/"* ]] && logged "$both"
 }
 case_pre_push_outer_flags() { # a push from inside make -i, or a MAKEFILES .IGNORE:, still fails
   fresh
@@ -759,6 +875,11 @@ settings_xml() { # settings_xml KIND: writes $HOME/.m2/settings.xml
   mkdir -p "$HOME/.m2"
   case $1 in
     props) echo '<settings><profiles><profile><id>p</id><properties><skipTests>true</skipTests></properties></profile></profiles></settings>' ;;
+    act_none) echo '<settings><activeProfiles><activeProfile>p</activeProfile></activeProfiles></settings>' ;;
+    act_own) echo '<settings><profiles><profile><id>p</id></profile></profiles><activeProfiles><activeProfile>p</activeProfile></activeProfiles></settings>' ;;
+    act_comment) echo '<settings><!-- <activeProfiles><activeProfile>p</activeProfile></activeProfiles> --></settings>' ;;
+    act_mixed) echo '<settings><profiles><profile><id>a</id></profile></profiles><activeProfiles><activeProfile>a</activeProfile><activeProfile>b</activeProfile></activeProfiles></settings>' ;;
+    act_ws) printf '%s\n' '<settings><profiles><profile><id> p </id></profile></profiles><activeProfiles><activeProfile>' '  p' '</activeProfile></activeProfiles></settings>' ;;
     benign) printf '%s\n' '<settings><mirrors><mirror><id>m</id><url>https://example.invalid</url></mirror></mirrors>' \
       '<!-- <profiles><profile><id>p</id>' '<properties><skipTests>true</skipTests></properties>' \
       '</profile></profiles> -->' '</settings>' ;;
@@ -783,6 +904,87 @@ case_gate_dirty_start() {
     norecord "the tree was not clean at the start" || return 1
   done
 }
+case_gate_ignored_mvn() { # .mvn/ files Maven reads, ignored by git
+  local ex pre="git ignores .mvn/ files Maven reads:" post="(they can skip tests)"
+  fresh
+  ex=$clone/.git/info/exclude
+  mkdir -p "$clone/.mvn/wrapper"
+  echo -DskipTests >"$clone/.mvn/maven.config"
+  echo .mvn/maven.config >>"$ex"
+  norecord "$pre .mvn/maven.config $post" || return 1
+  : >"$HOOK_LOG"
+  echo '<extensions/>' >"$clone/.mvn/extensions.xml"
+  echo .mvn/extensions.xml >>"$ex"
+  norecord "$pre .mvn/extensions.xml, .mvn/maven.config $post" || return 1
+  : >"$HOOK_LOG"
+  # An ignored jvm.config, alone.
+  rm "$clone/.mvn/maven.config" "$clone/.mvn/extensions.xml"
+  echo -Xmx1g >"$clone/.mvn/jvm.config"
+  echo .mvn/jvm.config >"$ex"
+  norecord "$pre .mvn/jvm.config $post" || return 1
+  : >"$HOOK_LOG"
+  # Ignored through a directory pattern: the read files are named, the wrapper's is not.
+  echo x >"$clone/.mvn/maven.config"
+  echo jar >"$clone/.mvn/wrapper/maven-wrapper.jar"
+  echo .mvn/ >"$ex"
+  norecord "$pre .mvn/jvm.config, .mvn/maven.config $post" || return 1
+  : >"$HOOK_LOG"
+  # Ignored through core.excludesFile.
+  rm "$clone/.mvn/jvm.config"
+  printf '%s\n' .mvn/maven.config .mvn/wrapper/ >"$work/excludes"
+  : >"$ex"
+  g config core.excludesFile "$work/excludes"
+  norecord "$pre .mvn/maven.config $post" || return 1
+  g config --unset core.excludesFile
+  : >"$HOOK_LOG"
+  # .mvn/wrapper/ is not read by Maven: recorded. A committed .mvn/jvm.config too.
+  rm "$clone/.mvn/maven.config"
+  echo -Xmx1g >"$clone/.mvn/jvm.config"
+  echo .mvn/wrapper/maven-wrapper.jar >"$ex"
+  g add -f .mvn/jvm.config
+  g commit -q --no-verify -m jvmconfig
+  if ! unwarned; then
+    gate
+    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
+  fi
+}
+case_gate_home_files() { # settings.xml activeProfiles and a directory at extensions.xml
+  fresh
+  local spec kind want ok=0 f
+  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
+    [[ ! -e $f ]] || { echo "SKIP: $f exists; not asserting the home-directory files" >&2; return 0; }
+  done
+  for spec in act_none:no act_own:yes act_comment:yes act_mixed:no act_ws:yes; do
+    kind=${spec%:*} want=${spec#*:}
+    : >"$HOOK_LOG"
+    settings_xml "$kind"
+    if [[ $want == no ]]; then
+      norecord "$HOME/.m2/settings.xml activates a profile it does not define (a project profile can skip tests)" || ok=1
+    else
+      gate
+      [[ $rc == 0 && $out == "make gate: recorded"* ]] || ok=1
+      rm -f "$(rec)"
+    fi
+    rm -f "$HOME/.m2/settings.xml"
+    [[ $ok == 0 ]] || return 1
+  done
+  : >"$HOOK_LOG"
+  mkdir -p "$HOME/.m2/extensions.xml" # Maven loads only a regular file
+  gate MAVEN_SKIP_RC=1
+  rmdir "$HOME/.m2/extensions.xml"
+  [[ $rc == 0 && $out == "make gate: recorded"* ]]
+}
+case_gate_ignored_mvn_during() { # an ignored file that appears during the run
+  fresh
+  norecord "git ignores .mvn/ files Maven reads that appeared during the run: .mvn/maven.config (they can skip tests)" \
+    DURING='mkdir -p .mvn && echo x >.mvn/maven.config && echo .mvn/maven.config >>.git/info/exclude'
+}
+case_jvm_screen_parity() { # the hook stays self-contained, so the two copies must not drift
+  local extract='/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^(jvm_option|strip_comments|sets_properties|activates_project_profile|trim|ignored_mvn)\(\)/,/^}/p' a b
+  a=$(sed -En "$extract" "$root/scripts/gate.sh")
+  b=$(sed -En "$extract" "$root/scripts/hooks/pre-push.sh")
+  [[ $(grep -c '_re=' <<<"$a") == 4 && $a == "$b" ]]
+}
 case_gate_environment() { # variables that can skip or deselect tests
   fresh
   norecord "MAVEN_ARGS is set (it can skip tests)" MAVEN_ARGS=-q || return 1
@@ -793,15 +995,67 @@ case_gate_environment() { # variables that can skip or deselect tests
   : >"$HOOK_LOG"
   local var
   for var in MAVEN_OPTS JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS; do
-    norecord "$var holds a -D (it can skip tests)" "$var=-Dx=y" || return 1
+    norecord "$var holds -D (it can skip tests)" "$var=-Dx=y" || return 1
     : >"$HOOK_LOG"
   done
+  local spec
+  for spec in 'MAVEN_OPTS=@file|MAVEN_OPTS holds @argfile' \
+    'JDK_JAVA_OPTIONS="@file"|JDK_JAVA_OPTIONS holds @argfile' \
+    'JDK_JAVA_OPTIONS=--list-modules|JDK_JAVA_OPTIONS holds --list-modules' \
+    'JAVA_TOOL_OPTIONS=-XX:VMOptionsFile=x|JAVA_TOOL_OPTIONS holds -XX:VMOptionsFile' \
+    '_JAVA_OPTIONS=-XX:Flags=x|_JAVA_OPTIONS holds -XX:Flags' \
+    'MAVEN_OPTS=-version|MAVEN_OPTS holds -version' \
+    'MAVEN_OPTS=-Xmx1g --dry-run|MAVEN_OPTS holds --dry-run' \
+    'MAVEN_OPTS=-Xshare:dump|MAVEN_OPTS holds -Xshare:dump' \
+    'MAVEN_OPTS=-XX:AOTMode=create|MAVEN_OPTS holds -XX:AOTMode=create' \
+    'MAVEN_OPTS=--module=x/y|MAVEN_OPTS holds --module' \
+    'MAVEN_OPTS=-?|MAVEN_OPTS holds -?' \
+    'MAVEN_OPTS=-fullversion|MAVEN_OPTS holds -fullversion' \
+    'MAVEN_OPTS=--full-version|MAVEN_OPTS holds --full-version' \
+    'MAVEN_OPTS=-Xinternalversion|MAVEN_OPTS holds -Xinternalversion' \
+    'MAVEN_OPTS=-XX:+PrintFlagsInitial|MAVEN_OPTS holds -XX:+PrintFlagsInitial' \
+    'JAVA_TOOL_OPTIONS=-XX:+PrintSharedArchiveAndExit|JAVA_TOOL_OPTIONS holds -XX:+PrintSharedArchiveAndExit' \
+    'MAVEN_OPTS=-Xoptionsfile=x|MAVEN_OPTS holds -Xoptionsfile' \
+    'JAVA_TOOL_OPTIONS=-"D"x=y|JAVA_TOOL_OPTIONS holds -D' \
+    'JAVA_TOOL_OPTIONS=-XX:AOTMode="create"|JAVA_TOOL_OPTIONS holds -XX:AOTMode=create' \
+    "JDK_JAVA_OPTIONS='-version'|JDK_JAVA_OPTIONS holds -version" \
+    "MAVEN_OPTS=$(printf -- '-Xmx1g\t-version')|MAVEN_OPTS holds -version" \
+    'MAVEN_OPTS=--version|MAVEN_OPTS holds --version' \
+    'MAVEN_OPTS=-help|MAVEN_OPTS holds -help' \
+    'MAVEN_OPTS=--help|MAVEN_OPTS holds --help' \
+    'MAVEN_OPTS=-h|MAVEN_OPTS holds -h' \
+    'MAVEN_OPTS=-X|MAVEN_OPTS holds -X' \
+    'MAVEN_OPTS=--help-extra|MAVEN_OPTS holds --help-extra' \
+    'MAVEN_OPTS=-d|MAVEN_OPTS holds -d' \
+    'MAVEN_OPTS=--describe-module|MAVEN_OPTS holds --describe-module' \
+    'MAVEN_OPTS=--validate-modules|MAVEN_OPTS holds --validate-modules' \
+    'MAVEN_OPTS=-jar|MAVEN_OPTS holds -jar' \
+    'MAVEN_OPTS=-m|MAVEN_OPTS holds -m' \
+    'MAVEN_OPTS=--module|MAVEN_OPTS holds --module' \
+    'MAVEN_OPTS=-XX:+JVMCIPrintProperties|MAVEN_OPTS holds -XX:+JVMCIPrintProperties' \
+    'MAVEN_OPTS=-javaagent:/x.jar|MAVEN_OPTS holds -javaagent' \
+    'JDK_JAVA_OPTIONS=-agentpath:/x.so|JDK_JAVA_OPTIONS holds -agentpath' \
+    'MAVEN_OPTS=-agentlib:jdwp=transport=dt_socket|MAVEN_OPTS holds -agentlib' \
+    'JAVA_TOOL_OPTIONS=-Xrunjdwp:transport=dt_socket|JAVA_TOOL_OPTIONS holds -Xrun' \
+    'MAVEN_OPTS=-Xlog:help|MAVEN_OPTS holds -Xlog:help' \
+    'MAVEN_OPTS=-XX:StartFlightRecording:help|MAVEN_OPTS holds -XX:StartFlightRecording:help' \
+    'JAVA_TOOL_OPTIONS=-Xmx1g -XX:StartFlightRecording=help|JAVA_TOOL_OPTIONS holds -XX:StartFlightRecording=help' \
+    'MAVEN_OPTS=-Dfoo=help|MAVEN_OPTS holds -D'; do
+    norecord "${spec#*|} (it can skip tests)" "${spec%%|*}" || return 1
+    : >"$HOOK_LOG"
+  done
+  norecord "MAVEN_OPTS holds -version (it can skip tests)" LC_ALL=C.UTF-8 $'MAVEN_OPTS=\xe9 -version' || return 1 # invalid byte, UTF-8 locale
+  : >"$HOOK_LOG"
   norecord "PYTEST_ADDOPTS is set (it can deselect tests)" "PYTEST_ADDOPTS=-k x" || return 1
   : >"$HOOK_LOG"
-  norecord "JAVA_TOOL_OPTIONS holds a -D (it can skip tests)" 'JAVA_TOOL_OPTIONS=-Xmx1g "-Dx=a b"' || return 1
+  norecord "JAVA_TOOL_OPTIONS holds -D (it can skip tests)" 'JAVA_TOOL_OPTIONS=-Xmx1g "-Dx=a b"' || return 1
   : >"$HOOK_LOG"
   if ! unwarned; then
     gate MAVEN_OPTS='-Xmx1g -XX:-DisableExplicitGC' # no option starts with -D: recorded
+    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
+    rm -f "$(rec)"
+    : >"$HOOK_LOG"
+    gate MAVEN_OPTS='-Xmx1g -Xss1m -Xshare:auto -XX:AOTMode=auto --module-path=x -showversion -da -XX:-DisableExplicitGC -XX:+PrintFlagsFinal -XshowSettings:all -Xlog:gc -verbose:gc --add-opens=java.base/java.lang=ALL-UNNAMED -ea' # none ends java, reads a file or loads code
     [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
     rm -f "$(rec)"
     : >"$HOOK_LOG"
@@ -830,6 +1084,14 @@ case_gate_environment() { # variables that can skip or deselect tests
   [[ $rc == 0 && ( $out == "make gate: recorded"* || -n $lead ) ]] || ok=1
   rm -f "$HOME/.m2/settings.xml"
   [[ -z $lead ]] || echo "SKIP: a machine-wide mavenrc exists; not asserting the benign settings.xml is recorded" >&2
+  [[ $ok == 0 ]] || return 1
+  : >"$HOOK_LOG"
+  mkdir -p "$HOME/.m2"
+  : >"$HOME/.m2/extensions.xml" # any content, and MAVEN_SKIP_RC does not stop Maven loading it
+  norecord "${lead}$HOME/.m2/extensions.xml exists, and Maven loads its core extensions (they can skip tests)" MAVEN_SKIP_RC= || ok=1
+  : >"$HOOK_LOG"
+  norecord "$HOME/.m2/extensions.xml exists, and Maven loads its core extensions (they can skip tests)" MAVEN_SKIP_RC=1 || ok=1
+  rm -f "$HOME/.m2/extensions.xml"
   [[ $ok == 0 ]]
 }
 case_gate_no_reflog() {
@@ -927,7 +1189,9 @@ t "pre-push ignores a deletion-only push" case_pre_push_deletion
 t "pre-push installed directly exits 0 on zero refs" case_pre_push_no_refs
 t "pre-push.devkit with zero refs runs the gate" case_pre_push_side_no_refs
 t "pre-push ignores ONLY and says so" case_pre_push_only
-t "pre-push warns on variables that can deselect tests, and still gates" case_pre_push_environment
+t "gate.sh and pre-push define the JVM options screen, the settings.xml checks and ignored_mvn identically" case_jvm_screen_parity
+t "pre-push warns on variables, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
+t "pre-push warns on a settings.xml activeProfile it does not define and on ignored .mvn/ files, not on a directory at ~/.m2/extensions.xml" case_pre_push_home_files
 t "pre-push: outer make flags do not reach the stages" case_pre_push_outer_flags
 t "a failing gate part fails the hook, a failing notice never does" case_part_status
 t "a copy does nothing outside a devkit project" case_outside_project
@@ -963,7 +1227,10 @@ t "pre-push still gates after another commit, and on any not strictly clean tree
 t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
 t "make gate refuses ONLY, also on the make command line" case_gate_only
 t "make gate records nothing from a tree not strictly clean at the start" case_gate_dirty_start
-t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS or a JVM option -D" case_gate_environment
+t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, a JVM option that skips or replaces the tests, a mavenrc, a settings.xml with properties or ~/.m2/extensions.xml" case_gate_environment
+t "make gate records nothing for a settings.xml activeProfile it does not define, but does for a directory at ~/.m2/extensions.xml" case_gate_home_files
+t "make gate records nothing while git ignores a .mvn/ file Maven reads, but does under .mvn/wrapper/ and for a committed one" case_gate_ignored_mvn
+t "make gate records nothing for an ignored .mvn/ file that appeared during the run" case_gate_ignored_mvn_during
 t "make gate records nothing without a HEAD reflog" case_gate_no_reflog
 t "make gate records nothing for a project below the git top level" case_gate_nested
 t "make gate records nothing when the tree changed during the run" case_gate_tree_changed

@@ -531,13 +531,54 @@ one is missing or stale. A hook it did not write is never overwritten.
   `MAVEN_BASEDIR` (Maven's project directory, where `.mvn/` and the
   parent's gate configurations are read from), `MAVEN_DEBUG_OPTS` (any
   value counts: it is for mvnDebug's debugger, and the launcher hands it
-  to java), `PYTEST_ADDOPTS`, an option starting with `-D` (quoted or
-  not) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`,
+  to java), `PYTEST_ADDOPTS`, a JVM option that can skip tests (see
+  below) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`,
   `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc
   file Maven runs (`/usr/local/etc/mavenrc`,
-  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
+  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set), a
   `~/.m2/settings.xml` that defines profile properties (`<properties>`
-  outside XML comments), which are often set on purpose.
+  outside XML comments) or an `<activeProfile>` naming no profile that
+  file defines (Maven activates a profile of that id from the project's
+  POM; every `<id>` in its `<profiles>` section counts as defined, and
+  without one every `<activeProfile>` counts), a `~/.m2/extensions.xml`
+  (any regular file, not a directory: Maven loads its core extensions, code
+  in its JVM, whatever `MAVEN_SKIP_RC` says) and
+  an ignored `.mvn/maven.config`, `.mvn/extensions.xml` or `.mvn/jvm.config`
+  (Maven reads them whether git tracks them or not; `.mvn/wrapper/` does
+  not count), which are often set on purpose.
+  A JVM option that can skip tests is a word of the variable, found after
+  every `"` and `'` is removed, at its start or after whitespace. Java strips
+  quotes inside the JVM's own variables (`JDK_JAVA_OPTIONS`,
+  `JAVA_TOOL_OPTIONS` ...); in `MAVEN_OPTS`, which the launcher word-splits,
+  a quote stays literal, so removing every quote first can only over-count.
+  The launcher of devkit's Maven or its JVM reads these variables. A word
+  counts when it:
+  - starts with `-D` or `@` (an `@argfile`), `-XX:VMOptionsFile=` or
+    `-Xoptionsfile=` (OpenJ9) (an options file, which can set a `-D`),
+    `-XX:Flags=` (a flags file), or `-javaagent:`, `-agentpath:`,
+    `-agentlib:` or `-Xrun` (they load code into Maven's JVM, like the
+    user-level core extensions);
+  - is one of the options that end java without running its main class
+    (the stage then exits 0 with no test run) or run another one instead,
+    alone or followed by `=` (as `--module=x` is): `-version`, `--version`,
+    `-fullversion`, `--full-version`, `-Xinternalversion`, `-help`,
+    `--help`, `-h`, `-?`, `-X`, `--help-extra`, `--dry-run`,
+    `--list-modules`, `-d`, `--describe-module`, `--validate-modules`,
+    `-Xshare:dump`, `-XX:AOTMode=create`, `-XX:+PrintFlagsInitial`,
+    `-XX:+PrintSharedArchiveAndExit`, `-XX:+JVMCIPrintProperties`, `-jar`,
+    `-m` and `--module` (checked against JDK 25);
+  - or, when it is none of those, has the form `-...:help` or `-...=help`
+    (`-Xlog:help`, `-XX:StartFlightRecording:help`), which prints help and
+    exits. A `-D...=help` is reported as `-D`.
+
+  The message names the option without a trailing `:` or `=`, never the
+  value; a help word is named whole, as its value is the literal `help`.
+  `-showversion`, `-Xmx`, `-Xshare:auto`, `-XX:AOTMode=auto`,
+  `-XX:+PrintFlagsFinal`, `-XshowSettings`, `-Xlog:gc`, `-verbose:gc`,
+  `--add-opens`, `-ea` and a `-D` inside a word (`-XX:-DisableExplicitGC`)
+  do not count. The match runs under `LC_ALL=C` (the stages keep their
+  locale), and a bash that cannot compile the patterns is detected before
+  the check: `pre-push` says so and `make gate` records nothing.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -550,12 +591,16 @@ one is missing or stale. A hook it did not write is never overwritten.
   are fine), HEAD did not move during the run (detected through HEAD and its
   reflog, so a move away and back counts, and no reflog means no record), the
   ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
-  `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`, an option
-  starting with `-D` (quoted or not) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`,
+  `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`, a JVM option
+  `pre-push` warns on above in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`,
   `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or
   `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs (`/usr/local/etc/mavenrc`,
   `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
-  `~/.m2/settings.xml` that defines profile properties is present.
+  `~/.m2/settings.xml` that defines profile properties or activates a
+  profile it does not define, or a regular file `~/.m2/extensions.xml`, is
+  present, and git ignores none of `.mvn/maven.config`,
+  `.mvn/extensions.xml` and `.mvn/jvm.config` (checked at the start and
+  again at the end of the run, as the tree state is).
   Recording never changes the exit status, and a passing run that records
   nothing says why. `pre-push` skips its gate only while HEAD equals the
   record and the tree is still strictly clean.

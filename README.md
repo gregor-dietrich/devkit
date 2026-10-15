@@ -442,6 +442,24 @@ Run `make hooks` to refresh the git hooks, so `pre-push` also warns on
 option in `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, which the launcher of
 devkit's Maven or its JVM reads; `make check` warns until then. `make gate`
 no longer records under any of them; unsetting them restores the record.
+Both also count more JVM options in any of the six JVM options variables:
+`@argfile`, `-XX:VMOptionsFile=`, `-Xoptionsfile=` and `-XX:Flags=` (they
+read options from a file), and options that end java before Maven runs or
+run another main class (`-version`, `-fullversion`, `--help`, `--dry-run`,
+`--list-modules`, `-Xshare:dump`, `-XX:AOTMode=create`,
+`-XX:+PrintFlagsInitial`, `-jar`, `--module` and the like; the contract
+lists them), options that load code (`-javaagent:`, `-agentpath:`,
+`-agentlib:`, `-Xrun`) and help words such as `-Xlog:help`, with every quote
+removed first. `pre-push` also warns,
+and `make gate` no longer records, while git ignores `.mvn/maven.config`,
+`.mvn/extensions.xml` or `.mvn/jvm.config`, which Maven reads whether git
+tracks them or not; committing the file or removing it restores the record.
+Both likewise count a `~/.m2/extensions.xml` that is a regular file, whatever
+it holds and whether or not `MAVEN_SKIP_RC` is set: Maven loads its core
+extensions, which can skip tests; removing the file restores the record. They
+also count a `~/.m2/settings.xml` `<activeProfile>` naming a profile that file
+does not define, since Maven then activates a profile of that id from the
+project's POM, which can skip tests; removing it restores the record.
 
 ### Upgrading from v0.5.x
 
