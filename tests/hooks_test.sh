@@ -19,7 +19,7 @@ trap 'rm -rf "$work"' EXIT
 unset $(git rev-parse --local-env-vars) CI FAIL GIT_CEILING_DIRECTORIES
 # What the hooks and make gate react to: an ambient one would change the cases.
 unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS MAVEN_SKIP_RC \
-  MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
+  X Y D SEL NOPE F d p r MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 export HOME=$work/home GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
 export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid
@@ -979,11 +979,274 @@ case_gate_ignored_mvn_during() { # an ignored file that appears during the run
   norecord "git ignores .mvn/ files Maven reads that appeared during the run: .mvn/maven.config (they can skip tests)" \
     DURING='mkdir -p .mvn && echo x >.mvn/maven.config && echo .mvn/maven.config >>.git/info/exclude'
 }
+# Committed POM profiles that activate on the environment or on a file.
+pom_pre="the project's POMs depend on ambient state:" pom_post="(they can skip tests)"
+fx() { # fx PATH: an <activation> on a file that exists
+  echo "<file><exists>$1</exists></file>"; }
+pf() { # pf PATH: a POM holding one profile, activated by that file
+  prof "$(fx "$1")"; }
+prof() { # prof ACTIVATION [ID]: a POM holding one profile
+  printf '<project><profiles><profile><id>%s</id><activation>%s</activation></profile></profiles></project>' "${2-p}" "$1"
+}
+pomproj() { # pomproj [FILE CONTENT]...: a fresh clone with the files committed
+  fresh
+  while [[ $# -gt 0 ]]; do
+    mkdir -p "$(dirname "$clone/$1")"
+    printf '%s\n' "$2" >"$clone/$1"
+    shift 2
+  done
+  g add -A && g commit -q --no-verify -m poms
+}
+ignored() { # ignored FILE...: creates the files in the clone, which git ignores
+  local f
+  for f; do
+    mkdir -p "$(dirname "$clone/$f")"
+    echo x >"$clone/$f"
+    echo "/$f" >>"$clone/.git/info/exclude"
+  done
+}
+nr() { # nr LINE [VAR=value...]: no record, naming the pom_ambient LINE
+  local line=$1
+  shift
+  : >"$HOOK_LOG"
+  norecord "$pom_pre $line $pom_post" "$@"
+}
+yesrec() { # yesrec [VAR=value...]: recorded
+  : >"$HOOK_LOG"
+  gate "$@"
+  [[ $rc == 0 && $out == "make gate: recorded"* ]]
+}
+# shellcheck disable=SC2016 # the ${...} are literal Maven expressions
+case_gate_pom_env() { # profiles activated by an environment variable
+  local env_x='<property><name>env.X</name></property>'
+  pomproj pom.xml "$(prof "$env_x")"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml "$(prof '<property><name>env.X</name><value>v</value></property>')"
+  nr "pom.xml: the environment variable X is set" X=w || return 1
+  pomproj pom.xml "$(prof '<property><name>!env.X</name></property>')"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  yesrec || return 1 # unset
+  yesrec X= || return 1 # empty counts as unset
+  pomproj pom.xml "$(prof '<property><name> env.A-B </name></property>')"
+  nr "pom.xml: env.A-B is not a variable name the scan can check" || return 1
+  pomproj pom.xml "$(prof '<property><name>env.d</name></property>')"
+  nr "pom.xml: the environment variable d is set" d=a || return 1 # a name the scan's own variables use
+  pomproj pom.xml '<project><profiles><profile><activation><file><exists>absent</exists></file></activation></profile><profile><activation><property><name>env.d</name></property></activation></profile></profiles></project>'
+  nr "pom.xml: the environment variable d is set" d=a || return 1 # a local of the scan must not shadow it
+  pomproj pom.xml '<project><profiles><profile><activation><file><exists>absent</exists></file></activation></profile><profile><activation><property><name>env.p</name></property></activation></profile></profiles></project>'
+  nr "pom.xml: the environment variable p is set" p=a || return 1
+  pomproj pom.xml '<project><profiles><profile><activation><file><exists>${basedir}/absent</exists></file></activation></profile><profile><activation><property><name>env.r</name></property></activation></profile></profiles></project>'
+  nr "pom.xml: the environment variable r is set" r=a || return 1
+  pomproj pom.xml "<project><!-- $(prof "$env_x") --></project>"
+  yesrec X=a
+}
+case_gate_pom_scope() { # which POMs are read
+  local env_x='<property><name>env.X</name></property>'
+  pomproj pom.xml '<project><modules><module>mod</module></modules></project>' \
+    mod/pom.xml "$(prof "$env_x" | sed 's|<project>|<project><parent><artifactId>r</artifactId></parent>|')" # default parent: ../pom.xml, a cycle
+  nr "mod/pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><profiles><profile><id>q</id><modules><module>mod</module></modules></profile></profiles></project>' \
+    mod/pom.xml "$(prof "$env_x")"
+  nr "mod/pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><modules><module>mod/other.xml</module></modules></project>' mod/other.xml "$(prof "$env_x")"
+  nr "mod/other.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><parent><relativePath>parent/pom.xml</relativePath></parent></project>' parent/pom.xml "$(prof "$env_x")"
+  nr "parent/pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><parent><artifactId>r</artifactId></parent></project>' ../pom.xml "$(prof "$env_x")"
+  yesrec X=a # the default parent, ../pom.xml, lies outside the tree
+}
+# shellcheck disable=SC2016 # the ${...} are literal Maven expressions
+case_gate_pom_files() { # profiles activated by a file
+  local act ok=0
+  for act in flag '${basedir}/flag' '${project.basedir}/flag' '${project.rootDirectory}/flag'; do
+    pomproj pom.xml "$(pf "$act")"
+    ignored flag
+    nr "pom.xml: $act exists and git does not track it" || return 1
+  done
+  pomproj pom.xml "$(pf '${env.D}/flag')"
+  ignored flag
+  nr "pom.xml: the environment variable D is set" D=/nowhere || return 1
+  yesrec || return 1 # D unset: the path is literal
+  pomproj pom.xml "$(pf '${user.home}/x')"
+  echo x >"$HOME/x"
+  nr 'pom.xml: ${user.home}/x exists and git does not track it' || ok=1
+  rm -f "$HOME/x"
+  [[ $ok == 0 ]] || return 1
+  pomproj pom.xml "$(pf '${foo}/x')"
+  nr 'pom.xml: ${foo}/x depends on a property' || return 1
+  pomproj pom.xml "$(pf file)" # tracked
+  yesrec || return 1
+  pomproj pom.xml "$(pf dir)" dir/f x # a tracked directory
+  yesrec || return 1
+  pomproj pom.xml "$(pf absent)"
+  yesrec || return 1
+  pomproj pom.xml "$(prof '<file><missing>flag</missing></file>')"
+  ignored flag
+  nr "pom.xml: flag exists and git does not track it" || return 1
+  # The root's relative path, found only in a module's directory.
+  pomproj pom.xml "<project><modules><module>mod</module></modules>$(prof "$(fx only)" | sed 's|^<project>||')" mod/pom.xml '<project/>'
+  ignored mod/only
+  nr "pom.xml: only exists and git does not track it" || return 1
+  pomproj pom.xml "$(pf '*.flag')"
+  ignored a.flag
+  yesrec
+}
+case_gate_pom_during() { # an ignored file that appears during the run
+  pomproj pom.xml "$(prof '<file><exists>flag</exists></file>')"
+  : >"$HOOK_LOG"
+  norecord "the project's POMs depend on ambient state that appeared during the run: pom.xml: flag exists and git does not track it $pom_post" \
+    DURING='echo x >flag && echo /flag >>.git/info/exclude'
+}
+case_pre_push_poms() { # the hook warns on the same profiles, and still gates
+  local env_x='<property><name>env.X</name></property>' file_x='<file><exists>flag</exists></file>' spec kind var want
+  for spec in "env|X=a|pom.xml: the environment variable X is set" \
+    "file|F=1|pom.xml: flag exists and git does not track it" \
+    "module|X=a|mod/pom.xml: the environment variable X is set" \
+    "parent|X=a|parent/pom.xml: the environment variable X is set" \
+    "ignoredparent|F=1|build/pom.xml: git does not track this POM" \
+    "unset|F=1|" "tracked|F=1|" "absent|F=1|"; do
+    kind=${spec%%|*} var=${spec#*|} want=${var#*|} var=${var%%|*}
+    case $kind in
+      env | unset) pomproj pom.xml "$(prof "$env_x")" ;;
+      file | absent) pomproj pom.xml "$(prof "$file_x")" ;;
+      module) pomproj pom.xml '<project><modules><module>mod</module></modules></project>' mod/pom.xml "$(prof "$env_x")" ;;
+      parent) pomproj pom.xml '<project><parent><relativePath>parent/pom.xml</relativePath></parent></project>' parent/pom.xml "$(prof "$env_x")" ;;
+      ignoredparent) pomproj pom.xml '<project><parent><relativePath>build/pom.xml</relativePath></parent></project>' && ignored build/pom.xml ;;
+      tracked) pomproj pom.xml "$(prof "$file_x")" flag x ;;
+    esac
+    [[ $kind != file ]] || ignored flag
+    install
+    : >"$HOOK_LOG"
+    say env "$var" git push -q origin main
+    [[ $rc == 0 ]] && logged "$both" || return 1
+    if [[ -n $want ]]; then [[ $out == *"WARNING: $pom_pre $want $pom_post."* ]] || return 1; else [[ $out != *"ambient state"* ]] || return 1; fi
+  done
+}
+case_gate_pom_queue() { # several POMs at once, several profiles in one, one hit per line
+  local env_x='<property><name>env.X</name></property>' two
+  pomproj pom.xml '<project><modules><module>m1</module><module>m2</module><module>m3</module></modules></project>' \
+    m1/pom.xml '<project/>' m2/pom.xml '<project/>' m3/pom.xml "$(prof "$env_x")"
+  nr "m3/pom.xml: the environment variable X is set" X=a || return 1
+  two='<project><profiles><profile><activation>%s</activation></profile><profile><activation>%s</activation></profile></profiles></project>'
+  # shellcheck disable=SC2059 # the format is the template above
+  pomproj pom.xml "$(printf "$two" "$env_x" '<property><name>env.Y</name></property>')"
+  nr "pom.xml: the environment variable X is set, pom.xml: the environment variable Y is set" X=a Y=b || return 1
+  # shellcheck disable=SC2059
+  pomproj pom.xml "$(printf "$two" "$env_x" "$env_x")"
+  nr "pom.xml: the environment variable X is set" X=a
+}
+# shellcheck disable=SC2016 # the ${...} are literal Maven expressions
+case_gate_pom_env_refs() { # ${env.N} in a path: set counts, empty included; the rest of the path is still checked
+  pomproj pom.xml "$(pf '${env.X}flag')"
+  ignored flag
+  nr "pom.xml: the environment variable X is set" X= || return 1 # Maven substitutes the empty value
+  yesrec || return 1 # unset: the path stays literal
+  pomproj pom.xml "$(pf '${foo}${env.NOPE}')"
+  nr 'pom.xml: ${foo}${env.NOPE} depends on a property' || return 1
+  pomproj pom.xml "$(pf '${env.}/x')"
+  nr 'pom.xml: env. is not a variable name the scan can check' || return 1
+  pomproj pom.xml "$(pf '${env.A-B}/x')"
+  nr 'pom.xml: env.A-B is not a variable name the scan can check'
+}
+case_gate_pom_tags() { # tags with whitespace and attributes, and one that only looks like a tag
+  local env_x='<property><name>env.X</name></property>' open='<project><profiles><profile>' close='</profile></profiles></project>'
+  pomproj pom.xml "$open<activation >$env_x</activation >$close"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml "$open<activation xml:space=\"preserve\">$env_x</activation>$close"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml "$open<activation><property ><name foo=\"1\">env.X</name ></property ></activation>$close"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml "$open<activation><file ><exists >ignored</exists ></file ></activation>$close"
+  ignored ignored
+  nr "pom.xml: ignored exists and git does not track it" || return 1
+  pomproj pom.xml "<project><names>x</names>$open<activation>$env_x</activation>$close"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><modules ><module >mod</module ></modules ></project>' mod/pom.xml "$(prof "$env_x")"
+  nr "mod/pom.xml: the environment variable X is set" X=a || return 1
+  pomproj pom.xml '<project><parent ><relativePath >parent/pom.xml</relativePath ></parent ></project>' parent/pom.xml "$(prof "$env_x")"
+  nr "parent/pom.xml: the environment variable X is set" X=a
+}
+# shellcheck disable=SC2016 # the ${...} are literal Maven expressions
+case_gate_pom_forms() { # names, values and paths the scan does not resolve
+  pomproj pom.xml "$(prof '<property><name>${env.SEL}</name></property>')"
+  nr 'pom.xml: ${env.SEL} in an activation depends on a property' SEL=env.X X=1 || return 1
+  pomproj pom.xml "$(prof '<property><name>x</name><value>${env.Y}</value></property>')"
+  nr 'pom.xml: ${env.Y} in an activation depends on a property' Y=1 || return 1
+  local path
+  for path in 'flags\skip' 'sub/../x' 'flag/'; do
+    pomproj pom.xml "$(pf "$path")"
+    nr "pom.xml: $path is a path the scan does not resolve" || return 1
+  done
+  pomproj pom.xml "$(pf '${project.rootDirectory}/flag')" mod/x x
+  yesrec || return 1
+  pomproj pom.xml '<project><modules><module>mod</module></modules></project>' mod/pom.xml "$(pf '${project.rootDirectory}/flag')"
+  ignored mod/flag
+  nr 'mod/pom.xml: ${project.rootDirectory}/flag exists and git does not track it' || return 1
+  pomproj pom.xml "$(pf .git)"
+  yesrec || return 1 # every checkout has one
+  pomproj pom.xml "$(pf dir)"
+  ignored dir/f
+  nr "pom.xml: dir exists and git does not track it" || return 1 # a directory
+  pomproj pom.xml "$(prof '<property><name>foo</name></property>')"
+  yesrec X=a
+}
+# shellcheck disable=SC2016 # the ${...} are literal Maven expressions
+case_gate_pom_reactor() { # what the walk lists, and what it notes
+  local env_x='<property><name>env.X</name></property>'
+  pomproj pom.xml '<project><parent><relativePath>build/pom.xml</relativePath></parent></project>'
+  ignored build/pom.xml
+  nr "build/pom.xml: git does not track this POM" || return 1
+  pomproj pom.xml '<project><modules><module>${m}</module></modules></project>'
+  nr 'pom.xml: module ${m} holds a property' || return 1
+  pomproj pom.xml '<project><modules><module>../outside</module></modules></project>'
+  mkdir -p "$work/case/outside"
+  echo '<project/>' >"$work/case/outside/pom.xml"
+  nr "pom.xml: module ../outside resolves outside the project" || return 1
+  pomproj pom.xml '<project><modules><module>gone</module></modules></project>'
+  yesrec || return 1 # a module that does not exist: Maven fails the build
+  pomproj pom.xml '<project><modules><module>mod/sub</module></modules></project>' \
+    mod/pom.xml "$(prof "$env_x")" mod/sub/pom.xml '<project><parent><artifactId>r</artifactId></parent></project>'
+  nr "mod/pom.xml: the environment variable X is set" X=a || return 1 # the default parent
+  pomproj pom.xml '<project><modules><module>mod/sub</module></modules></project>' \
+    mod/pom.xml "$(prof "$env_x")" mod/sub/pom.xml '<project><parent><relativePath/></parent></project>'
+  yesrec X=a || return 1 # an empty relativePath names no parent
+  pomproj pom.xml '<project><parent><relativePath>parent</relativePath></parent></project>' parent/pom.xml "$(prof "$env_x")"
+  nr "parent/pom.xml: the environment variable X is set" X=a
+}
+case_gate_pom_text() { # processing instructions and .mvn/maven.config
+  local env_x='<property><name>env.X</name></property>'
+  pomproj pom.xml "<?x <!-- ?>$(prof "$env_x")"
+  nr "pom.xml: holds a processing instruction" X=a || return 1
+  pomproj pom.xml $'<?xml version="1.0"?>\n'"$(prof "$env_x")"
+  nr "pom.xml: the environment variable X is set" X=a || return 1
+  yesrec || return 1 # a leading XML declaration is no processing instruction
+  local opt
+  for opt in '-f alt/pom.xml' '--file=alt/pom.xml' '-falt/pom.xml' '-T 2 --file alt/pom.xml'; do
+    pomproj pom.xml '<project/>' .mvn/maven.config "$opt"
+    nr ".mvn/maven.config names the POM to build" || return 1
+  done
+  pomproj pom.xml '<project/>' .mvn/maven.config '-fae'
+  yesrec
+}
+case_gate_pom_scan_failure() { # a scan that fails refuses to record, and the hook warns and gates
+  pomproj pom.xml "$(pf flag)"
+  printf junk >"$clone/.git/index"
+  : >"$HOOK_LOG"
+  gate
+  [[ $rc == 0 && $out == *"could not scan the project's POMs"* && ! -e $(rec) ]] && logged "$both" || return 1
+  install
+  : >"$HOOK_LOG"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: could not scan the project's POMs; the gate runs anyway."* ]] && logged "$both"
+}
 case_jvm_screen_parity() { # the hook stays self-contained, so the two copies must not drift
-  local extract='/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^(jvm_option|strip_comments|sets_properties|activates_project_profile|trim|ignored_mvn)\(\)/,/^}/p' a b
+  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
+  alt=$(IFS='|' && echo "${names[*]}")
+  local extract="/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^($alt)\\(\\)/,/^}/p"
   a=$(sed -En "$extract" "$root/scripts/gate.sh")
   b=$(sed -En "$extract" "$root/scripts/hooks/pre-push.sh")
-  [[ $(grep -c '_re=' <<<"$a") == 4 && $a == "$b" ]]
+  # Every listed helper was extracted: a name changed in both files drops out.
+  [[ $(grep -c '_re=' <<<"$a") == 4 && $(grep -cE '^[a-z_]+\(\) \{' <<<"$a") == "${#names[@]}" && $a == "$b" ]]
 }
 case_gate_environment() { # variables that can skip or deselect tests
   fresh
@@ -1189,9 +1452,10 @@ t "pre-push ignores a deletion-only push" case_pre_push_deletion
 t "pre-push installed directly exits 0 on zero refs" case_pre_push_no_refs
 t "pre-push.devkit with zero refs runs the gate" case_pre_push_side_no_refs
 t "pre-push ignores ONLY and says so" case_pre_push_only
-t "gate.sh and pre-push define the JVM options screen, the settings.xml checks and ignored_mvn identically" case_jvm_screen_parity
+t "gate.sh and pre-push define the JVM options screen, the settings.xml checks, ignored_mvn and the POM profile scan identically" case_jvm_screen_parity
 t "pre-push warns on variables, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
 t "pre-push warns on a settings.xml activeProfile it does not define and on ignored .mvn/ files, not on a directory at ~/.m2/extensions.xml" case_pre_push_home_files
+t "pre-push warns on POM profiles activated by an environment variable or an untracked file, in modules and parents too, and still gates" case_pre_push_poms
 t "pre-push: outer make flags do not reach the stages" case_pre_push_outer_flags
 t "a failing gate part fails the hook, a failing notice never does" case_part_status
 t "a copy does nothing outside a devkit project" case_outside_project
@@ -1231,6 +1495,17 @@ t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, a 
 t "make gate records nothing for a settings.xml activeProfile it does not define, but does for a directory at ~/.m2/extensions.xml" case_gate_home_files
 t "make gate records nothing while git ignores a .mvn/ file Maven reads, but does under .mvn/wrapper/ and for a committed one" case_gate_ignored_mvn
 t "make gate records nothing for an ignored .mvn/ file that appeared during the run" case_gate_ignored_mvn_during
+t "make gate records nothing for a POM profile activated by an environment variable, but does for an unset or empty one and a commented-out profile" case_gate_pom_env
+t "make gate reads the POMs of modules, profile modules and parents inside the tree, and nothing outside it" case_gate_pom_scope
+t "make gate records nothing for a POM profile activated by an untracked or ignored file or a property path, but does for a tracked or absent one" case_gate_pom_files
+t "make gate records nothing for a POM profile file that appeared during the run" case_gate_pom_during
+t "make gate reads every POM of a queue, two profiles of one POM, and reports an env variable once" case_gate_pom_queue
+t "make gate counts a set or empty \${env.N} in a path and still checks the rest of the path" case_gate_pom_env_refs
+t "make gate reads tags with whitespace and attributes, and leaves <names> alone" case_gate_pom_tags
+t "make gate counts interpolated names and values, paths it cannot resolve, and ignores .git" case_gate_pom_forms
+t "make gate counts an untracked POM, a module with a property or outside the tree, and follows default parents" case_gate_pom_reactor
+t "make gate counts a processing instruction and a -f in .mvn/maven.config" case_gate_pom_text
+t "make gate refuses to record when the POM scan fails, and pre-push warns" case_gate_pom_scan_failure
 t "make gate records nothing without a HEAD reflog" case_gate_no_reflog
 t "make gate records nothing for a project below the git top level" case_gate_nested
 t "make gate records nothing when the tree changed during the run" case_gate_tree_changed

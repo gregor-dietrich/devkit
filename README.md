@@ -460,6 +460,18 @@ extensions, which can skip tests; removing the file restores the record. They
 also count a `~/.m2/settings.xml` `<activeProfile>` naming a profile that file
 does not define, since Maven then activates a profile of that id from the
 project's POM, which can skip tests; removing it restores the record.
+Both count a project POM that depends on ambient state: a POM the build
+reads that git does not track, or a profile whose activation depends on an
+environment variable (`env.X`, `!env.X`) that is set, or on an `<exists>`
+or `<missing>` file that exists untracked or whose path uses a set variable
+(the contract lists the forms). Unsetting the variable, removing the file or
+committing it restores the record. A form the scan does not resolve always
+counts until the POM changes: a module or an activation property name or
+value that uses a property, or a path that uses one other than `${env.X}`,
+`${basedir}`, `${project.basedir}`, `${project.rootDirectory}` and
+`${user.home}`; a path with a `\`, a `..` part or a trailing `/`; an
+environment variable name that is not a shell identifier; a processing
+instruction; and a `-f` in `.mvn/maven.config`.
 
 ### Upgrading from v0.5.x
 

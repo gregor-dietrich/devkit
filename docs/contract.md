@@ -545,7 +545,8 @@ one is missing or stale. A hook it did not write is never overwritten.
   in its JVM, whatever `MAVEN_SKIP_RC` says) and
   an ignored `.mvn/maven.config`, `.mvn/extensions.xml` or `.mvn/jvm.config`
   (Maven reads them whether git tracks them or not; `.mvn/wrapper/` does
-  not count), which are often set on purpose.
+  not count), and a committed POM profile that depends on ambient state (see
+  below), which are often set on purpose.
   A JVM option that can skip tests is a word of the variable, found after
   every `"` and `'` is removed, at its start or after whitespace. Java strips
   quotes inside the JVM's own variables (`JDK_JAVA_OPTIONS`,
@@ -579,6 +580,47 @@ one is missing or stale. A hook it did not write is never overwritten.
   do not count. The match runs under `LC_ALL=C` (the stages keep their
   locale), and a bash that cannot compile the patterns is detected before
   the check: `pre-push` says so and `make gate` records nothing.
+
+  The POMs in scope are the root `pom.xml`, every POM a `<module>` names
+  (in a profile, too) and every parent a `<parent>` reaches through its
+  `<relativePath>` (default `../pom.xml`) inside the project, each followed
+  transitively; a parent outside the project is not read. They depend on
+  ambient state when:
+  - a POM in scope is not tracked by git (untracked or ignored);
+  - a `<module>` uses a property (`${...}`), or names an existing directory
+    outside the project;
+  - `.mvn/maven.config` selects another root POM (`-f`, `--file`);
+  - a POM holds a processing instruction other than its XML declaration;
+  - an `<activation>` names an environment variable (`env.X` or `!env.X`)
+    that is set and not empty (Maven reads an empty one as unset here), a
+    name that is not a shell identifier, or a property `<name>` or `<value>`
+    that uses a property (Maven interpolates both);
+  - or an `<activation>` has an `<exists>` or `<missing>` path that uses
+    `${env.X}` while X is set, even empty (Maven substitutes an empty value
+    in a path); that uses a property other than `${env.X}`, `${basedir}`,
+    `${project.basedir}`, `${project.rootDirectory}` and `${user.home}`;
+    that holds a `\`, a `..` part or a trailing `/` (Maven normalises
+    them); or that exists and git does not track (outside the project, or
+    untracked or ignored inside it, but never the work tree's `.git`; `*`
+    and `?` are literal, as they are to Maven). Maven resolves a relative
+    path, `${basedir}` and `${project.rootDirectory}` per project it
+    evaluates the profile for, which for a parent's profile is each module,
+    so the path is tried against the directory of every POM in scope.
+
+  Whitespace and attributes in the tags are read as Maven reads them. The
+  scan is a static reading, not Maven's model builder: forms only a
+  deliberate setup reaches are accepted misses (#150): a symlink, XML
+  entities and CDATA, an attribute value holding `>`, a POM reached only
+  through a parent outside the project, a variable whose value is only
+  newlines, a crafted `CDPATH`, a non-UTF-8 POM naming a non-ASCII path and
+  a path with an internal newline. A scan that cannot read a POM or ask git
+  fails closed: `make gate` records nothing and `pre-push` warns.
+
+  The message names the POM and the variable, module or path as written,
+  never a value. The JDK, the operating system and the JVM's own system
+  properties are the machine's, which `pre-push` runs on too, not ambient: a
+  profile they activate does not count, and a `-D` one is a JVM option
+  above.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -598,9 +640,10 @@ one is missing or stale. A hook it did not write is never overwritten.
   `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
   `~/.m2/settings.xml` that defines profile properties or activates a
   profile it does not define, or a regular file `~/.m2/extensions.xml`, is
-  present, and git ignores none of `.mvn/maven.config`,
-  `.mvn/extensions.xml` and `.mvn/jvm.config` (checked at the start and
-  again at the end of the run, as the tree state is).
+  present, git ignores none of `.mvn/maven.config`, `.mvn/extensions.xml`
+  and `.mvn/jvm.config`, and no POM in scope depends on ambient state, as
+  above (both checked at the start and again at the end of the
+  run, as the tree state is).
   Recording never changes the exit status, and a passing run that records
   nothing says why. `pre-push` skips its gate only while HEAD equals the
   record and the tree is still strictly clean.
