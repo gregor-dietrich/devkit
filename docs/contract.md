@@ -1014,26 +1014,30 @@ run the tools from `.venv`.
   when `COVERAGE_FLOOR` is unset or not a percent from 0 to 100, when
   `.python-version` is missing or no `major.minor[.patch]`, when `MODULES`
   holds a glob character or differs from the members `uv.lock` records,
-  when the root `pyproject.toml` sets no `[tool.vulture] paths`, when no uv
-  of the pinned version is found, when `.venv` is missing, when its Python's
-  version differs from the pin (`major.minor`, or the patch too when the
-  pin names one), when
-  `uv sync --check --frozen --offline` cannot confirm `.venv` matches
-  `uv.lock` (drift: run `make install`), and when a dev tool is missing
-  from `.venv`. Before uv, it validates `devkit.toml`'s
-  `[python.duplication]` (`duplication.py check-config`, see the
-  copy-paste gate below) and `[python.anchored-match]`
+  when the root `pyproject.toml` sets no `[tool.vulture] paths`, when
+  devkit's copy of the uv `uv.lock` pins is not installed, when `.venv` is
+  missing, when its Python's version differs from the pin (`major.minor`,
+  or the patch too when the pin names one), when `uv sync --check --frozen
+  --offline` cannot confirm `.venv` matches `uv.lock` (drift: run `make
+  install`), and when a dev tool is missing from `.venv`. Before uv, it
+  validates `devkit.toml`'s `[python.duplication]` (`duplication.py
+  check-config`, see the copy-paste gate below) and `[python.anchored-match]`
   (`anchored_match.py check-config`, see the anchored-match gate below).
-- uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, the first of: `uv` on
-  `PATH` when it reports the pinned version and is not the one inside
-  `.venv` (each `uv` on `PATH` in turn; a link to that one, or any file
-  under `.venv`'s resolved path, counts as it); devkit's per-user copy,
-  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv/<version>/bin/uv`. Only
-  `make install` creates that copy, read-only, when it is missing: pip, in
-  a throwaway venv of `python3`, installs the uv wheel `uv.lock` pins,
-  verified against the lock's hashes. devkit never runs the uv inside
-  `.venv`, and its targets always use the project's `.venv`: `get_uv.sh`
-  unsets `UV_PROJECT_ENVIRONMENT`.
+- uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, devkit's per-user copy of
+  the uv `uv.lock` pins,
+  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/uv-<version>-<key>/bin/uv`;
+  `<key>` comes from the sha256 of every uv wheel the lock records (hashed
+  with `sha256sum` or `shasum`), so projects that lock the same uv by the
+  same hashes share one copy and a lock with other hashes gets its own.
+  devkit never runs a `uv` on `PATH`, nor the one inside `.venv`. Only
+  `make install` creates the copy, read-only, when it is missing, and
+  `check` and `audit` fail until then: pip, in a throwaway venv of
+  `python3`, installs the machine's uv wheel from the index pip's own
+  configuration names (PyPI unless `pip.conf` or a `PIP_*` variable such as
+  `PIP_INDEX_URL` names another), and only a wheel whose sha256 `uv.lock`
+  lists. A copy that does not report the pinned version fails with the
+  command that removes it. devkit's targets always use the project's
+  `.venv`: `get_uv.sh` unsets `UV_PROJECT_ENVIRONMENT`.
 - `make install` runs `uv sync --locked --all-packages --all-extras`: it
   creates or repairs `.venv`, with the pinned CPython, which uv provisions
   when it is missing. It fails when `uv.lock` is stale against

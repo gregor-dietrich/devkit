@@ -102,9 +102,10 @@
 #          an environment no later part inherits: user-level uv configuration
 #          (XDG_CONFIG_HOME), the caches and uv's Python downloads in the temp
 #          dir, no pip configuration file, no inherited UV_*, PIP_*,
-#          VIRTUAL_ENV or PYTHONPATH, and no uv of the fixtures' pin on PATH,
-#          so the first make install runs the hash-verified uv bootstrap;
-#          system-level uv configuration (/etc/uv) is not isolated. Then make
+#          VIRTUAL_ENV or PYTHONPATH; the first make install runs the
+#          hash-verified uv bootstrap, whatever uv is on PATH, and the second
+#          fixture reuses its copy; system-level uv configuration (/etc/uv) is
+#          not isolated. Then make
 #          help, install, check, lint, test, format and audit (nothing to
 #          audit); ruff's walk must skip the .devkit link, and nothing but
 #          caches and .venv may change (uv.lock included). Then break copies
@@ -995,23 +996,23 @@ python_part() {
   fails=$(<"$work/fails")
 }
 
+shared_uv_copy() { # shared_uv_copy LOG COPY...: exactly one COPY exists, and LOG shows no uv install
+  local log=$1
+  shift
+  [[ $# == 1 && -d $1 ]] && ! grep -q "Installing uv" "$log"
+}
+
 python_checks() {
-  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv dir path='' dirs fixture
+  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv fixture copies
   first=${fixtures[0]%/}
   pin=$(PROJECT_ROOT=$first python3 "$root/scripts/python/uv_project.py" uv-version)
-  uv=$XDG_CACHE_HOME/devkit/uv/$pin/bin/uv # where the bootstrap puts it; it locks the copies too
   # User-level uv configuration (XDG_CONFIG_HOME), the caches (XDG_CACHE_HOME) and uv's Python
-  # downloads stay in $work, and pip reads no configuration file. No uv of the pin on PATH, so
-  # the first make install runs the hash-verified bootstrap; later ones find its uv in the cache.
+  # downloads stay in $work, and pip reads no configuration file. The first make install
+  # bootstraps uv, whatever uv is on PATH; later ones find its copy in the cache.
   # shellcheck disable=SC2046 # one argument per variable name
   unset VIRTUAL_ENV PYTHONPATH $(compgen -e | grep -E '^(UV|PIP)_')
   export XDG_CONFIG_HOME=$work/config UV_PYTHON_INSTALL_DIR=$work/uv-python npm_config_cache=$work/npm-cache \
     PIP_CONFIG_FILE=/dev/null
-  IFS=: read -ra dirs <<<"$PATH"
-  for dir in "${dirs[@]}"; do
-    [[ -x $dir/uv && "$("$dir/uv" --version 2>/dev/null) " == "uv $pin "* ]] || path+=${path:+:}$dir
-  done
-  export PATH=$path
   for fixture in "${fixtures[@]}"; do
     fixture=${fixture%/}
     run_fixture "$fixture" "install check lint test format"
@@ -1021,6 +1022,10 @@ python_checks() {
     unchanged "$fixture" .venv __pycache__ .pytest_cache .ruff_cache .coverage
   done
   check "${first##*/}: the first make install bootstraps uv" grep -q "Installing uv $pin" "$work/${first##*/}.install.log"
+  copies=("$XDG_CACHE_HOME/devkit/tools/uv-$pin-"*)
+  check "the fixtures, locking the same uv by the same hashes, share one copy" \
+    shared_uv_copy "$work/$(basename "${fixtures[1]}").install.log" "${copies[@]}"
+  uv=${copies[0]}/bin/uv # it locks the copies too
   python_negatives
 }
 

@@ -1,27 +1,44 @@
 #!/bin/bash
 
-# Sourced by the scripts/python/*.sh after they cd to $PROJECT_ROOT. Exports UV_CMD, a uv of
-# exactly the version uv.lock pins (its uv package), the first of:
-#   1. the first uv on PATH that reports that version and is not the one inside the project's
-#      .venv (nor resolves into it);
-#   2. devkit's per-user copy, ${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv/<version>/bin/uv;
-#   3. with UV_BOOTSTRAP=true (make install only): that copy, installed first from the uv wheel
-#      uv.lock pins, hash-verified, by pip in a throwaway venv.
-# Else it fails. Never the uv inside .venv: install replaces that environment, and check judges
-# it.
+# Sourced by the scripts/python/*.sh after they cd to $PROJECT_ROOT. Exports UV_CMD, devkit's
+# per-user copy of exactly the uv uv.lock pins (its uv package):
+#   ${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/uv-<version>-<key>/bin/uv
+# where <key> is the first 16 hex digits of the sha256 of the requirements file pip installs it
+# from (the version and every wheel hash uv.lock lists for it). The copy is installed only under
+# UV_BOOTSTRAP=true (make install), by pip in a throwaway venv, from the index pip's own
+# configuration names, and pip accepts only a wheel whose hash the lock lists. Else a missing copy
+# fails, naming make install.
+#
+# Why it differs from the pinned Maven bootstrap (#131, #44): the pin and the hashes are the
+# project's, so pip matches the wheel by its tags (fetch.sh fits a tarball devkit pins). Only
+# install bootstraps: check and audit need .venv, which only install creates, lint, test and
+# format run no uv, and check stays offline, so Maven's reason for fetching lazily does not apply.
+#
+# Where it no longer differs: never a uv on PATH (it came first until v0.7.x; a matching version
+# is not the same bits, and uv enforces uv.lock's hashes as Maven enforces java/checksums), never
+# the uv inside .venv (install replaces that environment, and check judges it). The key holds the
+# hashes because the cache is shared and the lock is per project: keyed by version alone, the
+# first project decided what every later one ran. pip's configuration keeps choosing the index (a
+# mirror, a private index, a wheel directory) because the lock's hashes decide what is installed,
+# so pinning PyPI or the lock's source adds no trust and breaks routes.
 
 # shellcheck source=SCRIPTDIR/python.sh
 . "$DEVKIT/scripts/lib/python.sh"
 python3_floor || exit 1
 # shellcheck source=SCRIPTDIR/sealed_dir.sh
 . "$DEVKIT/scripts/lib/sealed_dir.sh"
-UV_PIN=$(python3 "$DEVKIT/scripts/python/uv_project.py" uv-version) || exit
-uv_root=${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv
-[[ $uv_root == /* ]] || {
-    echo "ERROR: the uv cache root $uv_root is not an absolute path; fix XDG_CACHE_HOME or HOME." >&2
+# shellcheck source=SCRIPTDIR/sha256.sh
+. "$DEVKIT/scripts/lib/sha256.sh"
+UV_PIN=$(python3 -I "$DEVKIT/scripts/python/uv_project.py" uv-version) || exit
+uv_reqs=$(python3 -I "$DEVKIT/scripts/python/uv_project.py" uv-requirements) || exit
+uv_tools=${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools
+[[ $uv_tools == /* ]] || {
+    echo "ERROR: the tools cache root $uv_tools is not an absolute path; fix XDG_CACHE_HOME or HOME." >&2
     exit 1
 }
-uv_dir=$uv_root/$UV_PIN
+uv_key=$(sha256_of <(printf '%s\n' "$uv_reqs")) || exit
+uv_dir=$uv_tools/uv-$UV_PIN-${uv_key:0:16}
+UV_CMD=$uv_dir/bin/uv
 
 uv_is_pin() { # uv_is_pin PATH: PATH runs and reports the pinned version ("uv X" or "uv X (...)")
     local version
@@ -31,22 +48,27 @@ uv_is_pin() { # uv_is_pin PATH: PATH runs and reports the pinned version ("uv X"
 
 uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps stay its own
     (
-        mkdir -p "$uv_root"
-        tmp=$(mktemp -d "$uv_root/.tmp.XXXXXX")
+        mkdir -p "$uv_tools"
+        tmp=$(mktemp -d "$uv_tools/.tmp.XXXXXX")
         trap 'sealed_remove "$tmp"' EXIT
         trap 'exit 1' HUP INT TERM
         echo "Installing uv $UV_PIN, hash-verified from uv.lock, into $uv_dir ..."
         # A file, not a pipe: pip installs nothing, and succeeds, from an empty requirements list.
-        python3 "$DEVKIT/scripts/python/uv_project.py" uv-requirements > "$tmp/requirements.txt"
+        # The same bytes the key hashes.
+        printf '%s\n' "$uv_reqs" > "$tmp/requirements.txt"
         # -I: else the cwd, the project root, comes first on sys.path, and a project venv.py or
         # pip.py would run in place of the module.
         python3 -I -m venv "$tmp/venv" || {
-            echo "ERROR: python3 -m venv failed; install python3's venv module, or put uv $UV_PIN on PATH." >&2
+            echo "ERROR: python3 -m venv failed; install python3's venv module." >&2
             exit 1
         }
         "$tmp/venv/bin/python" -I -m pip install --quiet --disable-pip-version-check --require-hashes \
             --only-binary=:all: --no-deps -r "$tmp/requirements.txt" || {
-            echo "ERROR: pip could not install uv $UV_PIN as uv.lock pins it; see its output above." >&2
+            echo "ERROR: pip could not install uv $UV_PIN as uv.lock pins it; see its output above. pip fetches from its own index (PyPI unless pip.conf or PIP_INDEX_URL names another) and installs only a wheel whose sha256 uv.lock lists." >&2
+            exit 1
+        }
+        [[ -x $tmp/venv/bin/uv ]] || {
+            echo "ERROR: pip reported success but installed no uv into its throwaway venv; PIP_TARGET, PIP_PREFIX or PIP_USER (in the environment or pip.conf) redirect it: unset them for make install." >&2
             exit 1
         }
         mkdir "$tmp/bin"
@@ -60,39 +82,18 @@ uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps sta
     )
 }
 
-uv_refused() { # uv_refused PATH: PATH is the uv inside .venv, or resolves into .venv; unsure refuses
-    local real venv
-    [[ ! $1 -ef .venv/bin/uv ]] && real=$(realpath "$1") || return 0
-    [[ -e .venv || -L .venv ]] || return 1
-    venv=$(cd ./.venv && pwd -P) || return 0
-    [[ $real == "$venv/"* ]]
-}
-
-uv_on_path() { # set UV_CMD to the first uv on PATH that uv_refused lets through and reports the pin
-    local candidate
-    while IFS= read -r candidate; do
-        ! uv_refused "$candidate" && uv_is_pin "$candidate" && UV_CMD=$candidate && return
-    done < <(type -aP uv)
-    return 1
-}
-
-if uv_on_path; then
-    : # UV_CMD is the uv on PATH
-elif UV_CMD=$uv_dir/bin/uv; [[ -e $uv_dir || -L $uv_dir ]]; then
-    uv_is_pin "$UV_CMD" || {
-        echo "ERROR: $UV_CMD does not report uv $UV_PIN; remove $uv_dir (chmod -R u+w '$uv_dir'; rm -rf '$uv_dir') and run make install." >&2
+if [[ ! -e $uv_dir && ! -L $uv_dir ]]; then
+    if [[ ${UV_BOOTSTRAP:-} == true ]]; then
+        uv_bootstrap
+    else
+        echo "ERROR: uv $UV_PIN, as uv.lock pins it, is not installed in $uv_dir; run make install." >&2
         exit 1
-    }
-elif [[ ${UV_BOOTSTRAP:-} == true ]]; then
-    uv_bootstrap
-    uv_is_pin "$UV_CMD" || {
-        echo "ERROR: the uv installed into $uv_dir does not report uv $UV_PIN; remove $uv_dir (chmod -R u+w '$uv_dir'; rm -rf '$uv_dir') and retry." >&2
-        exit 1
-    }
-else
-    echo "ERROR: uv $UV_PIN not found, neither on PATH nor in $uv_dir; run make install." >&2
-    exit 1
+    fi
 fi
+uv_is_pin "$UV_CMD" || {
+    echo "ERROR: $UV_CMD does not report uv $UV_PIN; remove $uv_dir (chmod -R u+w '$uv_dir'; rm -rf '$uv_dir') and run make install." >&2
+    exit 1
+}
 export UV_CMD
 # uv would sync UV_PROJECT_ENVIRONMENT, but get_venv.sh and every target use the project's .venv.
 unset UV_PROJECT_ENVIRONMENT

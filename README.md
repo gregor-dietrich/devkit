@@ -108,9 +108,10 @@ whole repository, then the language gates. Requirements: git, GNU make,
 ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3 (3.11 or
 later); fetching a devkit release on a cache miss also needs the running UID to
 have a passwd entry, which ssh-keygen requires (a container run with an
-arbitrary `-u` UID needs one added); a uv project needs python3's venv and
-pip only when no uv of the pinned version is on `PATH` or in devkit's
-cache, and a `python3` on `PATH` (not `.venv`'s) that parses the project's
+arbitrary `-u` UID needs one added); a uv project needs `sha256sum` or
+`shasum`, and, for the first `make install` of each uv `uv.lock` pins,
+python3's venv and pip and the index pip is configured for (PyPI by
+default), and a `python3` on `PATH` (not `.venv`'s) that parses the project's
 syntax, for the anchored-match gate. `make lint` also needs node (22.22.2
 or later) with npm, for markdownlint and a uv project's copy-paste gate
 (jscpd), and `make format` needs them for `format-md`, which fixes the
@@ -290,6 +291,26 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
+
+### Upgrading from v0.7.x
+
+In a uv project, devkit now runs only its own copy of the uv `uv.lock`
+pins, never a `uv` on `PATH`, and keeps a copy per set of hashes the lock
+records for that uv, not per version ([uv
+projects](docs/contract.md#uv-projects)). After the bump, run `make install`
+once on each machine: `make check` and `make audit` fail, naming it, until
+then, and a CI job that runs either on a restored `.venv` runs `make install`
+first. The install needs python3's venv and pip even where a uv of the
+pinned version is on `PATH`: a CI image that provided only uv adds them
+(`python3-venv` on Debian and Ubuntu). pip still fetches the uv wheel from
+the index its own configuration names, and installs only a wheel whose
+sha256 `uv.lock` lists: a network that reaches PyPI only through a mirror,
+or has uv only on a private index, sets `index-url` in `pip.conf` or
+`PIP_INDEX_URL`; putting uv on `PATH` no longer works around it. The old
+copies in `~/.cache/devkit/uv` (or `$XDG_CACHE_HOME/devkit/uv`) are unused;
+`chmod -R u+w ~/.cache/devkit/uv && rm -rf ~/.cache/devkit/uv` removes
+them. A cache hit is not re-verified, so `devkit/tools` is not restored from
+a shared CI cache.
 
 ### Upgrading from v0.6.x
 
