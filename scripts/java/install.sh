@@ -16,7 +16,7 @@ echo "Starting install${ONLY:+ for $ONLY}..."
 
 # The build above resolves vaadin-core-internal, which the gate reads; the gate resolves the bundle jar.
 if [[ $FRONTEND_SELECTED == true ]]; then
-    python3 "$DEVKIT/scripts/java/check_frontend_deps.py" "$FRONTEND_DIR"
+    python3 -I "$DEVKIT/scripts/java/check_frontend_deps.py" "$FRONTEND_DIR"
 fi
 
 echo "Install completed."

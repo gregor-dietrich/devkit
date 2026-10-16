@@ -53,6 +53,6 @@ echo "Environment checks completed."
 
 echo "Checking dependency version pins..."
 
-python3 "$DEVKIT/scripts/java/version_check.py"
+python3 -I "$DEVKIT/scripts/java/version_check.py"
 
 echo "Dependency version pin checks completed."

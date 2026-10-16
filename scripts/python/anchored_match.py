@@ -26,7 +26,8 @@ attribute such as self._RE, a class-level constant, a return value, a name bound
 imported from another module (each file is read on its own), a symlinked file, a name bound to
 re.compile(...).match, the regex module, PurePath.match). A $ in a (?x) or (?#...) comment is a
 known false positive (accept it), and an unbalanced [ in one can hide a later $.
-A file that the python3 on PATH does not parse fails the run, so none is left unscanned.
+A file the interpreter running the gate does not parse fails the run, so none is left unscanned; make
+lint runs it under .venv's Python, the project's grammar.
 """
 
 import ast
@@ -41,6 +42,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
+# The sibling is found under -I, -P and PYTHONSAFEPATH too, which keep the script directory off sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_files import Failure, python_files, python_table
 
 ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
@@ -429,7 +432,7 @@ def run() -> str:
     errors += [f"ERROR: stale {ENTRY} entry, no anchored .match() or .search() in: {show(key)}" for key in stale]
     errors += [f"ERROR: stale {EXCLUDED_ENTRY} entry, git lists no such Python file: {name}" for name in gone]
     if errors:
-        remedies = [f"run make lint with a python3 new enough for the project's syntax first on PATH, fix the file, or exclude it with an {EXCLUDED_ENTRY} entry in devkit.toml (file and a reason)"] if unparsed else []
+        remedies = [f"fix the file so that the Python .python-version pins parses it, or exclude it with an {EXCLUDED_ENTRY} entry in devkit.toml (file and a reason)"] if unparsed else []
         remedies += [f"use re.fullmatch (or \\A...\\Z), or accept the function with an {ENTRY} entry in devkit.toml (file, function and a reason)"] if new else []
         remedies += ["remove the stale entries from devkit.toml"] if stale or gone else []
         print("\n".join(errors), file=sys.stderr)

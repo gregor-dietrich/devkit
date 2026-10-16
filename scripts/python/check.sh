@@ -31,8 +31,12 @@ if [[ ! $pin =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$ ]]; then
     exit 1
 fi
 pin_minor=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}
+if (( BASH_REMATCH[1] < 3 || BASH_REMATCH[1] == 3 && BASH_REMATCH[2] < 11 )); then
+    echo "ERROR: .python-version pins $pin, but devkit needs CPython 3.11 or later there (make lint's anchored-match gate runs under .venv's Python); raise it and requires-python, then uv lock and make install." >&2
+    exit 1
+fi
 
-members=$(python3 "$DEVKIT/scripts/python/uv_project.py" members) || exit 1
+members=$(python3 -I "$DEVKIT/scripts/python/uv_project.py" members) || exit 1
 if [[ ${MODULES:-} == *[*?[]* ]]; then
     echo "ERROR: MODULES ($MODULES) holds a glob character; MODULES lists member directories, not globs." >&2
     exit 1
@@ -44,9 +48,9 @@ if [[ $(LC_ALL=C sort -u <<< "$members") != "$modules" ]]; then
     exit 1
 fi
 
-python3 "$DEVKIT/scripts/python/duplication.py" check-config
-python3 "$DEVKIT/scripts/python/anchored_match.py" check-config
-python3 "$DEVKIT/scripts/python/uv_project.py" vulture-paths > /dev/null
+python3 -I "$DEVKIT/scripts/python/duplication.py" check-config
+python3 -I "$DEVKIT/scripts/python/anchored_match.py" check-config
+python3 -I "$DEVKIT/scripts/python/uv_project.py" vulture-paths > /dev/null
 
 # shellcheck source=SCRIPTDIR/../lib/get_uv.sh
 UV_BOOTSTRAP=false . "$DEVKIT/scripts/lib/get_uv.sh"

@@ -18,7 +18,7 @@ devkit is written against this page; change it here first.
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
 | `pyproject.toml` | uv: the package, or a virtual workspace root (no `[project]` table) whose members are the packages; its `dev` dependency group lists ruff, pytest, pytest-cov, vulture, pip-audit and uv, and `[tool.vulture]` sets `paths` (see uv projects) |
-| `.python-version` | uv: the CPython version, `major.minor` or `major.minor.patch` |
+| `.python-version` | uv: the CPython version, `major.minor` or `major.minor.patch`, 3.11 or later |
 | `uv.lock` | uv: committed; `make install` syncs `.venv` from it and never rewrites it |
 | `.gitignore` entry `/.devkit` | The link `devkitw` creates; a uv project also ignores `/.venv` |
 | `docs/decisions.md` | Optional: the project's decisions log, whose entry format `lint-decisions` checks (see Repository gates) |
@@ -253,6 +253,10 @@ include .devkit/make/python-uv.mk
 - Bash, `set -euo pipefail`, shellcheck-clean. Python helpers are
   stdlib-only and run under `python3` 3.11 or later; a script checks that
   floor with `python3_floor` from `scripts/lib/python.sh` before it runs one.
+  `make lint` runs the anchored-match gate's scan under `.venv`'s Python
+  instead (see uv projects). Every helper runs with `python3 -I`; one that
+  imports a sibling module puts its own directory first on `sys.path`, so
+  `-I` or `PYTHONSAFEPATH` does not break it.
 - They act on the project, never on devkit: `cd "$PROJECT_ROOT"` first, and
   resolve project files from `$PROJECT_ROOT`, devkit files from `$DEVKIT`.
 - Shared helpers live in `scripts/lib/` and are sourced as
@@ -1012,8 +1016,9 @@ run the tools from `.venv`.
   `uv.lock` pins uv; neither is a profile variable. `make check` fails, one
   `ERROR` line with its remedy each, when `python3` is older than 3.11,
   when `COVERAGE_FLOOR` is unset or not a percent from 0 to 100, when
-  `.python-version` is missing or no `major.minor[.patch]`, when `MODULES`
-  holds a glob character or differs from the members `uv.lock` records,
+  `.python-version` is missing, no `major.minor[.patch]` or older than 3.11
+  (`make lint`'s anchored-match gate runs under `.venv`'s Python), when
+  `MODULES` holds a glob character or differs from the members `uv.lock` records,
   when the root `pyproject.toml` sets no `[tool.vulture] paths`, when
   devkit's copy of the uv `uv.lock` pins is not installed, when `.venv` is
   missing, when its Python's version differs from the pin (`major.minor`,
@@ -1109,18 +1114,19 @@ run the tools from `.venv`.
   (each file is read on its own, so a pattern compiled in one module and used in
   another is not checked), the `regex` module and `PurePath.match`. A `$` in a
   `(?x)` or `(?#…)` comment is a known false positive: accept it; an unbalanced
-  `[` inside such a comment can also hide a later `$`. It parses with the
-  `python3` on `PATH`, not `.venv`'s, so that one must parse the project's
-  syntax: a file it cannot parse, or cannot read, fails the run, naming the
-  file, the
-  version and the interpreter. The table is optional; a project without one
-  accepts nothing. `make check` fails, one `ERROR` line with its remedy each,
-  when `[python.anchored-match]` is not a table or holds a key other than
-  `accepted` or `excluded`, when either is not an array of tables, when an
-  entry sets an unknown key, when `file`, `function` or `reason` is missing
-  or blank, when two entries accept the same pair or exclude the same file
-  (`./src/a.py` counts as `src/a.py`), and when an accepted entry's `file` is
-  an excluded file (remove the accepted entry).
+  `[` inside such a comment can also hide a later `$`. It runs under `.venv`'s
+  Python with `-I -S`, so no `PYTHON*` variable, user site or site-packages
+  reaches it, and parses with the grammar of the CPython `.python-version`
+  pins: a file that Python does not parse, or that cannot be read, fails the
+  run, naming the file, the version and the interpreter. `make check`
+  validates the table with the `python3` on `PATH`. The table is optional; a
+  project without one accepts nothing. `make check` fails, one `ERROR` line with
+  its remedy each, when `[python.anchored-match]` is not a table or holds a key
+  other than `accepted` or `excluded`, when either is not an array of tables,
+  when an entry sets an unknown key, when `file`, `function` or `reason` is
+  missing or blank, when two entries accept the same pair or exclude the same
+  file (`./src/a.py` counts as `src/a.py`), and when an accepted entry's `file`
+  is an excluded file (remove the accepted entry).
 - The copy-paste gate, the last step of `make lint`, runs jscpd at the
   closure `jscpd/package-lock.json` pins, installed and audited like
   markdownlint-cli (see `lint-md`); installed on first use, it needs `node`

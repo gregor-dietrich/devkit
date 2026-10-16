@@ -22,7 +22,7 @@ spotbugs=com.github.spotbugs:spotbugs-maven-plugin pmd=org.apache.maven.plugins:
 
 # Skip when the selection leaves the frontend out: the gate is about its committed manifest.
 if [[ $FRONTEND_SELECTED == true ]]; then
-    python3 "$DEVKIT/scripts/java/check_frontend_deps.py" "$FRONTEND_DIR"
+    python3 -I "$DEVKIT/scripts/java/check_frontend_deps.py" "$FRONTEND_DIR"
 fi
 
 echo "Lint checks completed."

@@ -108,13 +108,12 @@ whole repository, then the language gates. Requirements: git, GNU make,
 ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3 (3.11 or
 later); fetching a devkit release on a cache miss also needs the running UID to
 have a passwd entry, which ssh-keygen requires (a container run with an
-arbitrary `-u` UID needs one added); a uv project needs `sha256sum` or
-`shasum`, and, for the first `make install` of each uv `uv.lock` pins,
-python3's venv and pip and the index pip is configured for (PyPI by
-default), and a `python3` on `PATH` (not `.venv`'s) that parses the project's
-syntax, for the anchored-match gate. `make lint` also needs node (22.22.2
-or later) with npm, for markdownlint and a uv project's copy-paste gate
-(jscpd), and `make format` needs them for `format-md`, which fixes the
+arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or later
+in `.python-version`, needs `sha256sum` or `shasum`, and, for the first
+`make install` of each uv `uv.lock` pins, python3's venv and pip and the
+index pip is configured for (PyPI by default). `make lint` also needs node
+(22.22.2 or later) with npm, for markdownlint and a uv project's copy-paste
+gate (jscpd), and `make format` needs them for `format-md`, which fixes the
 Markdown.
 `make lint` also needs curl, tar and `sha256sum` or `shasum`, which fetch
 and verify the pinned gitleaks once. So does the first target of a Maven
@@ -311,6 +310,14 @@ copies in `~/.cache/devkit/uv` (or `$XDG_CACHE_HOME/devkit/uv`) are unused;
 `chmod -R u+w ~/.cache/devkit/uv && rm -rf ~/.cache/devkit/uv` removes
 them. A cache hit is not re-verified, so `devkit/tools` is not restored from
 a shared CI cache.
+
+The anchored-match gate now parses with `.venv`'s Python, the CPython
+`.python-version` pins, so a newer `python3` put first on `PATH` only for
+that gate can go. A file that only a Python newer than the pin parses now
+fails `make lint`: fix it, or exclude it with a
+`[[python.anchored-match.excluded]]` entry. `make check` now fails on a
+`.python-version` older than 3.11: raise it with `requires-python`, then
+`uv lock` and `make install`.
 
 ### Upgrading from v0.6.x
 

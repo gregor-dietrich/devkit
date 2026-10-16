@@ -69,6 +69,7 @@ required="does not inherit de.vptr.devkit:devkit-parent, which devkit requires s
 
 project "$(parent)$own"
 expect "devkit's parent at the pinned version passes" 0 "$passed"
+PYTHONSAFEPATH=1 expect "the check runs under PYTHONSAFEPATH=1" 0 "$passed"
 project "$(parent)$own" ""
 expect "a pom without the POM namespace passes" 0 "$passed"
 project "$own"

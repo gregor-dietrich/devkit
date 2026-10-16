@@ -33,7 +33,7 @@ set --
 for module in $SELECTED; do
     set -- "$@" "$module/target/site/jacoco/jacoco.csv"
 done
-python3 "$DEVKIT/scripts/java/coverage.py" "$REPORT" "$@"
+python3 -I "$DEVKIT/scripts/java/coverage.py" "$REPORT" "$@"
 
 if [ "$OPEN_REPORT" = true ]; then
     xdg-open "$REPORT" 2>/dev/null || open "$REPORT" 2>/dev/null || echo "Cannot open $REPORT" >&2

@@ -110,9 +110,11 @@
 #          audit); ruff's walk must skip the .devkit link, and nothing but
 #          caches and .venv may change (uv.lock included). Then break copies
 #          and expect lint (format, an unused import, an unused function, a
-#          duplicated test module), test (coverage, coverage not activated),
-#          install (a stale uv.lock), check (a tool missing from .venv, no
-#          pytest-cov, the Python pin, its format, no .python-version,
+#          duplicated test module, an unparseable file only the anchored-match
+#          gate reads, which it must report with .venv's Python), test
+#          (coverage, coverage not activated), install (a stale uv.lock),
+#          check (a tool missing from .venv, no pytest-cov, the Python pin, a
+#          Python pin below 3.11, its format, no .python-version,
 #          COVERAGE_FLOOR unset or not a percent, no install, MODULES against
 #          the workspace or as a glob, no [python.duplication] or
 #          [tool.vulture] paths) and audit (a vulnerable dependency) to fail
@@ -946,6 +948,14 @@ py_duplicated() { # a test module, one test longer, copied whole: a clone over 5
     make_says fail "$dir" lint "duplicated code not accepted in devkit.toml: tests/test_greeter.py  ~  tests/test_greeter_copy.py"
 }
 
+py_venv_parses() { # make lint's anchored-match gate reports a file only .venv's Python reads, by that Python
+  local dir=$work/py-venv-parses
+  py_copy single venv-parses installed &&
+    printf '\n[tool.ruff]\nextend-exclude = ["broken.py"]\n' >>"$dir/pyproject.toml" &&
+    printf 'def broken(:\n' >"$dir/broken.py" &&
+    make_says fail "$dir" lint "ERROR: cannot parse broken.py with Python 3.13" "/.venv/bin/python): SyntaxError:"
+}
+
 python_negatives() {
   local greeter=src/devkit_fixture/greeter.py test=tests/test_greeter.py
   local quotes="s/f\"Hello, {name}\"/f'Hello, {name}'/" import='s/^"""Builds greetings."""$/&\n\nimport os/'
@@ -966,6 +976,8 @@ python_negatives() {
   py_negative coverage-activation test "wrote no coverage report" single installed pyproject.toml 's/--cov=src //'
   py_negative stale-lock install "needs to be updated" single "" pyproject.toml 's/^dependencies = \[\]/dependencies = ["urllib3"]/'
   py_negative python-pin check ".python-version pins 3.99" single installed .python-version 's/.*/3.99/'
+  py_negative python-floor check ".python-version pins 3.10, but devkit needs CPython 3.11 or later" single "" .python-version 's/.*/3.10/'
+  check "python-uv-single: make lint's anchored-match gate parses with .venv's Python" py_venv_parses
   py_negative python-patch-pin check ".python-version pins 3.13.99" single installed .python-version 's/.*/3.13.99/'
   py_negative python-pin-format check "major.minor" single "" .python-version 's/.*/3/'
   check "python-uv-single: a missing .python-version fails make check" \
