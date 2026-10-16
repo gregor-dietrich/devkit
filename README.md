@@ -291,6 +291,19 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
 
+### Upgrading from v0.7.x
+
+Run `make hooks` to refresh the git hooks: `pre-push` then also warns, and
+`make gate` no longer records HEAD, while git ignores a file pytest reads in a
+uv project (one with a tracked root `pyproject.toml`): `pytest.toml`,
+`.pytest.toml`, `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`,
+`setup.cfg` or `.coveragerc` in a directory holding a tracked `pyproject.toml`
+or above one, or a `conftest.py` outside `.venv`, other virtual environments
+and the directories pytest skips by default. Committing or removing the file
+restores the record. Both also count `PYTEST_PLUGINS` and `COVERAGE_RCFILE`
+being set; unsetting them restores it. `make check` warns that the hooks are
+stale until `make hooks` has run.
+
 ### Upgrading from v0.6.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,

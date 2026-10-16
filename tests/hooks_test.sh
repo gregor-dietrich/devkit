@@ -18,7 +18,7 @@ trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) CI FAIL GIT_CEILING_DIRECTORIES
 # What the hooks and make gate react to: an ambient one would change the cases.
-unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS MAVEN_SKIP_RC \
+unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS PYTEST_PLUGINS COVERAGE_RCFILE MAVEN_SKIP_RC \
   X Y D SEL NOPE F d p r MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 export HOME=$work/home GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
@@ -388,7 +388,9 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
     "MAVEN_OPTS=-XX:StartFlightRecording:help|MAVEN_OPTS holds -XX:StartFlightRecording:help (it can skip tests)." \
     "JAVA_TOOL_OPTIONS=-Xmx1g -XX:StartFlightRecording=help|JAVA_TOOL_OPTIONS holds -XX:StartFlightRecording=help (it can skip tests)." \
     "MAVEN_OPTS=-Dfoo=help|MAVEN_OPTS holds -D (it can skip tests)." \
-    "PYTEST_ADDOPTS=-k x|PYTEST_ADDOPTS is set (it can deselect tests)."; do
+    "PYTEST_ADDOPTS=-k x|PYTEST_ADDOPTS is set (it can deselect tests)." \
+    "PYTEST_PLUGINS=x|PYTEST_PLUGINS is set (it can deselect tests)." \
+    "COVERAGE_RCFILE=x|COVERAGE_RCFILE is set (it can skew coverage)."; do
     n=$((n + 1))
     var=${spec%%|*}
     g commit -q --no-verify --allow-empty -m "env$n"
@@ -1239,8 +1241,64 @@ case_gate_pom_scan_failure() { # a scan that fails refuses to record, and the ho
   say git push -q origin main
   [[ $rc == 0 && $out == *"WARNING: could not scan the project's POMs; the gate runs anyway."* ]] && logged "$both"
 }
+pytest_pre="git ignores files pytest reads:" pytest_post="(they can deselect tests or skew coverage)"
+case_gate_ignored_pytest() { # files pytest reads, ignored by git
+  local f
+  for f in pytest.ini pytest.toml .pytest.toml .pytest.ini tox.ini setup.cfg .coveragerc; do
+    pomproj pyproject.toml '[project]'
+    ignored "$f"
+    norecord "$pytest_pre $f $pytest_post" || return 1
+  done
+  pomproj pyproject.toml '[project]' packages/core/pyproject.toml '[project]'
+  ignored packages/core/pytest.ini packages/pyproject.toml
+  norecord "$pytest_pre packages/core/pytest.ini, packages/pyproject.toml $pytest_post" || return 1
+  pomproj pyproject.toml '[project]'
+  ignored tests/conftest.py packages/core/tests/conftest.py
+  norecord "$pytest_pre packages/core/tests/conftest.py, tests/conftest.py $pytest_post" || return 1
+  pomproj pyproject.toml '[project]'
+  echo pytest.ini >"$work/excludes"
+  g config core.excludesFile "$work/excludes"
+  echo x >"$clone/pytest.ini"
+  norecord "$pytest_pre pytest.ini $pytest_post" || return 1
+  if ! unwarned; then
+    # Not read, or not counted: recorded.
+    pomproj pyproject.toml '[project]'
+    ignored .venv/lib/p/conftest.py venv/conftest.py build/conftest.py dist/conftest.py node_modules/conftest.py x.egg/conftest.py \
+      env/pyvenv.cfg env/lib/p/conftest.py docs/pytest.ini
+    mkdir -p "$clone/nested"
+    git init -q "$clone/nested"
+    echo x >"$clone/nested/conftest.py"
+    echo x >"$clone/nested/pytest.ini"
+    echo /nested/ >>"$clone/.git/info/exclude"
+    yesrec || return 1
+    pomproj pyproject.toml '[project]' pytest.ini x
+    yesrec || return 1
+    pomproj other.txt x
+    ignored pytest.ini tests/conftest.py
+    yesrec || return 1
+    pomproj packages/core/pyproject.toml '[project]'
+    ignored pytest.ini
+    yesrec || return 1
+  fi
+}
+case_gate_ignored_pytest_during() { # an ignored file that appears during the run
+  pomproj pyproject.toml '[project]'
+  norecord "git ignores files pytest reads that appeared during the run: pytest.ini $pytest_post" \
+    DURING='echo x >pytest.ini && echo /pytest.ini >>.git/info/exclude'
+}
+case_pre_push_ignored_pytest() { # the hook warns on the same files, and still gates
+  pomproj pyproject.toml '[project]'
+  ignored pytest.ini tests/conftest.py .venv/lib/p/conftest.py
+  git init -q "$clone/nested"
+  echo x >"$clone/nested/conftest.py"
+  echo /nested/ >>"$clone/.git/info/exclude"
+  install
+  : >"$HOOK_LOG"
+  say git push -q origin main
+  [[ $rc == 0 && $out == *"WARNING: $pytest_pre pytest.ini, tests/conftest.py $pytest_post."* ]] && logged "$both"
+}
 case_jvm_screen_parity() { # the hook stays self-contained, so the two copies must not drift
-  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
+  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn ignored_pytest identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
   alt=$(IFS='|' && echo "${names[*]}")
   local extract="/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^($alt)\\(\\)/,/^}/p"
   a=$(sed -En "$extract" "$root/scripts/gate.sh")
@@ -1310,6 +1368,10 @@ case_gate_environment() { # variables that can skip or deselect tests
   norecord "MAVEN_OPTS holds -version (it can skip tests)" LC_ALL=C.UTF-8 $'MAVEN_OPTS=\xe9 -version' || return 1 # invalid byte, UTF-8 locale
   : >"$HOOK_LOG"
   norecord "PYTEST_ADDOPTS is set (it can deselect tests)" "PYTEST_ADDOPTS=-k x" || return 1
+  : >"$HOOK_LOG"
+  norecord "PYTEST_PLUGINS is set (it can deselect tests)" PYTEST_PLUGINS=x || return 1
+  : >"$HOOK_LOG"
+  norecord "COVERAGE_RCFILE is set (it can skew coverage)" COVERAGE_RCFILE=x || return 1
   : >"$HOOK_LOG"
   norecord "JAVA_TOOL_OPTIONS holds -D (it can skip tests)" 'JAVA_TOOL_OPTIONS=-Xmx1g "-Dx=a b"' || return 1
   : >"$HOOK_LOG"
@@ -1456,6 +1518,7 @@ t "gate.sh and pre-push define the JVM options screen, the settings.xml checks, 
 t "pre-push warns on variables, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
 t "pre-push warns on a settings.xml activeProfile it does not define and on ignored .mvn/ files, not on a directory at ~/.m2/extensions.xml" case_pre_push_home_files
 t "pre-push warns on POM profiles activated by an environment variable or an untracked file, in modules and parents too, and still gates" case_pre_push_poms
+t "pre-push warns on ignored files pytest reads, not on a venv's or a nested repository's, and still gates" case_pre_push_ignored_pytest
 t "pre-push: outer make flags do not reach the stages" case_pre_push_outer_flags
 t "a failing gate part fails the hook, a failing notice never does" case_part_status
 t "a copy does nothing outside a devkit project" case_outside_project
@@ -1491,10 +1554,12 @@ t "pre-push still gates after another commit, and on any not strictly clean tree
 t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
 t "make gate refuses ONLY, also on the make command line" case_gate_only
 t "make gate records nothing from a tree not strictly clean at the start" case_gate_dirty_start
-t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, a JVM option that skips or replaces the tests, a mavenrc, a settings.xml with properties or ~/.m2/extensions.xml" case_gate_environment
+t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, PYTEST_PLUGINS, COVERAGE_RCFILE, a JVM option that skips or replaces the tests, a mavenrc, a settings.xml with properties or ~/.m2/extensions.xml" case_gate_environment
 t "make gate records nothing for a settings.xml activeProfile it does not define, but does for a directory at ~/.m2/extensions.xml" case_gate_home_files
 t "make gate records nothing while git ignores a .mvn/ file Maven reads, but does under .mvn/wrapper/ and for a committed one" case_gate_ignored_mvn
 t "make gate records nothing for an ignored .mvn/ file that appeared during the run" case_gate_ignored_mvn_during
+t "make gate records nothing while git ignores a file pytest reads, but does for a venv's conftest.py, a nested repository, a committed file and a project with no tracked root pyproject.toml" case_gate_ignored_pytest
+t "make gate records nothing for an ignored file pytest reads that appeared during the run" case_gate_ignored_pytest_during
 t "make gate records nothing for a POM profile activated by an environment variable, but does for an unset or empty one and a commented-out profile" case_gate_pom_env
 t "make gate reads the POMs of modules, profile modules and parents inside the tree, and nothing outside it" case_gate_pom_scope
 t "make gate records nothing for a POM profile activated by an untracked or ignored file or a property path, but does for a tracked or absent one" case_gate_pom_files
