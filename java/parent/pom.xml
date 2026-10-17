@@ -358,9 +358,9 @@
                   <includedLicense>Eclipse Public License - v 2.0</includedLicense>
                   <includedLicense>Eclipse Public License 1.0</includedLicense>
                   <includedLicense>Eclipse Public License 2.0</includedLicense>
-                  <includedLicense>Eclipse Public License, Version 2.0</includedLicense>
                   <includedLicense>Eclipse Public License v. 2.0</includedLicense>
                   <includedLicense>Eclipse Public License v2.0</includedLicense>
+                  <includedLicense>Eclipse Public License, Version 2.0</includedLicense>
                   <!-- Public domain -->
                   <includedLicense>Public Domain</includedLicense>
                   <includedLicense>Public Domain, per Creative Commons CC0</includedLicense>
@@ -373,8 +373,8 @@
                   <includedLicense>UPL-1.0</includedLicense>
                   <includedLicense>Universal Permissive License, Version 1.0</includedLicense>
                   <!-- Weak copyleft: CDDL, LGPL, MPL -->
-                  <includedLicense>COMMON DEVELOPMENT AND DISTRIBUTION LICENSE (CDDL) Version 1.0</includedLicense>
                   <includedLicense>CDDL + GPLv2 with classpath exception</includedLicense>
+                  <includedLicense>COMMON DEVELOPMENT AND DISTRIBUTION LICENSE (CDDL) Version 1.0</includedLicense>
                   <includedLicense>GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1</includedLicense>
                   <includedLicense>GNU Lesser General Public License</includedLicense>
                   <includedLicense>GNU Library General Public License v2.1 or later</includedLicense>
@@ -384,10 +384,10 @@
                   <includedLicense>Mozilla Public License, Version 2.0</includedLicense>
                   <!-- GPL with the Classpath Exception. Not the Universal FOSS Exception: it
                        covers only FOSS software, so a FOSS project appends it. -->
-                  <includedLicense>GPL-2.0-with-classpath-exception</includedLicense>
-                  <includedLicense>GPL2 w/ CPE</includedLicense>
                   <includedLicense>GNU General Public License, version 2 with the GNU Classpath Exception</includedLicense>
                   <includedLicense>GNU General Public License, version 2, with the Classpath Exception</includedLicense>
+                  <includedLicense>GPL-2.0-with-classpath-exception</includedLicense>
+                  <includedLicense>GPL2 w/ CPE</includedLicense>
                   <includedLicense>The GNU General Public License (GPL), Version 2, With Classpath Exception</includedLicense>
                   <!-- No license declared -->
                   <includedLicense>Unknown license</includedLicense>
