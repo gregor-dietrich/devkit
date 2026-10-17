@@ -1018,9 +1018,11 @@ run the tools from `.venv`.
   when `COVERAGE_FLOOR` is unset or not a percent from 0 to 100, when
   `.python-version` is missing, no `major.minor[.patch]` or older than 3.11
   (`make lint`'s anchored-match gate runs under `.venv`'s Python), when
-  `MODULES` holds a glob character or differs from the members `uv.lock` records,
-  when the root `pyproject.toml` sets no `[tool.vulture] paths`, when
-  devkit's copy of the uv `uv.lock` pins is not installed, when `.venv` is
+  `MODULES` holds a glob character or differs from the members `uv.lock`
+  records, when the root `pyproject.toml` sets no `[tool.vulture] paths`,
+  when `uv.lock` pins no single usable uv version or lists a uv wheel
+  without a sha256 hash, when devkit's copy of the uv `uv.lock` pins is not
+  installed, when `.venv` is
   missing, when its Python's version differs from the pin (`major.minor`,
   or the patch too when the pin names one), when `uv sync --check --frozen
   --offline` cannot confirm `.venv` matches `uv.lock` (drift: run `make
@@ -1029,13 +1031,15 @@ run the tools from `.venv`.
   check-config`, see the copy-paste gate below) and `[python.anchored-match]`
   (`anchored_match.py check-config`, see the anchored-match gate below).
 - uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, devkit's per-user copy of
-  the uv `uv.lock` pins,
-  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/uv-<version>-<key>/bin/uv`;
-  `<key>` comes from the sha256 of every uv wheel the lock records (hashed
-  with `sha256sum` or `shasum`), so projects that lock the same uv by the
-  same hashes share one copy and a lock with other hashes gets its own.
-  devkit never runs a `uv` on `PATH`, nor the one inside `.venv`. Only
-  `make install` creates the copy, read-only, when it is missing, and
+  the uv `uv.lock` pins, `uv-<version>-<os>-<arch>-<key>/bin/uv` in
+  `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools`; `<os>-<arch>` is
+  `uname -s` and `uname -m`, so a cache that machines of another platform
+  share keeps a copy each, and `<key>` comes from the sha256 of every uv
+  wheel the lock records (hashed with `sha256sum` or `shasum`), so projects
+  that lock the same uv by the same hashes share one copy and a lock with
+  other hashes gets its own. devkit never runs a `uv` on `PATH`, nor the
+  one inside `.venv`. Only `make install` creates the copy, read-only, when
+  it is missing, and
   `check` and `audit` fail until then: pip, in a throwaway venv of
   `python3`, installs the machine's uv wheel from the index pip's own
   configuration names (PyPI unless `pip.conf` or a `PIP_*` variable such as
@@ -1124,7 +1128,8 @@ run the tools from `.venv`.
   Python with `-I -S`, so no `PYTHON*` variable, user site or site-packages
   reaches it, and parses with the grammar of the CPython `.python-version`
   pins: a file that Python does not parse, or that cannot be read, fails the
-  run, naming the file, the version and the interpreter. `make check`
+  run, naming the file, and for a parse failure the version and the
+  interpreter. `make check`
   validates the table with the `python3` on `PATH`. The table is optional; a
   project without one accepts nothing. `make check` fails, one `ERROR` line with
   its remedy each, when `[python.anchored-match]` is not a table or holds a key

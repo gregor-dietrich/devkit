@@ -2,9 +2,10 @@
 
 # Sourced by the scripts/python/*.sh after they cd to $PROJECT_ROOT. Exports UV_CMD, devkit's
 # per-user copy of exactly the uv uv.lock pins (its uv package):
-#   ${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/uv-<version>-<key>/bin/uv
-# where <key> is the first 16 hex digits of the sha256 of the requirements file pip installs it
-# from (the version and every wheel hash uv.lock lists for it). The copy is installed only under
+#   ${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/uv-<version>-<os>-<arch>-<key>/bin/uv
+# where <os>-<arch> is uname's (a cache shared by machines of another platform keeps a copy each,
+# as gitleaks' does) and <key> is the first 16 hex digits of the sha256 of the requirements file
+# pip installs it from (the version and every wheel hash uv.lock lists for it). The copy is installed only under
 # UV_BOOTSTRAP=true (make install), by pip in a throwaway venv, from the index pip's own
 # configuration names, and pip accepts only a wheel whose hash the lock lists. Else a missing copy
 # fails, naming make install.
@@ -36,8 +37,9 @@ uv_tools=${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools
     echo "ERROR: the tools cache root $uv_tools is not an absolute path; fix XDG_CACHE_HOME or HOME." >&2
     exit 1
 }
-uv_key=$(sha256_of <(printf '%s\n' "$uv_reqs")) || exit
-uv_dir=$uv_tools/uv-$UV_PIN-${uv_key:0:16}
+uv_key=$(printf '%s\n' "$uv_reqs" | sha256_of -) || exit
+uv_platform=$(uname -s)-$(uname -m) || exit
+uv_dir=$uv_tools/uv-$UV_PIN-$uv_platform-${uv_key:0:16}
 UV_CMD=$uv_dir/bin/uv
 
 uv_is_pin() { # uv_is_pin PATH: PATH runs and reports the pinned version ("uv X" or "uv X (...)")
@@ -49,7 +51,7 @@ uv_is_pin() { # uv_is_pin PATH: PATH runs and reports the pinned version ("uv X"
 uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps stay its own
     (
         mkdir -p "$uv_tools"
-        tmp=$(mktemp -d "$uv_tools/.tmp.XXXXXX")
+        tmp=$(mktemp -d "$uv_tools/.tmp.XXXXXX") || exit 1
         trap 'sealed_remove "$tmp"' EXIT
         trap 'exit 1' HUP INT TERM
         echo "Installing uv $UV_PIN, hash-verified from uv.lock, into $uv_dir ..."
@@ -68,7 +70,7 @@ uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps sta
             exit 1
         }
         [[ -x $tmp/venv/bin/uv ]] || {
-            echo "ERROR: pip reported success but installed no uv into its throwaway venv; PIP_TARGET, PIP_PREFIX or PIP_USER (in the environment or pip.conf) redirect it: unset them for make install." >&2
+            echo "ERROR: pip reported success but installed no uv into its throwaway venv; PIP_TARGET, PIP_PREFIX, PIP_ROOT or PIP_DRY_RUN (in the environment or pip.conf) redirect or skip it: unset them for make install." >&2
             exit 1
         }
         mkdir "$tmp/bin"
@@ -84,7 +86,8 @@ uv_bootstrap() { # install uv $UV_PIN into $uv_dir; a subshell, so its traps sta
 
 if [[ ! -e $uv_dir && ! -L $uv_dir ]]; then
     if [[ ${UV_BOOTSTRAP:-} == true ]]; then
-        uv_bootstrap
+        # || exit: fail closed even where the caller's errexit is off (a || list, a sourcing test).
+        uv_bootstrap || exit
     else
         echo "ERROR: uv $UV_PIN, as uv.lock pins it, is not installed in $uv_dir; run make install." >&2
         exit 1

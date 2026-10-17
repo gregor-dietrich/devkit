@@ -45,9 +45,9 @@
 #          first use.
 #   floor  bootstrap the uv the python-uv-single fixture's uv.lock pins, have it
 #          create venvs of CPython 3.11 (the helpers' floor) and 3.14 (the
-#          newest, for the anchored-match gate that runs on the project's
-#          Python), check each version, and run every shell-part test (not
-#          the shellcheck run, not the parent checks) under 3.11 and the
+#          newest stable, for the anchored-match gate that runs on the
+#          project's Python), check each version, and run every shell-part
+#          test (not the shellcheck run, not the parent checks) under 3.11 and the
 #          anchored_match tests under 3.14; uv's downloads stay in the temp
 #          dir, in the python part's isolation. Needs what the shell part
 #          needs, python3 with venv and pip, and the network (PyPI, github.com
@@ -137,11 +137,11 @@
 #          fails, and JUNIT_DIR=reports writes one report per member into the
 #          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
 #          later), python3 >= 3.11 with venv and pip, curl, tar, sha256sum or
-#          shasum and the network (PyPI, its advisory API, github.com, and
-#          uv's Python downloads when no CPython of the pin is installed),
-#          and node with npm for the copy-paste gate, which installs jscpd
-#          from the npm registry; the fixtures hold no Markdown, so lint-md
-#          does not run markdownlint.
+#          shasum and the network (PyPI, its advisory API, api.osv.dev,
+#          github.com, and uv's Python downloads when no CPython of the pin
+#          is installed), and node with npm for the copy-paste gate, which
+#          installs jscpd from the npm registry; the fixtures hold no
+#          Markdown, so lint-md does not run markdownlint.
 set -euo pipefail
 if ((BASH_VERSINFO[0] < 4)); then
   echo "ERROR: tests/run.sh needs bash 4 or later (globstar); this is bash $BASH_VERSION." >&2
@@ -1126,7 +1126,9 @@ for part in "$@"; do
   }
   seen+="$part "
 done
-for part in "$@"; do "${part}_part"; done
+# A fixed order, whatever the command line's: floor must follow python, whose first make install
+# must find no uv in the shared cache to show that it bootstraps one.
+for part in shell java python floor; do [[ $seen != *" $part "* ]] || "${part}_part"; done
 [[ $fails == 0 ]] || {
   echo "$fails check(s) failed"
   exit 1

@@ -100,7 +100,7 @@ tools_of() { echo "$cache/devkit/tools"; }
 cached_dir() {
   local key
   key=$(sha256_of <(printf 'uv==%s \\\n    --hash=sha256:%s\n' "$pin" "${1:-$hash}"))
-  echo "$cache/devkit/tools/uv-$pin-${key:0:16}"
+  echo "$cache/devkit/tools/uv-$pin-$(uname -s)-$(uname -m)-${key:0:16}"
 }
 cached_uv() { echo "$(cached_dir "$@")/bin/uv"; }
 read_only() { [[ -z $(find "$1" ! -type l -perm -u+w) ]]; } # files and directories; root-safe
@@ -166,7 +166,7 @@ case_bootstrap() {
   run "$work/python" -- UV_BOOTSTRAP=true
   key=$(sha256_of "$work/pip-requirements")
   [[ $rc == 0 && $out == *"Installing uv $pin"* && $out == *$'\n'"$(cached_uv)" ]] &&
-    [[ $(ls -A "$(tools_of)") == "uv-$pin-${key:0:16}" && $(ls -A "$(cached_dir)/bin") == uv ]] &&
+    [[ $(ls -A "$(tools_of)") == "uv-$pin-$(uname -s)-$(uname -m)-${key:0:16}" && $(ls -A "$(cached_dir)/bin") == uv ]] &&
     read_only "$(cached_dir)" &&
     grep -q -- '-I -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps -r ' \
       "$work/pip-args" &&
@@ -189,7 +189,7 @@ case_bootstrap_pip_fails() {
 }
 case_bootstrap_pip_installs_nothing() {
   run "$work/python" -- UV_BOOTSTRAP=true PIP_NOOP=1
-  failed_saying "pip reported success but installed no uv into its throwaway venv; PIP_TARGET, PIP_PREFIX or PIP_USER" &&
+  failed_saying "pip reported success but installed no uv into its throwaway venv; PIP_TARGET, PIP_PREFIX, PIP_ROOT or PIP_DRY_RUN" &&
     [[ -z $(ls -A "$(tools_of)") ]]
 }
 case_pip_index() {

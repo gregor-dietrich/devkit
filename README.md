@@ -294,8 +294,8 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 ### Upgrading from v0.7.x
 
 In a uv project, devkit now runs only its own copy of the uv `uv.lock`
-pins, never a `uv` on `PATH`, and keeps a copy per set of hashes the lock
-records for that uv, not per version ([uv
+pins, never a `uv` on `PATH`, and keeps a copy per platform and set of
+hashes the lock records for that uv, not per version ([uv
 projects](docs/contract.md#uv-projects)). After the bump, run `make install`
 once on each machine: `make check` and `make audit` fail, naming it, until
 then, and a CI job that runs either on a restored `.venv` runs `make install`
