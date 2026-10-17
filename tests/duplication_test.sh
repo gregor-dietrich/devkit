@@ -109,6 +109,8 @@ expect "an unknown key in an accepted entry fails" 1 check-config -- \
 config "$table" 'paths = ["src", "src/c.py"]' "$entry" "$ab" 'reason = "deliberate"'
 expect "a valid table passes check-config" 0 check-config -- \
   "[python.duplication]: jscpd scans the 3 Python file(s) git lists under src, src/c.py."
+PYTHONSAFEPATH=1 expect "check-config finds project_files under PYTHONSAFEPATH=1" 0 check-config -- \
+  "[python.duplication]: jscpd scans the 3 Python file(s) git lists under src, src/c.py."
 mkdir "$proj/empty"
 touch "$proj/empty/notes.txt"
 config "$table" 'paths = ["empty"]'

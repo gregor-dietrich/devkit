@@ -20,7 +20,7 @@ python3_floor || exit 13
 
 # Maven reads devkit's parent POM only through the .devkit link; fail before any build whose pom
 # would make it look the parent up remotely. Its ERROR lines reach stderr.
-python3 "$DEVKIT/scripts/java/parent_check.py" > /dev/null || exit
+python3 -I "$DEVKIT/scripts/java/parent_check.py" > /dev/null || exit
 
 # Both checks above come first, so a bad python3 or parent fails offline, before the download.
 MVN_LAUNCHER=$("$DEVKIT/scripts/lib/pinned_maven.sh") || exit

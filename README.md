@@ -108,12 +108,12 @@ whole repository, then the language gates. Requirements: git, GNU make,
 ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3 (3.11 or
 later); fetching a devkit release on a cache miss also needs the running UID to
 have a passwd entry, which ssh-keygen requires (a container run with an
-arbitrary `-u` UID needs one added); a uv project needs python3's venv and
-pip only when no uv of the pinned version is on `PATH` or in devkit's
-cache, and a `python3` on `PATH` (not `.venv`'s) that parses the project's
-syntax, for the anchored-match gate. `make lint` also needs node (22.22.2
-or later) with npm, for markdownlint and a uv project's copy-paste gate
-(jscpd), and `make format` needs them for `format-md`, which fixes the
+arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or later
+in `.python-version`, needs `sha256sum` or `shasum`, and, for the first
+`make install` of each uv `uv.lock` pins, python3's venv and pip and the
+index pip is configured for (PyPI by default). `make lint` also needs node
+(22.22.2 or later) with npm, for markdownlint and a uv project's copy-paste
+gate (jscpd), and `make format` needs them for `format-md`, which fixes the
 Markdown.
 `make lint` also needs curl, tar and `sha256sum` or `shasum`, which fetch
 and verify the pinned gitleaks once. So does the first target of a Maven
@@ -132,7 +132,7 @@ points at another pin: run `make check`.
 
 devkit is its own consumer: `make lint-repo`, `make hooks` and `make gate`
 work here as in a project, and `make test` runs all of `tests/run.sh`, so
-the push gate needs what its java and python parts need. By default
+the push gate needs what its java, python and floor parts need. By default
 (`GATES=tree`) the targets run the working tree's own scripts, so each
 change is gated by itself. With `GATES=release` they run the release
 `devkit.toml` pins, fetched by `devkitw` as a consumer's is, so a change
@@ -290,6 +290,43 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
+
+### Upgrading from v0.7.x
+
+In a uv project, devkit now runs only its own copy of the uv `uv.lock`
+pins, never a `uv` on `PATH`, and keeps a copy per platform and set of
+hashes the lock records for that uv (and per libc and pointer width of
+`python3`), not per version ([uv
+projects](docs/contract.md#uv-projects)). After the bump, run `make install`
+once on each machine: `make check` and `make audit` fail, naming it, until
+then, and a CI job that runs either on a restored `.venv` runs `make install`
+first. The install needs python3's venv and pip even where a uv of the
+pinned version is on `PATH`: a CI image that provided only uv adds them
+(`python3-venv` on Debian and Ubuntu). pip still fetches the uv wheel from
+the index its own configuration names, and installs only a wheel whose
+sha256 `uv.lock` lists: a network that reaches PyPI only through a mirror,
+or has uv only on a private index, sets `index-url` in `pip.conf` or
+`PIP_INDEX_URL`; putting uv on `PATH` no longer works around it. Behind a
+TLS-inspecting proxy, pip also needs its own `cert` setting (`pip.conf` or
+`PIP_CERT`): a uv on `PATH` may have had its own trust configuration. The
+old copies in `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv` are unused by
+v0.8.x: once no project on the machine pins an older devkit, and while no
+devkit run is in progress, `chmod -R u+w "$d" && rm -rf "$d"` removes them,
+with `d` set to that directory. A cache hit is not re-verified, so
+`devkit/tools` is not restored from a shared CI cache.
+
+The anchored-match gate now parses with `.venv`'s Python, the CPython
+`.python-version` pins, so a newer `python3` put first on `PATH` only for
+that gate can go. A file that only a Python newer than the pin parses now
+fails `make lint`: fix it, or exclude it with a
+`[[python.anchored-match.excluded]]` entry. `make check` now fails on a
+`.python-version` older than 3.11, and `make lint` on a `.venv` whose
+Python is: raise it with `requires-python`, then `uv lock` and `make
+install`.
+
+`make audit` in a uv project now also queries OSV (api.osv.dev), which a
+network allowing only PyPI must open. It takes longer (about half a minute
+on a 100-pin lock) and can now fail on advisories PyPI did not list.
 
 ### Upgrading from v0.6.x
 

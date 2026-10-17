@@ -178,7 +178,7 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
             group = resolve(raw_group, properties)
             artifact = resolve(raw_artifact, properties)
             if group is None or artifact is None:
-                notes.append(f"{raw_group}:{raw_artifact}:{raw_version} — unresolved property, skipped")
+                notes.append(f"{raw_group}:{raw_artifact}:{raw_version}: unresolved property, skipped")
                 continue
 
             coordinate = Coordinate(group, artifact)
@@ -188,7 +188,7 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
 
             version = resolve(raw_version, properties)
             if version is None:
-                notes.append(f"{raw_group}:{raw_artifact}:{raw_version} — unresolved property, skipped")
+                notes.append(f"{raw_group}:{raw_artifact}:{raw_version}: unresolved property, skipped")
                 continue
 
             match = SINGLE_PLACEHOLDER.match(raw_version)

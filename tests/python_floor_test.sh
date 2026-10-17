@@ -77,4 +77,16 @@ printf '#!/bin/bash\nexit 127\n' >"$work/bin/python3"
 want="ERROR: devkit's Python helpers need python3 3.11 or later; found no working python3 on PATH."
 expect "lint-pins stops at the floor without a working python3" 1 "$root/scripts/pins.sh"
 
+# lint under a real python3, with a uv project whose .venv python is 3.10: devkit's one line, not tomllib's traceback.
+mkdir -p "$work/uvproj/.venv/bin"
+cat >"$work/uvproj/.venv/bin/python" <<'EOF2'
+#!/bin/bash
+[[ "$1 $2" == "-I -c" ]] && { echo 3.10.12; exit 1; }
+echo 'Traceback (most recent call last):' >&2
+exit 1
+EOF2
+chmod +x "$work/uvproj/.venv/bin/python"
+want="ERROR: devkit's Python helpers need $work/uvproj/.venv/bin/python 3.11 or later; found 3.10.12. Raise .python-version and requires-python to 3.11 or later, then uv lock and make install."
+FLOOR_PYBIN=$work/nostub FLOOR_PROJECT=$work/uvproj expect "uv lint stops at the floor of .venv's python" 1 "$root/scripts/python/lint.sh"
+
 [[ $fails == 0 ]]

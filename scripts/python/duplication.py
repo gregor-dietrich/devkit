@@ -21,6 +21,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, NamedTuple
 
+# The sibling is found under -I, -P and PYTHONSAFEPATH too, which keep the script directory off sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from project_files import Failure, python_files, python_table
 
 ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()

@@ -23,8 +23,9 @@ mkdir "$proj/src"
 config() { printf '%s\n' "$@" >"$proj/devkit.toml"; } # config LINE...: devkit.toml holds the LINEs
 
 # expect LABEL WANT-STATUS ARG... -- WANT-TEXT...: $driver ARGs end with
-# WANT-STATUS, saying every WANT-TEXT, and no Python traceback.
-driver=(python3 "$root/scripts/python/anchored_match.py")
+# WANT-STATUS, saying every WANT-TEXT, and no Python traceback. -W error, as -I drops
+# PYTHONWARNINGS: a warning the script lets through is a traceback.
+driver=(python3 -I -S -B -W error "$root/scripts/python/anchored_match.py")
 expect() {
   local label=$1 want=$2 args=() out rc=0 text ok=true
   shift 2
@@ -64,7 +65,7 @@ why='reason = "the caller strips the newline"'
 version=$(python3 -c 'import platform; print(platform.python_version())')
 exe=$(python3 -c 'import sys; print(sys.executable)')
 excl='[[python.anchored-match.excluded]]'
-remedy="run make lint with a python3 new enough for the project's syntax first on PATH, fix the file, or exclude it with an $excl entry in devkit.toml (file and a reason)"
+remedy="fix the file so that the Python .python-version pins parses it, or exclude it with an $excl entry in devkit.toml (file and a reason)"
 
 # Configuration.
 config '[devkit]' 'version = "v0.0.0"'
@@ -388,7 +389,7 @@ rm "$proj/src/deep.py" "$proj/src/long.py" "$proj/src/unary.py"
 printf 'import re\n\nx = "\\d"\nre.match("c$", x)\n' >"$proj/src/escape.py"
 expect "an invalid escape warns nothing and is still scanned" 1 run -- "src/escape.py:4 in <module>: 'c\$'"
 absent "an invalid escape warns nothing" "SyntaxWarning"
-PYTHONWARNINGS=error expect "an invalid escape parses under PYTHONWARNINGS=error" 1 run -- "src/escape.py:4 in <module>: 'c\$'"
+expect "an invalid escape parses with warnings as errors" 1 run -- "src/escape.py:4 in <module>: 'c\$'"
 rm "$proj/src/escape.py"
 
 # A search after leading global inline flags is anchored at the start too.

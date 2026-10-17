@@ -45,7 +45,7 @@ for member in $SELECTED; do
     echo "Testing $label..."
     (cd "$member" && "$pytest" --cov-branch --cov-report="json:$json" \
         ${JUNIT_DIR:+--junitxml="$JUNIT_DIR/$(name "$member").xml"})
-    python3 "$DEVKIT/scripts/python/coverage_floor.py" "$json" "$floor" "$label"
+    python3 -I "$DEVKIT/scripts/python/coverage_floor.py" "$json" "$floor" "$label"
 done
 
 echo "Tests completed."

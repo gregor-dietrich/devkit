@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [java]
-# [python], each part at most once (no argument runs all three). Prints
-# PASS/FAIL per check with its time and status. java and python share one temp
-# dir (TMPDIR is honoured) and the tree under test, published once.
+# [python] [floor], each part at most once (no argument runs all four). Prints
+# PASS/FAIL per check with its time and status. The parts always run in that
+# order, whatever the command line's: floor follows python, whose first make
+# install must bootstrap uv. floor, java and python share one temp dir (TMPDIR
+# is honoured); java and python also share the tree under test, published once
+# by whichever runs first.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/make_test.sh,
 #          tests/kill_test.sh, tests/check_frontend_deps_test.sh,
@@ -13,8 +16,10 @@
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/pinned_maven_test.sh, tests/mvn_checked_test.sh,
 #          tests/sealed_dir_test.sh,
-#          tests/coverage_floor_test.sh,
-#          tests/python_clean_test.sh, tests/java_clean_test.sh,
+#          tests/coverage_floor_test.sh, tests/coverage_test.sh,
+#          tests/version_check_test.sh, tests/python_invocations_test.sh,
+#          tests/python_clean_test.sh, tests/python_audit_test.sh,
+#          tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/anchored_match_test.sh,
 #          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh
 #          and tests/tag_test.sh,
@@ -42,6 +47,23 @@
 #          markdown/package.json and jscpd/package.json) with npm, which
 #          installs markdownlint-cli and jscpd from the npm registry on
 #          first use.
+#   floor  install the uv the python-uv-single fixture's uv.lock pins (the
+#          python part's copy, when it ran first), have it create venvs of
+#          CPython 3.11 (the helpers' floor) and 3.14 (newest_python, the
+#          newest stable, for the anchored-match gate that runs on the
+#          project's Python; a check fails when the pinned uv lists a newer
+#          stable minor), check each version, compile every scripts/**/*.py
+#          under each, and run every shell-part test (not the shellcheck run,
+#          not the parent checks) under each. uv uses an installed CPython of
+#          the minor before it downloads one. The floor's isolation: no uv
+#          configuration file (--no-config: the venvs are made under the temp
+#          dir, where uv would otherwise read a uv.toml from a parent
+#          directory), XDG_*, the
+#          pip cache and uv's Python downloads in the temp dir, no inherited
+#          UV_*, PIP_*, VIRTUAL_ENV or PYTHONPATH, no bytecode written;
+#          system-level uv configuration (/etc/uv) is not isolated. Needs what
+#          the shell part needs, python3 with venv and pip, and the network
+#          (PyPI, github.com for uv's Python downloads, the npm registry).
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
@@ -102,33 +124,39 @@
 #          an environment no later part inherits: user-level uv configuration
 #          (XDG_CONFIG_HOME), the caches and uv's Python downloads in the temp
 #          dir, no pip configuration file, no inherited UV_*, PIP_*,
-#          VIRTUAL_ENV or PYTHONPATH, and no uv of the fixtures' pin on PATH,
-#          so the first make install runs the hash-verified uv bootstrap;
-#          system-level uv configuration (/etc/uv) is not isolated. Then make
+#          VIRTUAL_ENV or PYTHONPATH; the first make install runs the
+#          hash-verified uv bootstrap, whatever uv is on PATH, and the second
+#          fixture reuses its copy; system-level uv configuration (/etc/uv) is
+#          not isolated. Then make
 #          help, install, check, lint, test, format and audit (nothing to
 #          audit); ruff's walk must skip the .devkit link, and nothing but
 #          caches and .venv may change (uv.lock included). Then break copies
 #          and expect lint (format, an unused import, an unused function, a
-#          duplicated test module), test (coverage, coverage not activated),
-#          install (a stale uv.lock), check (a tool missing from .venv, no
-#          pytest-cov, the Python pin, its format, no .python-version,
-#          COVERAGE_FLOOR unset or not a percent, no install, MODULES against
-#          the workspace or as a glob, no [python.duplication] or
-#          [tool.vulture] paths) and audit (a vulnerable dependency) to fail
-#          for that reason. Expect make format to fix a format and an
-#          unused-import break so that lint passes, and audit to pass on
-#          current runtime dependencies, one of them through a local path
-#          dependency. In the workspace, whose core is a package and app a
-#          virtual member: test ONLY=packages/app tests app alone, lint
+#          duplicated test module, an unparseable file only the anchored-match
+#          gate reads, which it must report with .venv's Python), run no .pth
+#          file of .venv's site-packages in that gate (with -S dropped, in a
+#          scratch copy of lint.sh, it must), test
+#          (coverage, coverage not activated), install (a stale uv.lock),
+#          check (a tool missing from .venv, no pytest-cov, the Python pin, a
+#          Python pin of 3.10 or 3.9, which fails, and of 3.11, which passes
+#          the floor and fails at the next check, its format, no
+#          .python-version, COVERAGE_FLOOR unset or not a percent, no install,
+#          MODULES against the workspace or as a glob, no [python.duplication] or
+#          [tool.vulture] paths) and audit (a vulnerable dependency, one only
+#          OSV lists) to fail for that reason. Expect make format to fix a
+#          format and an unused-import break so that lint passes, and audit
+#          to pass on current runtime dependencies, one of them through a
+#          local path dependency. In the workspace, whose core is a package
+#          and app a virtual member: test ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
 #          fails, and JUNIT_DIR=reports writes one report per member into the
 #          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
 #          later), python3 >= 3.11 with venv and pip, curl, tar, sha256sum or
-#          shasum and the network (PyPI, its advisory API, github.com, and
-#          uv's Python downloads when no CPython of the pin is installed),
-#          and node with npm for the copy-paste gate, which installs jscpd
-#          from the npm registry; the fixtures hold no Markdown, so lint-md
-#          does not run markdownlint.
+#          shasum and the network (PyPI, its advisory API, api.osv.dev,
+#          github.com, and uv's Python downloads when no CPython of the pin
+#          is installed), and node with npm for the copy-paste gate, which
+#          installs jscpd from the npm registry; the fixtures hold no
+#          Markdown, so lint-md does not run markdownlint.
 set -euo pipefail
 if ((BASH_VERSINFO[0] < 4)); then
   echo "ERROR: tests/run.sh needs bash 4 or later (globstar); this is bash $BASH_VERSION." >&2
@@ -138,6 +166,9 @@ shopt -s globstar
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 fails=0
+# Set by prepare and publish, which skip when they are set, so none may come from the caller's environment.
+work='' label_prefix='' tag='' bare='' commit=''
+newest_python=3.14 # the newest stable CPython; floor_newest_stable fails when the pinned uv offers a newer one
 # shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
 . "$root/scripts/lib/tree.sh"
 
@@ -147,9 +178,9 @@ check() { # check LABEL COMMAND...: run COMMAND and report how it went
   shift
   "$@" || rc=$?
   if [[ $rc == 0 ]]; then
-    echo "PASS $label ($((SECONDS - start))s)"
+    echo "PASS ${label_prefix-}$label ($((SECONDS - start))s)"
   else
-    echo "FAIL $label (exit $rc, $((SECONDS - start))s)"
+    echo "FAIL ${label_prefix-}$label (exit $rc, $((SECONDS - start))s)"
     fails=$((fails + 1))
   fi
 }
@@ -158,8 +189,7 @@ shellcheck_all() {
   (cd "$root" && shellcheck -x devkitw scripts/**/*.sh tests/*.sh)
 }
 
-shell_part() {
-  check "shellcheck" shellcheck_all
+shell_tests() { # every test file of the shell part, run again by the floor part
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "make tests" "$root/tests/make_test.sh"
@@ -179,13 +209,22 @@ shell_part() {
   check "mvn_checked tests" "$root/tests/mvn_checked_test.sh"
   check "sealed_dir tests" "$root/tests/sealed_dir_test.sh"
   check "coverage_floor tests" "$root/tests/coverage_floor_test.sh"
+  check "coverage tests" "$root/tests/coverage_test.sh"
+  check "version_check tests" "$root/tests/version_check_test.sh"
+  check "python invocations tests" "$root/tests/python_invocations_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
+  check "python audit tests" "$root/tests/python_audit_test.sh"
   check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "anchored_match tests" "$root/tests/anchored_match_test.sh"
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
   check "tag tests" "$root/tests/tag_test.sh"
+}
+
+shell_part() {
+  check "shellcheck" shellcheck_all
+  shell_tests
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
@@ -426,7 +465,8 @@ swap_signers() {
 # The devkit a fixture pins: the tree under test as tag $tag on main (devkitw
 # refuses a tag off main), signed by a key made here, in bare repo $bare. The
 # tree's devkitw trusts the release key, so the published copy trusts this one.
-publish() {
+publish() { # at most once per run
+  [[ -z $commit ]] || return 0
   local src=$work/src key=$work/release-key
   listed "$root" "$src"
   export GIT_CONFIG_GLOBAL=/dev/null # from here on: no url rewrites, no signing config
@@ -720,19 +760,27 @@ secret_negatives() { # each scan of the real gitleaks reads what it should
     make_says fail "$proj" lint "git failed under gitleaks git --log-opts=HEAD"
 }
 
-prepare() { # once per run: the temp dir, a clean environment and the published tree under test
-  [[ -z ${work:-} ]] || return 0
+prepare() { # once per run: the temp dir and a clean environment
+  [[ -z $work ]] || return 0
   work=$(mktemp -d) tag=v$(parent_version "$root") bare=$work/devkit.git
   trap 'uncache "$work"' EXIT
   clean_env
   export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
   export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
   export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid
-  publish
+}
+
+isolated() { # isolated COMMAND...: run COMMAND in a subshell, so that no later part inherits its environment; $work/fails carries the count back
+  (
+    "$@"
+    echo "$fails" >"$work/fails"
+  )
+  fails=$(<"$work/fails")
 }
 
 java_part() {
   prepare
+  publish
   for fixture in "$root"/tests/fixtures/java-*/; do
     run_fixture "${fixture%/}" "check lint test coverage format"
     unchanged "${fixture%/}" target .coverage.md
@@ -922,7 +970,16 @@ py_formatted() { # py_formatted FILE SED: make format undoes SED's breaks, so th
 # imports (urllib3, requests, ...): .venv holds both, and an old pin of those breaks pip-audit.
 py_vulnerable() {
   py_copy single vulnerable relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["jinja2==3.1.4"]/' &&
-    make_says fail "$work/py-vulnerable" audit "in 1 package" "jinja2 3.1.4"
+    make_says fail "$work/py-vulnerable" audit "in 1 package" "jinja2" "3.1.4"
+}
+
+# A dependency whose advisory only OSV carries (mako 1.4.1, PYSEC-2026-4243 = GHSA-5639-2j2p-m4mx,
+# 2026-10): the PyPI run alone passes it, so only the OSV run can fail this. It stops discriminating
+# once PyPI lists the advisory, which is why tests/python_audit_test.sh stubs pip-audit and asserts
+# both runs.
+py_osv_only() {
+  py_copy single osv-only relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["mako==1.4.1"]/' &&
+    make_says fail "$work/py-osv-only" audit "mako" "1.4.1" "PYSEC-2026-4243"
 }
 
 # Current runtime dependencies without advisories, neither one pip-audit imports: six, and attrs
@@ -945,6 +1002,36 @@ py_duplicated() { # a test module, one test longer, copied whole: a clone over 5
     make_says fail "$dir" lint "duplicated code not accepted in devkit.toml: tests/test_greeter.py  ~  tests/test_greeter_copy.py"
 }
 
+py_venv_parses() { # make lint's anchored-match gate reports a file only .venv's Python reads, by that Python
+  local dir=$work/py-venv-parses
+  py_copy single venv-parses installed &&
+    printf '\n[tool.ruff]\nextend-exclude = ["broken.py"]\n' >>"$dir/pyproject.toml" &&
+    printf 'def broken(:\n' >"$dir/broken.py" &&
+    make_says fail "$dir" lint "ERROR: cannot parse broken.py with Python $(<"$root/tests/fixtures/python-uv-single/.python-version")" "/.venv/bin/python): SyntaxError:"
+}
+
+# A .pth file in .venv's site-packages runs whenever a Python of that venv starts with site, and logs its
+# command line. make lint runs vulture there (so the log must show the planted file live) and the anchored-match
+# gate, which runs with -I -S and so must not appear in the log.
+py_pth_isolated() {
+  local dir=$work/py-pth log=$work/py-pth.log site
+  py_copy single pth installed || return
+  site=$(echo "$dir"/.venv/lib/python3*/site-packages) && [[ -d $site ]] || return
+  printf 'import sys; open("%s", "a").write(" ".join(sys.orig_argv) + chr(10))\n' "$log" >"$site/devkit_marker.pth"
+  make_says pass "$dir" lint && [[ -s $log && $(<"$log") == *"/bin/vulture"* && $(<"$log") != *anchored_match* ]]
+}
+
+# The same project with lint.sh's -S dropped, from a scratch copy of the tree under test (never the repo):
+# the anchored-match gate then runs the planted file, so the check above discriminates.
+py_pth_needs_s() {
+  local dir=$work/py-pth log=$work/py-pth.log copy=$work/src-no-s
+  cp -R "$work/src" "$copy" && sed_into "$copy/scripts/python/lint.sh" 's/ -I -S / -I /' &&
+    ! cmp -s "$work/src/scripts/python/lint.sh" "$copy/scripts/python/lint.sh" || return
+  rm -f "$log"
+  PROJECT_ROOT=$dir DEVKIT=$copy MODULES='' "$copy/scripts/python/lint.sh" >"$work/py-pth-no-s.log" 2>&1 || :
+  [[ -s $log && $(<"$log") == *anchored_match* ]]
+}
+
 python_negatives() {
   local greeter=src/devkit_fixture/greeter.py test=tests/test_greeter.py
   local quotes="s/f\"Hello, {name}\"/f'Hello, {name}'/" import='s/^"""Builds greetings."""$/&\n\nimport os/'
@@ -965,6 +1052,13 @@ python_negatives() {
   py_negative coverage-activation test "wrote no coverage report" single installed pyproject.toml 's/--cov=src //'
   py_negative stale-lock install "needs to be updated" single "" pyproject.toml 's/^dependencies = \[\]/dependencies = ["urllib3"]/'
   py_negative python-pin check ".python-version pins 3.99" single installed .python-version 's/.*/3.99/'
+  py_negative python-floor check ".python-version pins 3.10, but devkit needs CPython 3.11 or later" single "" .python-version 's/.*/3.10/'
+  py_negative python-floor-3-9 check ".python-version pins 3.9, but devkit needs CPython 3.11 or later" single "" .python-version 's/.*/3.9/'
+  # At the floor: past the version check, the next one (no .venv in an uninstalled copy) fails.
+  py_negative python-floor-3-11 check "no .venv; run make install" single "" .python-version 's/.*/3.11/'
+  check "python-uv-single: make lint's anchored-match gate parses with .venv's Python" py_venv_parses
+  check "python-uv-single: make lint's anchored-match gate runs no .pth file of .venv's site-packages" py_pth_isolated
+  check "python-uv-single: without -S in lint.sh (a scratch copy) the anchored-match gate runs the planted .pth file" py_pth_needs_s
   py_negative python-patch-pin check ".python-version pins 3.13.99" single installed .python-version 's/.*/3.13.99/'
   py_negative python-pin-format check "major.minor" single "" .python-version 's/.*/3/'
   check "python-uv-single: a missing .python-version fails make check" \
@@ -981,37 +1075,38 @@ python_negatives() {
   check "python-uv-workspace: make lint ONLY=packages/app skips core's ruff passes" py_only_lint "$quotes"
   check "python-uv-workspace: JUNIT_DIR=reports writes one report per member into the project" py_junit
   check "python-uv-single: a vulnerable dependency fails make audit" py_vulnerable
+  check "python-uv-single: a dependency with an OSV-only advisory fails make audit" py_osv_only
   check "python-uv-single: make audit passes on current dependencies, leaving a path one out" py_audited
 }
 
 python_part() {
   prepare
-  # A subshell, so that no later part inherits the environment python_checks sets; check counts
-  # failures there, and $work/fails carries the count back.
-  (
-    python_checks
-    echo "$fails" >"$work/fails"
-  )
-  fails=$(<"$work/fails")
+  publish
+  isolated python_checks # it sets an environment; check counts failures there
 }
 
-python_checks() {
-  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv dir path='' dirs fixture
-  first=${fixtures[0]%/}
-  pin=$(PROJECT_ROOT=$first python3 "$root/scripts/python/uv_project.py" uv-version)
-  uv=$XDG_CACHE_HOME/devkit/uv/$pin/bin/uv # where the bootstrap puts it; it locks the copies too
-  # User-level uv configuration (XDG_CONFIG_HOME), the caches (XDG_CACHE_HOME) and uv's Python
-  # downloads stay in $work, and pip reads no configuration file. No uv of the pin on PATH, so
-  # the first make install runs the hash-verified bootstrap; later ones find its uv in the cache.
+shared_uv_copy() { # shared_uv_copy LOG COPY...: exactly one COPY exists, and LOG shows no uv install
+  local log=$1
+  shift
+  [[ $# == 1 && -d $1 ]] && ! grep -q "Installing uv" "$log"
+}
+
+uv_sandbox() {
+  # User-level uv configuration (XDG_CONFIG_HOME), the caches (XDG_CACHE_HOME, PIP_CACHE_DIR: pip
+  # ignores XDG_CACHE_HOME on macOS) and uv's Python downloads stay in $work, and pip reads no
+  # configuration file. The first make install bootstraps uv, whatever uv is on PATH; later ones
+  # find its copy in the cache.
   # shellcheck disable=SC2046 # one argument per variable name
   unset VIRTUAL_ENV PYTHONPATH $(compgen -e | grep -E '^(UV|PIP)_')
   export XDG_CONFIG_HOME=$work/config UV_PYTHON_INSTALL_DIR=$work/uv-python npm_config_cache=$work/npm-cache \
-    PIP_CONFIG_FILE=/dev/null
-  IFS=: read -ra dirs <<<"$PATH"
-  for dir in "${dirs[@]}"; do
-    [[ -x $dir/uv && "$("$dir/uv" --version 2>/dev/null) " == "uv $pin "* ]] || path+=${path:+:}$dir
-  done
-  export PATH=$path
+    PIP_CONFIG_FILE=/dev/null PIP_CACHE_DIR=$work/pip-cache
+}
+
+python_checks() {
+  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv fixture copies
+  first=${fixtures[0]%/}
+  pin=$(PROJECT_ROOT=$first python3 "$root/scripts/python/uv_project.py" uv-version)
+  uv_sandbox
   for fixture in "${fixtures[@]}"; do
     fixture=${fixture%/}
     run_fixture "$fixture" "install check lint test format"
@@ -1021,19 +1116,91 @@ python_checks() {
     unchanged "$fixture" .venv __pycache__ .pytest_cache .ruff_cache .coverage
   done
   check "${first##*/}: the first make install bootstraps uv" grep -q "Installing uv $pin" "$work/${first##*/}.install.log"
+  copies=("$XDG_CACHE_HOME/devkit/tools/uv-$pin-"*)
+  check "the fixtures, locking the same uv by the same hashes, share one copy" \
+    shared_uv_copy "$work/$(basename "${fixtures[1]}").install.log" "${copies[@]}"
+  uv=${copies[0]}/bin/uv # it locks the copies too
   python_negatives
 }
 
-[[ $# -gt 0 ]] || set -- shell java python
+floor_uv() { # the uv the python-uv-single fixture's uv.lock pins, bootstrapped as make install does; its path in $work/uv-cmd
+  (
+    cd "$root/tests/fixtures/python-uv-single"
+    export DEVKIT=$root PROJECT_ROOT=$PWD UV_BOOTSTRAP=true
+    # shellcheck source=SCRIPTDIR/../scripts/lib/get_uv.sh
+    . "$root/scripts/lib/get_uv.sh"
+    echo "$UV_CMD" >"$work/uv-cmd"
+  )
+}
+
+floor_venv() { # floor_venv VERSION DIR: a CPython VERSION venv at DIR, whose python3 reports VERSION; fails when either check does
+  local version=$1 dir=$2 before=$fails
+  # shellcheck disable=SC2031 # floor_checks sets UV_CMD from $work/uv-cmd; floor_uv sets its own in a subshell, by sourcing get_uv.sh
+  # --no-config: $dir is under $work, and uv would read a uv.toml of a parent directory.
+  check "floor: uv creates a CPython $version venv" "$UV_CMD" venv --no-config --quiet --python "$version" "$dir"
+  ((fails == before)) || return 1
+  check "floor: python3 on PATH is $version" \
+    env PATH="$dir/bin:$PATH" python3 -I -c "import sys; sys.exit(sys.version_info[:2] != (${version/./, }))"
+  ((fails == before))
+}
+
+compile_helpers() { # every Python helper compiles under the python3 on PATH, writing no bytecode
+  python3 -I -c 'import sys; [compile(open(f, "rb").read(), f, "exec") for f in sys.argv[1:]]' "$root"/scripts/**/*.py
+}
+
+floor_newest_stable() { # the pinned uv offers no stable CPython minor newer than $newest_python
+  # shellcheck disable=SC2031 # as in floor_venv
+  "$UV_CMD" python list --only-downloads --no-config --output-format json | python3 -I -c '
+import json, re, sys
+want = tuple(map(int, sys.argv[1].split(".")))
+stable = {(v["version_parts"]["major"], v["version_parts"]["minor"]): v["version"]
+          for v in json.load(sys.stdin)
+          if v["implementation"] == "cpython" and re.fullmatch(r"\d+\.\d+\.\d+", v["version"])}
+if want not in stable:
+    sys.exit(f"the pinned uv lists no stable CPython {sys.argv[1]}; newest_python in tests/run.sh is stale")
+newer = sorted(m for m in stable if m > want)
+if newer:
+    sys.exit(f"the pinned uv offers stable CPython {newer[-1][0]}.{newer[-1][1]}: raise newest_python in tests/run.sh")
+' "$newest_python"
+}
+
+# Never falls back to the system python3: a venv that cannot be built skips its tests.
+floor_checks() {
+  local before=$fails
+  uv_sandbox
+  export PYTHONDONTWRITEBYTECODE=1 # the tests run python3 without -B; nothing is written into the tree
+  check "floor: the pinned uv is installed" floor_uv
+  ((fails == before)) || return 0
+  UV_CMD=$(<"$work/uv-cmd")
+  cd "$work"
+  check "floor: the pinned uv offers no stable CPython newer than $newest_python" floor_newest_stable
+  if floor_venv 3.11 "$work/floor-venv"; then
+    PATH=$work/floor-venv/bin:$PATH label_prefix='python3 3.11: ' check "scripts/**/*.py compile" compile_helpers
+    PATH=$work/floor-venv/bin:$PATH label_prefix='python3 3.11: ' shell_tests
+  fi
+  if floor_venv "$newest_python" "$work/newest-venv"; then
+    PATH=$work/newest-venv/bin:$PATH label_prefix="python3 $newest_python: " check "scripts/**/*.py compile" compile_helpers
+    PATH=$work/newest-venv/bin:$PATH label_prefix="python3 $newest_python: " shell_tests
+  fi
+}
+
+floor_part() {
+  prepare
+  isolated floor_checks
+}
+
+[[ $# -gt 0 ]] || set -- shell java python floor
 seen=' '
 for part in "$@"; do
-  [[ $part =~ ^(shell|java|python)$ && $seen != *" $part "* ]] || {
-    echo "usage: tests/run.sh [shell] [java] [python], each part at most once" >&2
+  [[ $part =~ ^(shell|floor|java|python)$ && $seen != *" $part "* ]] || {
+    echo "usage: tests/run.sh [shell] [java] [python] [floor], each part at most once" >&2
     exit 2
   }
   seen+="$part "
 done
-for part in "$@"; do "${part}_part"; done
+# A fixed order, whatever the command line's: floor must follow python, whose first make install
+# must find no uv in the shared cache to show that it bootstraps one.
+for part in shell java python floor; do [[ $seen != *" $part "* ]] || "${part}_part"; done
 [[ $fails == 0 ]] || {
   echo "$fails check(s) failed"
   exit 1

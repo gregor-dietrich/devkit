@@ -110,6 +110,16 @@ expect "a pyproject.toml without [tool.vulture] fails" 1 "sets no [tool.vulture]
 rm "$proj/pyproject.toml"
 expect "a missing pyproject.toml fails" 1 "no pyproject.toml in $proj" vulture-paths
 
+# uv-platform
+rm -f "$proj/uv.lock"
+out=$(PROJECT_ROOT=$proj python3 "$script" uv-platform 2>&1) || out=failed
+if [[ $out =~ ^(glibc|musl|other)(32|64)$ ]]; then
+  echo "PASS uv-platform prints libc and pointer width, reading no lock"
+else
+  echo "FAIL uv-platform prints libc and pointer width, reading no lock: got: $out"
+  fails=$((fails + 1))
+fi
+
 rc=0
 out=$(python3 "$script" frobnicate 2>&1) || rc=$?
 if [[ $rc == 2 && $out == "usage: "* ]]; then

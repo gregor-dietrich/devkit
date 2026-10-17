@@ -5,14 +5,19 @@ Usage: uv_project.py COMMAND, for the project at $PROJECT_ROOT (else the working
   uv-version       the version of the uv package uv.lock pins
   uv-requirements  a pip requirements file for that uv: one --hash per locked wheel, for
                    pip's --require-hashes
+  uv-platform      what besides uname picks pip's uv wheel: <libc><bits>, e.g. glibc64, musl64
+                   or other32 (other: neither; no lock is read)
   members          the project's packages as directories, sorted, one per line: each uv
                    workspace member as uv.lock records it, or "." for a single package
   vulture-paths    the root pyproject.toml's [tool.vulture] paths, one per line
 Every failure is one ERROR line on stderr; exit 1.
 """
 
+import glob
 import os
+import platform
 import re
+import struct
 import sys
 import tomllib
 from pathlib import Path
@@ -78,6 +83,11 @@ def uv_requirements() -> list[str]:
     return [f"uv=={package['version']} \\", *(f"    --hash={h} \\" for h in hashes[:-1]), f"    --hash={hashes[-1]}"]
 
 
+def uv_platform() -> list[str]:
+    libc = "glibc" if platform.libc_ver()[0] == "glibc" else "musl" if glob.glob("/lib/ld-musl-*") else "other"
+    return [f"{libc}{struct.calcsize('P') * 8}"]
+
+
 def source_path(package: dict[str, Any]) -> str | None:
     """The directory of a project package: its editable or virtual source, else None."""
     source = package.get("source")
@@ -129,6 +139,7 @@ def vulture_paths() -> list[str]:
 COMMANDS = {
     "uv-version": uv_version,
     "uv-requirements": uv_requirements,
+    "uv-platform": uv_platform,
     "members": members,
     "vulture-paths": vulture_paths,
 }

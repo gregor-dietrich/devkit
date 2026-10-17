@@ -14,8 +14,7 @@ import tomllib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from version_check import REPO_ROOT
-
+REPO_ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 DEVKIT: Path = Path(os.environ.get("DEVKIT", Path(__file__).resolve().parents[2]))
 RELATIVE_PATH = ".devkit/java/parent/pom.xml"
 UPGRADE_HINT = 'see "Upgrading from v0.1.x" in .devkit/README.md'
