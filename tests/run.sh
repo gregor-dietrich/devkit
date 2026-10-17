@@ -556,8 +556,28 @@ JAVA
     make_says pass "$dir" lint
 }
 
+# A violation the shared config reports on an AST node (an abbreviation in a method name) fails lint
+# until checkstyle-xpath-suppressions.xml, which the parent wires like checkstyle-suppressions.xml,
+# suppresses it.
+xpath_suppression() {
+  local dir=$work/negative-xpath
+  edited "$dir" src/main/java/devkit/fixture/Greeter.java \
+    's|^}$|\n    /** Parses. */\n    public String parseURL() {\n        return "";\n    }\n}|' &&
+    make_says fail "$dir" lint "Checkstyle violation" || return
+  cat >"$dir/checkstyle-xpath-suppressions.xml" <<'XML'
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC "-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2//EN" "https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd">
+<suppressions>
+    <suppress-xpath checks="AbbreviationAsWordInName" query="//METHOD_DEF[./IDENT[@text='parseURL']]/IDENT" />
+</suppressions>
+XML
+  make_says pass "$dir" lint
+}
+
 negatives() {
   assert_helper_checks
+  check "java-monolith: checkstyle-xpath-suppressions.xml suppresses a violation make lint reports" \
+    xpath_suppression
   local main=src/main/java/devkit/fixture/Greeter.java
   local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
   negative format lint "format violations" "$main" "$indent"

@@ -541,7 +541,8 @@
           <configuration>
             <configLocation>${maven.multiModuleProjectDirectory}/.devkit/java/config/checkstyle.xml</configLocation>
             <propertyExpansion>
-              org.checkstyle.google.suppressionfilter.config=${project.basedir}/checkstyle-suppressions.xml</propertyExpansion>
+              org.checkstyle.google.suppressionfilter.config=${project.basedir}/checkstyle-suppressions.xml
+              org.checkstyle.google.suppressionxpathfilter.config=${project.basedir}/checkstyle-xpath-suppressions.xml</propertyExpansion>
             <consoleOutput>true</consoleOutput>
             <!-- No failsOnError: it stops Checkstyle before the plugin logs the violation, so
                  under make lint's -q only "There is 1 error reported" would show. failOnViolation

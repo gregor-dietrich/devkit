@@ -674,7 +674,9 @@ the project, not to the shared configs: PMD's UnitTestShouldIncludeAssert runs
 with its defaults, and a project names its own assertion helpers in the
 `pmd.extraAssertMethodNames` property ([Parent POM](#parent-pom)). The shared
 configs do keep the stack's conventions: JBoss Logging as the facade, a
-static `LOG` logger field and `jakarta.annotation.Nullable`. A project's own
+static `LOG` logger field, `jakarta.annotation.Nullable`, and failsafe's `*IT`
+names for integration tests, which Checkstyle's `AbbreviationAsWordInName`
+accepts. A project's own
 Checkstyle rules live in `checkstyle-project.xml` at the project root, a
 complete Checkstyle configuration (a `Checker` root). The parent runs it as
 the checkstyle plugin's execution `project`, with its own `configLocation`,
@@ -685,7 +687,10 @@ execution's `check` goal binds to `verify` by default, so `make test`,
 `make coverage` and `make install` run the project's rules too. The
 execution inherits the plugin-level `propertyExpansion`, so a
 `SuppressionFilter` on `${org.checkstyle.google.suppressionfilter.config}`
-reuses the project's `checkstyle-suppressions.xml`. A project with no rules
+reuses the project's `checkstyle-suppressions.xml`; the shared config's
+optional `SuppressionXpathFilter` likewise reads
+`checkstyle-xpath-suppressions.xml` from each module's directory, when the
+file exists. A project with no rules
 of its own commits an empty `<module name="Checker"/>`; `make check` fails
 when the file is missing.
 
@@ -893,10 +898,11 @@ inherit it, and Maven reads it through the link:
 - It commits the files the table above lists. `.mvn/jvm.config` carries
   the `jdk.compiler` `--add-exports` and `--add-opens` lines as devkit's
   `tests/fixtures/java-monolith/.mvn/jvm.config` lists them. The parent
-  reads `checkstyle-suppressions.xml` and `spotbugs-exclude.xml` from
-  `${project.basedir}`; a multi-module project that keeps one
-  `checkstyle-suppressions.xml` at the root overrides the checkstyle
-  plugin's `<propertyExpansion>` in its own `<pluginManagement>`, as
+  reads `checkstyle-suppressions.xml`, `checkstyle-xpath-suppressions.xml`
+  (optional) and `spotbugs-exclude.xml` from `${project.basedir}`; a
+  multi-module project that keeps one `checkstyle-suppressions.xml` at the
+  root overrides the checkstyle plugin's `<propertyExpansion>` in its own
+  `<pluginManagement>`, which replaces both properties, as
   `tests/fixtures/java-multimodule/pom.xml` does.
 - Maven merges any list the parent sets with a consumer's redeclaration
   element by element, by position, unless the consumer's list carries
