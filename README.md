@@ -309,6 +309,23 @@ The license allowlist gains these names, so a consumer's own appended
 `CDDL + GPLv2 with classpath exception`,
 `Universal Permissive License, Version 1.0` and `UPL-1.0`.
 
+Nothing else in a Maven project has to change, but these entries in its own
+files are now redundant and can go: `project.build.sourceEncoding` and
+`project.reporting.outputEncoding` in the root pom (the parent sets both to
+`UTF-8`); a `<suppress checks="AbbreviationAsWordInName"
+files=".*IT\.java$"/>` in `checkstyle-suppressions.xml` (the shared
+Checkstyle accepts failsafe's `*IT` names); the line exempting test sources
+from the `@SuppressWarnings("NullAway")` ban (the shared config exempts
+`src/test` itself); a class-level `@SuppressWarnings("NullAway")` on a test
+class whose only unset fields Mockito, JUnit's `@TempDir`, `@Inject` or
+Quarkus' `@InjectMock` and `@InjectSpy` inject; a
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION` match in `spotbugs-exclude.xml`
+(devkit's `java/config/spotbugs-baseline.xml` excludes it, read before the
+module's own); and `%test.quarkus.jacoco.report=false` in
+`application.properties` (surefire and failsafe set it). A module's
+`checkstyle-xpath-suppressions.xml` is now read from the module's own
+directory, not Maven's working directory.
+
 ### Upgrading from v0.6.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,
