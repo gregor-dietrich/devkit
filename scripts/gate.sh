@@ -12,11 +12,14 @@
 #     is about the commit, not about edits or untracked files;
 #   - git ignores none of the .mvn/ files Maven reads, which a tree that is
 #     clean by git's account would hide;
+#   - git ignores none of the files pytest reads (its configuration, coverage's
+#     and every conftest.py outside the directories it skips);
 #   - no POM profile has an <activation> on an environment variable or a file,
 #     and no POM is one git ignores, that could differ from a fresh checkout of
 #     HEAD;
 #   - no environment variable, mavenrc file, user-level core extensions file or
-#     settings.xml profile property that can skip or deselect tests is set.
+#     settings.xml profile property that can skip or deselect tests or skew
+#     coverage is set.
 # Recording never changes the exit status: it is the stages'. bash 3.2 (macOS).
 set -uo pipefail
 
@@ -35,7 +38,7 @@ strictly_clean() {
     local status files
     status=$(git status --porcelain --untracked-files=all --ignore-submodules=none 2> /dev/null) || return 1
     [[ -z "$status" ]] || return 1
-    files=$(git ls-files -v -- :/ 2> /dev/null) || return 1
+    files=$(GIT_LITERAL_PATHSPECS=0 git ls-files -v -- :/ 2> /dev/null) || return 1
     ! grep -q '^[a-zS]' <<< "$files"
 }
 
@@ -45,6 +48,66 @@ strictly_clean() {
 # Duplicated in scripts/hooks/pre-push.sh, which only warns.
 ignored_mvn() {
     mvn_ignored=$(git ls-files --others --ignored --exclude-standard -- .mvn/maven.config .mvn/extensions.xml .mvn/jvm.config 2> /dev/null)
+}
+
+# ignored_pytest: sets pytest_ignored to the ignored ones (a line each, in git's
+# order) among the files pytest reads whether git tracks them or not, which
+# strictly_clean counts as clean: in a project with a tracked root pyproject.toml,
+# its configuration files and coverage's .coveragerc in each directory holding a
+# tracked pyproject.toml (a member) and each directory above it up to the top
+# level, and every conftest.py except one below a directory pytest does not
+# enter inside its member: a default norecursedirs one (.*, venv, build, dist,
+# node_modules, *.egg, _darcs, CVS, {arch}) or a virtual environment (a regular
+# file pyvenv.cfg or conda-meta/history in it). A member's test*/conftest.py
+# always counts: pytest loads it at startup. The project's
+# own norecursedirs, testpaths and collect_ignore are not read. A listed
+# directory (a trailing slash) is a nested repository, which git does not
+# enter: it is dropped. GIT_LITERAL_PATHSPECS=0, since pathspec magic is
+# needed. Fails when git does. Accepted misses are tracked in #157.
+# Duplicated in scripts/hooks/pre-push.sh, which only warns.
+ignored_pytest() {
+    local dir file path failed rel acc comp seen=$'\n' members=$'\n' found
+    local specs=(':(glob)**/conftest.py')
+    pytest_ignored=""
+    failed=""
+    while IFS= read -r -d '' path || { failed=$path; false; }; do
+        dir=${path%pyproject.toml}
+        members="$members/$dir"$'\n'
+        while [[ "$seen" != *$'\n'"/$dir"$'\n'* ]]; do
+            seen="$seen/$dir"$'\n'
+            for file in pytest.toml .pytest.toml pytest.ini .pytest.ini pyproject.toml tox.ini setup.cfg .coveragerc; do
+                specs+=(":(literal)$dir$file")
+            done
+            [[ -n "$dir" ]] || break
+            dir=${dir%/}
+            if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
+        done
+    done < <(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files -z -- ':(glob)**/pyproject.toml' 2> /dev/null || printf x)
+    [[ -z "$failed" ]] || return 1
+    [[ "$members" == *$'\n/\n'* ]] || return 0
+    found=$(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files --others --ignored --exclude-standard -- "${specs[@]}" 2> /dev/null) || return 1
+    while IFS= read -r path; do
+        [[ -n "$path" && "$path" != */ ]] || continue
+        if [[ "$path" == */conftest.py ]]; then
+            dir=${path%/*}/
+            while [[ "$members" != *$'\n'"/$dir"$'\n'* ]]; do
+                dir=${dir%/}
+                if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
+            done
+            rel=${path#"$dir"}
+            acc=$dir
+            [[ "$rel" == test*/conftest.py && "$rel" != */*/* ]] || while [[ "$rel" == */* ]]; do
+                comp=${rel%%/*}
+                rel=${rel#*/}
+                acc="$acc$comp/"
+                case "$comp" in
+                    .* | venv | build | dist | node_modules | *.egg | _darcs | CVS | '{arch}') continue 2 ;;
+                esac
+                [[ ! -f "${acc}pyvenv.cfg" && ! -f "${acc}conda-meta/history" ]] || continue 2
+            done
+        fi
+        pytest_ignored="${pytest_ignored:+$pytest_ignored$'\n'}$path"
+    done <<< "$found"
 }
 
 # strip_comments TEXT: TEXT without its XML comments (<!-- ... -->, which may
@@ -207,7 +270,7 @@ ambient_file() {
     full=${full#/}
     [[ -n "$full" ]] || full=.
     if [[ "$full" == .git || "$full" == .git/* ]]; then return 1; fi
-    full=$(git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
+    full=$(GIT_LITERAL_PATHSPECS=0 git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
     [[ -z "$full" ]]
 }
 
@@ -520,6 +583,8 @@ if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     strictly_clean || why "the tree was not clean at the start"
     ignored_mvn || why "git could not list the ignored files under .mvn/"
     [[ -z "$mvn_ignored" ]] || why "git ignores .mvn/ files Maven reads: ${mvn_ignored//$'\n'/, } (they can skip tests)"
+    ignored_pytest || why "git could not list the ignored files pytest reads"
+    [[ -z "$pytest_ignored" ]] || why "git ignores files pytest reads: ${pytest_ignored//$'\n'/, } (they can deselect tests or skew coverage)"
     pom_scan || why "could not scan the project's POMs"
     [[ -z "$pom_ambient" ]] || why "the project's POMs depend on ambient state: ${pom_ambient//$'\n'/, } (they can skip tests)"
     [[ "$(git config --get extensions.refStorage)" != [Rr][Ee][Ff][Tt][Aa][Bb][Ll][Ee] ]] ||
@@ -592,6 +657,8 @@ else
     why "the JVM options screen does not work in this bash"
 fi
 [[ -z "${PYTEST_ADDOPTS-}" ]] || why "PYTEST_ADDOPTS is set (it can deselect tests)"
+[[ -z "${PYTEST_PLUGINS-}" ]] || why "PYTEST_PLUGINS is set (it can deselect tests)"
+[[ -z "${COVERAGE_RCFILE-}" ]] || why "COVERAGE_RCFILE is set (it can skew coverage)"
 # Maven's launcher sources these shell files unless MAVEN_SKIP_RC is non-empty,
 # and a settings.xml profile's <properties> can set skipTests like a -D.
 if [[ -z "${MAVEN_SKIP_RC-}" ]]; then
@@ -622,6 +689,8 @@ if [[ "$rc" -eq 0 && -z "$reasons" ]]; then
     # files, so those checks above run at the start only.
     ignored_mvn || why "git could not list the ignored files under .mvn/"
     [[ -z "$mvn_ignored" ]] || why "git ignores .mvn/ files Maven reads that appeared during the run: ${mvn_ignored//$'\n'/, } (they can skip tests)"
+    ignored_pytest || why "git could not list the ignored files pytest reads"
+    [[ -z "$pytest_ignored" ]] || why "git ignores files pytest reads that appeared during the run: ${pytest_ignored//$'\n'/, } (they can deselect tests or skew coverage)"
     # The environment cannot change during the run, so a hit here is a file.
     pom_scan || why "could not scan the project's POMs"
     [[ -z "$pom_ambient" ]] || why "the project's POMs depend on ambient state that appeared during the run: ${pom_ambient//$'\n'/, } (they can skip tests)"

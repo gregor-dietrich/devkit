@@ -535,11 +535,12 @@ one is missing or stale. A hook it did not write is never overwritten.
   `MAVEN_BASEDIR` (Maven's project directory, where `.mvn/` and the
   parent's gate configurations are read from), `MAVEN_DEBUG_OPTS` (any
   value counts: it is for mvnDebug's debugger, and the launcher hands it
-  to java), `PYTEST_ADDOPTS`, a JVM option that can skip tests (see
-  below) in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`,
-  `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc
-  file Maven runs (`/usr/local/etc/mavenrc`,
-  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set), a
+  to java), `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `COVERAGE_RCFILE`, a JVM
+  option that can skip tests (see below) in `MAVEN_OPTS`,
+  `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`,
+  `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs
+  (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`, unless
+  `MAVEN_SKIP_RC` is set), a
   `~/.m2/settings.xml` that defines profile properties (`<properties>`
   outside XML comments) or an `<activeProfile>` naming no profile that
   file defines (Maven activates a profile of that id from the project's
@@ -549,7 +550,8 @@ one is missing or stale. A hook it did not write is never overwritten.
   in its JVM, whatever `MAVEN_SKIP_RC` says) and
   an ignored `.mvn/maven.config`, `.mvn/extensions.xml` or `.mvn/jvm.config`
   (Maven reads them whether git tracks them or not; `.mvn/wrapper/` does
-  not count), and a committed POM profile that depends on ambient state (see
+  not count), a file pytest reads that git ignores (see below), and a
+  committed POM profile that depends on ambient state (see
   below), which are often set on purpose.
   A JVM option that can skip tests is a word of the variable, found after
   every `"` and `'` is removed, at its start or after whitespace. Java strips
@@ -625,6 +627,28 @@ one is missing or stale. A hook it did not write is never overwritten.
   properties are the machine's, which `pre-push` runs on too, not ambient: a
   profile they activate does not count, and a `-D` one is a JVM option
   above.
+- The files pytest reads whether git tracks them or not count only in a
+  project with a tracked root `pyproject.toml`: its configuration files
+  `pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
+  `pyproject.toml`, `tox.ini` and `setup.cfg`, and coverage's `.coveragerc`,
+  in every directory holding a tracked `pyproject.toml` and each directory
+  above it up to the top level (`make test` starts a session in each
+  member's directory, and pytest searches upward), and every `conftest.py`
+  except one below a directory pytest does not enter inside the member it
+  belongs to (the nearest directory holding a tracked `pyproject.toml`): one
+  its default `norecursedirs` skips (`.*`, `venv`, `build`, `dist`,
+  `node_modules`, `*.egg`, `_darcs`, `CVS`, `{arch}`) or a virtual
+  environment (a directory holding a regular file `pyvenv.cfg` or
+  `conda-meta/history`). A member's `test*/conftest.py` always counts, as
+  pytest loads it at startup. The project's own
+  `norecursedirs`, `testpaths` and `collect_ignore` are not read, so a
+  `conftest.py` they skip still counts. Accepted misses (#157): a
+  `conftest.py` in a directory only a project setting makes pytest collect,
+  configuration above the top level, a path through a symlink or inside a
+  nested repository (an ignored nested repository does not count), an
+  ignored module that tests or plugins import, a `sitecustomize.py` in a
+  `PYTHONPATH` entry, and, on a case-insensitive filesystem, a name that
+  differs from a screened one only in case.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -637,7 +661,8 @@ one is missing or stale. A hook it did not write is never overwritten.
   are fine), HEAD did not move during the run (detected through HEAD and its
   reflog, so a move away and back counts, and no reflog means no record), the
   ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
-  `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`, a JVM option
+  `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`,
+  `PYTEST_PLUGINS`, `COVERAGE_RCFILE`, a JVM option
   `pre-push` warns on above in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`,
   `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or
   `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs (`/usr/local/etc/mavenrc`,
@@ -645,9 +670,9 @@ one is missing or stale. A hook it did not write is never overwritten.
   `~/.m2/settings.xml` that defines profile properties or activates a
   profile it does not define, or a regular file `~/.m2/extensions.xml`, is
   present, git ignores none of `.mvn/maven.config`, `.mvn/extensions.xml`
-  and `.mvn/jvm.config`, and no POM in scope depends on ambient state, as
-  above (both checked at the start and again at the end of the
-  run, as the tree state is).
+  and `.mvn/jvm.config`, no file pytest reads is one git ignores, and no POM
+  in scope depends on ambient state, as above (all three checked at the
+  start and again at the end of the run, as the tree state is).
   Recording never changes the exit status, and a passing run that records
   nothing says why. `pre-push` skips its gate only while HEAD equals the
   record and the tree is still strictly clean.

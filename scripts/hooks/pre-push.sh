@@ -11,10 +11,10 @@
 #
 # It never narrows the gate: it unsets ONLY and clears the outer make's flags,
 # as `make gate` does. It warns, but does not refuse, on the variables and files
-# (an ignored .mvn/ file Maven reads, a POM profile activated by an environment
-# variable or a file and an ignored POM among them) `make gate` will not record
-# under, since those are often set on purpose. That list is duplicated in
-# scripts/gate.sh.
+# (an ignored .mvn/ file Maven reads or file pytest reads, a POM profile
+# activated by an environment variable or a file and an ignored POM among them)
+# `make gate` will not record under, since those are often set on purpose. That
+# list is duplicated in scripts/gate.sh.
 #
 # git sends the ref lines on one stdin, which an up-to-date push leaves empty.
 # Installed as `pre-push` itself, zero lines therefore means nothing to push.
@@ -30,7 +30,7 @@ strictly_clean() {
     local status files
     status="$(git status --porcelain --untracked-files=all --ignore-submodules=none 2> /dev/null)" || return 1
     [[ -z "$status" ]] || return 1
-    files="$(git ls-files -v -- :/ 2> /dev/null)" || return 1
+    files="$(GIT_LITERAL_PATHSPECS=0 git ls-files -v -- :/ 2> /dev/null)" || return 1
     ! grep -q '^[a-zS]' <<< "$files"
 }
 
@@ -40,6 +40,66 @@ strictly_clean() {
 # Duplicated in scripts/gate.sh, which refuses to record instead of warning.
 ignored_mvn() {
     mvn_ignored=$(git ls-files --others --ignored --exclude-standard -- .mvn/maven.config .mvn/extensions.xml .mvn/jvm.config 2> /dev/null)
+}
+
+# ignored_pytest: sets pytest_ignored to the ignored ones (a line each, in git's
+# order) among the files pytest reads whether git tracks them or not, which
+# strictly_clean counts as clean: in a project with a tracked root pyproject.toml,
+# its configuration files and coverage's .coveragerc in each directory holding a
+# tracked pyproject.toml (a member) and each directory above it up to the top
+# level, and every conftest.py except one below a directory pytest does not
+# enter inside its member: a default norecursedirs one (.*, venv, build, dist,
+# node_modules, *.egg, _darcs, CVS, {arch}) or a virtual environment (a regular
+# file pyvenv.cfg or conda-meta/history in it). A member's test*/conftest.py
+# always counts: pytest loads it at startup. The project's
+# own norecursedirs, testpaths and collect_ignore are not read. A listed
+# directory (a trailing slash) is a nested repository, which git does not
+# enter: it is dropped. GIT_LITERAL_PATHSPECS=0, since pathspec magic is
+# needed. Fails when git does. Accepted misses are tracked in #157.
+# Duplicated in scripts/gate.sh, which refuses to record instead of warning.
+ignored_pytest() {
+    local dir file path failed rel acc comp seen=$'\n' members=$'\n' found
+    local specs=(':(glob)**/conftest.py')
+    pytest_ignored=""
+    failed=""
+    while IFS= read -r -d '' path || { failed=$path; false; }; do
+        dir=${path%pyproject.toml}
+        members="$members/$dir"$'\n'
+        while [[ "$seen" != *$'\n'"/$dir"$'\n'* ]]; do
+            seen="$seen/$dir"$'\n'
+            for file in pytest.toml .pytest.toml pytest.ini .pytest.ini pyproject.toml tox.ini setup.cfg .coveragerc; do
+                specs+=(":(literal)$dir$file")
+            done
+            [[ -n "$dir" ]] || break
+            dir=${dir%/}
+            if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
+        done
+    done < <(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files -z -- ':(glob)**/pyproject.toml' 2> /dev/null || printf x)
+    [[ -z "$failed" ]] || return 1
+    [[ "$members" == *$'\n/\n'* ]] || return 0
+    found=$(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files --others --ignored --exclude-standard -- "${specs[@]}" 2> /dev/null) || return 1
+    while IFS= read -r path; do
+        [[ -n "$path" && "$path" != */ ]] || continue
+        if [[ "$path" == */conftest.py ]]; then
+            dir=${path%/*}/
+            while [[ "$members" != *$'\n'"/$dir"$'\n'* ]]; do
+                dir=${dir%/}
+                if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
+            done
+            rel=${path#"$dir"}
+            acc=$dir
+            [[ "$rel" == test*/conftest.py && "$rel" != */*/* ]] || while [[ "$rel" == */* ]]; do
+                comp=${rel%%/*}
+                rel=${rel#*/}
+                acc="$acc$comp/"
+                case "$comp" in
+                    .* | venv | build | dist | node_modules | *.egg | _darcs | CVS | '{arch}') continue 2 ;;
+                esac
+                [[ ! -f "${acc}pyvenv.cfg" && ! -f "${acc}conda-meta/history" ]] || continue 2
+            done
+        fi
+        pytest_ignored="${pytest_ignored:+$pytest_ignored$'\n'}$path"
+    done <<< "$found"
 }
 
 # strip_comments TEXT: TEXT without its XML comments (<!-- ... -->, which may
@@ -204,7 +264,7 @@ ambient_file() {
     full=${full#/}
     [[ -n "$full" ]] || full=.
     if [[ "$full" == .git || "$full" == .git/* ]]; then return 1; fi
-    full=$(git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
+    full=$(GIT_LITERAL_PATHSPECS=0 git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
     [[ -z "$full" ]]
 }
 
@@ -590,6 +650,8 @@ else
     echo "WARNING: the JVM options screen does not work in this bash; the gate runs anyway."
 fi
 [[ -z "${PYTEST_ADDOPTS-}" ]] || echo "WARNING: PYTEST_ADDOPTS is set (it can deselect tests)."
+[[ -z "${PYTEST_PLUGINS-}" ]] || echo "WARNING: PYTEST_PLUGINS is set (it can deselect tests)."
+[[ -z "${COVERAGE_RCFILE-}" ]] || echo "WARNING: COVERAGE_RCFILE is set (it can skew coverage)."
 # Maven sources these unless MAVEN_SKIP_RC is non-empty; as in gate.sh.
 if [[ -z "${MAVEN_SKIP_RC-}" ]]; then
     for rcfile in /usr/local/etc/mavenrc /etc/mavenrc "${HOME-}/.mavenrc"; do
@@ -604,6 +666,10 @@ fi
 # says nothing, the gate runs anyway.
 ignored_mvn || mvn_ignored=""
 [[ -z "$mvn_ignored" ]] || echo "WARNING: git ignores .mvn/ files Maven reads: ${mvn_ignored//$'\n'/, } (they can skip tests)."
+# Files pytest reads that git ignores, as in gate.sh; a failing listing says
+# nothing, the gate runs anyway.
+ignored_pytest || pytest_ignored=""
+[[ -z "$pytest_ignored" ]] || echo "WARNING: git ignores files pytest reads: ${pytest_ignored//$'\n'/, } (they can deselect tests or skew coverage)."
 # The project's POMs, as in gate.sh: a profile activated by an environment
 # variable or a file, or a POM git ignores. A scan that fails warns, and the gate
 # runs anyway.
