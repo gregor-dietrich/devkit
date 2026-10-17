@@ -18,7 +18,8 @@
 #     and no POM is one git ignores, that could differ from a fresh checkout of
 #     HEAD;
 #   - no environment variable, mavenrc file, user-level core extensions file or
-#     settings.xml profile property that can skip or deselect tests is set.
+#     settings.xml profile property that can skip or deselect tests or skew
+#     coverage is set.
 # Recording never changes the exit status: it is the stages'. bash 3.2 (macOS).
 set -uo pipefail
 
@@ -37,7 +38,7 @@ strictly_clean() {
     local status files
     status=$(git status --porcelain --untracked-files=all --ignore-submodules=none 2> /dev/null) || return 1
     [[ -z "$status" ]] || return 1
-    files=$(git ls-files -v -- :/ 2> /dev/null) || return 1
+    files=$(GIT_LITERAL_PATHSPECS=0 git ls-files -v -- :/ 2> /dev/null) || return 1
     ! grep -q '^[a-zS]' <<< "$files"
 }
 
@@ -53,25 +54,25 @@ ignored_mvn() {
 # order) among the files pytest reads whether git tracks them or not, which
 # strictly_clean counts as clean: in a project with a tracked root pyproject.toml,
 # its configuration files and coverage's .coveragerc in each directory holding a
-# tracked pyproject.toml and each directory above it up to the top level, and
-# every conftest.py except below a directory pytest's default norecursedirs
-# skips or a virtual environment (a directory holding pyvenv.cfg or
-# conda-meta/history). The project's own norecursedirs, testpaths and
-# collect_ignore are not read. A listed directory (a trailing slash) is a nested
-# repository, which git does not enter: it is dropped. Fails when git does.
-# Accepted misses are tracked in #157. Duplicated in scripts/hooks/pre-push.sh,
-# which only warns.
+# tracked pyproject.toml (a member) and each directory above it up to the top
+# level, and every conftest.py except one below a directory pytest does not
+# enter inside its member: a default norecursedirs one (.*, venv, build, dist,
+# node_modules, *.egg, _darcs, CVS, {arch}) or a virtual environment (a regular
+# file pyvenv.cfg or conda-meta/history in it). A member's test*/conftest.py
+# always counts: pytest loads it at startup. The project's
+# own norecursedirs, testpaths and collect_ignore are not read. A listed
+# directory (a trailing slash) is a nested repository, which git does not
+# enter: it is dropped. GIT_LITERAL_PATHSPECS=0, since pathspec magic is
+# needed. Fails when git does. Accepted misses are tracked in #157.
+# Duplicated in scripts/hooks/pre-push.sh, which only warns.
 ignored_pytest() {
-    local tracked dir rest file seen=$'\n' found path
+    local dir file path failed rel acc comp seen=$'\n' members=$'\n' found
     local specs=(':(glob)**/conftest.py')
-    for rest in '.*' venv build dist node_modules '*.egg' _darcs CVS '{arch}'; do
-        specs+=(":(exclude,glob)**/$rest/**")
-    done
     pytest_ignored=""
-    tracked=$(git -c core.quotePath=false ls-files -- ':(glob)**/pyproject.toml' 2> /dev/null) || return 1
-    [[ $'\n'"$tracked"$'\n' == *$'\n'pyproject.toml$'\n'* ]] || return 0
-    while IFS= read -r path; do
+    failed=""
+    while IFS= read -r -d '' path || { failed=$path; false; }; do
         dir=${path%pyproject.toml}
+        members="$members/$dir"$'\n'
         while [[ "$seen" != *$'\n'"/$dir"$'\n'* ]]; do
             seen="$seen/$dir"$'\n'
             for file in pytest.toml .pytest.toml pytest.ini .pytest.ini pyproject.toml tox.ini setup.cfg .coveragerc; do
@@ -81,16 +82,28 @@ ignored_pytest() {
             dir=${dir%/}
             if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
         done
-    done <<< "$tracked"
-    found=$(git -c core.quotePath=false ls-files --others --ignored --exclude-standard -- "${specs[@]}" 2> /dev/null) || return 1
+    done < <(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files -z -- ':(glob)**/pyproject.toml' 2> /dev/null || printf x)
+    [[ -z "$failed" ]] || return 1
+    [[ "$members" == *$'\n/\n'* ]] || return 0
+    found=$(GIT_LITERAL_PATHSPECS=0 git -c core.quotePath=false ls-files --others --ignored --exclude-standard -- "${specs[@]}" 2> /dev/null) || return 1
     while IFS= read -r path; do
         [[ -n "$path" && "$path" != */ ]] || continue
         if [[ "$path" == */conftest.py ]]; then
-            rest=${path%/*} dir=""
-            while [[ -n "$rest" ]]; do
-                dir="$dir${rest%%/*}/"
-                [[ ! -e "${dir}pyvenv.cfg" && ! -e "${dir}conda-meta/history" ]] || continue 2
-                if [[ "$rest" == */* ]]; then rest=${rest#*/}; else rest=""; fi
+            dir=${path%/*}/
+            while [[ "$members" != *$'\n'"/$dir"$'\n'* ]]; do
+                dir=${dir%/}
+                if [[ "$dir" == */* ]]; then dir=${dir%/*}/; else dir=""; fi
+            done
+            rel=${path#"$dir"}
+            acc=$dir
+            [[ "$rel" == test*/conftest.py && "$rel" != */*/* ]] || while [[ "$rel" == */* ]]; do
+                comp=${rel%%/*}
+                rel=${rel#*/}
+                acc="$acc$comp/"
+                case "$comp" in
+                    .* | venv | build | dist | node_modules | *.egg | _darcs | CVS | '{arch}') continue 2 ;;
+                esac
+                [[ ! -f "${acc}pyvenv.cfg" && ! -f "${acc}conda-meta/history" ]] || continue 2
             done
         fi
         pytest_ignored="${pytest_ignored:+$pytest_ignored$'\n'}$path"
@@ -257,7 +270,7 @@ ambient_file() {
     full=${full#/}
     [[ -n "$full" ]] || full=.
     if [[ "$full" == .git || "$full" == .git/* ]]; then return 1; fi
-    full=$(git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
+    full=$(GIT_LITERAL_PATHSPECS=0 git ls-files -- ":(literal)$full" 2> /dev/null) || return 2
     [[ -z "$full" ]]
 }
 

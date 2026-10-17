@@ -630,16 +630,19 @@ one is missing or stale. A hook it did not write is never overwritten.
   in every directory holding a tracked `pyproject.toml` and each directory
   above it up to the top level (`make test` starts a session in each
   member's directory, and pytest searches upward), and every `conftest.py`
-  except below a directory pytest's default `norecursedirs` skips (`.*`,
-  `venv`, `build`, `dist`, `node_modules`, `*.egg`, `_darcs`, `CVS`,
-  `{arch}`) or a virtual environment (a directory holding `pyvenv.cfg` or
-  `conda-meta/history`). The project's own `norecursedirs`, `testpaths` and
-  `collect_ignore` are not read, so a `conftest.py` they skip still counts.
-  Accepted misses (#157): a `conftest.py` in a directory only a project
-  setting makes pytest collect, configuration above the top level, a path
-  through a symlink or inside a nested repository (an ignored nested
-  repository does not count), a member directory whose path git quotes, and
-  an ignored module that tests or plugins import.
+  except one below a directory pytest does not enter inside the member it
+  belongs to (the nearest directory holding a tracked `pyproject.toml`): one
+  its default `norecursedirs` skips (`.*`, `venv`, `build`, `dist`,
+  `node_modules`, `*.egg`, `_darcs`, `CVS`, `{arch}`) or a virtual
+  environment (a directory holding a regular file `pyvenv.cfg` or
+  `conda-meta/history`). A member's `test*/conftest.py` always counts, as
+  pytest loads it at startup. The project's own
+  `norecursedirs`, `testpaths` and `collect_ignore` are not read, so a
+  `conftest.py` they skip still counts. Accepted misses (#157): a
+  `conftest.py` in a directory only a project setting makes pytest collect,
+  configuration above the top level, a path through a symlink or inside a
+  nested repository (an ignored nested repository does not count), and an
+  ignored module that tests or plugins import.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line

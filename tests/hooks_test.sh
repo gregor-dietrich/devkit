@@ -1281,6 +1281,55 @@ case_gate_ignored_pytest() { # files pytest reads, ignored by git
     yesrec || return 1
   fi
 }
+case_gate_ignored_pytest_members() { # a member's own directories, a root conftest.py, test* directories, GIT_LITERAL_PATHSPECS
+  pomproj pyproject.toml '[project]'
+  ignored conftest.py
+  norecord "$pytest_pre conftest.py $pytest_post" || return 1
+  # A member named like a skipped directory: its files still count.
+  pomproj pyproject.toml '[project]' packages/build/pyproject.toml '[project]'
+  ignored packages/build/pytest.ini
+  norecord "$pytest_pre packages/build/pytest.ini $pytest_post" || return 1
+  pomproj pyproject.toml '[project]' packages/build/pyproject.toml '[project]'
+  ignored packages/build/tests/conftest.py
+  norecord "$pytest_pre packages/build/tests/conftest.py $pytest_post" || return 1
+  # pytest loads test*/conftest.py at startup, whatever the directory holds.
+  pomproj pyproject.toml '[project]'
+  mkdir -p "$clone/tests/pyvenv.cfg"
+  ignored tests/conftest.py
+  norecord "$pytest_pre tests/conftest.py $pytest_post" || return 1
+  pomproj pyproject.toml '[project]'
+  ignored tests/pyvenv.cfg tests/conftest.py
+  norecord "$pytest_pre tests/conftest.py $pytest_post" || return 1
+  pomproj pyproject.toml '[project]'
+  ignored pytest.ini
+  norecord "$pytest_pre pytest.ini $pytest_post" GIT_LITERAL_PATHSPECS=1 || return 1
+  # A directory named pyvenv.cfg is no virtual environment.
+  pomproj pyproject.toml '[project]'
+  mkdir -p "$clone/src/pyvenv.cfg"
+  ignored src/sub/conftest.py
+  norecord "$pytest_pre src/sub/conftest.py $pytest_post" || return 1
+  # A member path git quotes (a double quote) still reaches the screen.
+  pomproj pyproject.toml '[project]' 'q"m/pyproject.toml' '[project]'
+  ignored 'q"m/pytest.ini'
+  norecord "$pytest_pre \"q\\\"m/pytest.ini\" $pytest_post" || return 1
+  if ! unwarned; then
+    pomproj pyproject.toml '[project]'
+    ignored env/conda-meta/history env/lib/p/conftest.py
+    yesrec || return 1
+    pomproj pyproject.toml '[project]'
+    ignored tests/build/conftest.py
+    yesrec || return 1
+  fi
+}
+case_gate_literal_pathspecs() { # an inherited GIT_LITERAL_PATHSPECS does not blind strictly_clean
+  fresh
+  g update-index --skip-worktree file && echo two >>"$clone/file"
+  norecord "the tree was not clean at the start" GIT_LITERAL_PATHSPECS=1 || return 1
+  gated || return 1
+  g update-index --skip-worktree file && echo two >>"$clone/file"
+  say env GIT_LITERAL_PATHSPECS=1 git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both"
+}
 case_gate_ignored_pytest_during() { # an ignored file that appears during the run
   pomproj pyproject.toml '[project]'
   norecord "git ignores files pytest reads that appeared during the run: pytest.ini $pytest_post" \
@@ -1559,6 +1608,8 @@ t "make gate records nothing for a settings.xml activeProfile it does not define
 t "make gate records nothing while git ignores a .mvn/ file Maven reads, but does under .mvn/wrapper/ and for a committed one" case_gate_ignored_mvn
 t "make gate records nothing for an ignored .mvn/ file that appeared during the run" case_gate_ignored_mvn_during
 t "make gate records nothing while git ignores a file pytest reads, but does for a venv's conftest.py, a nested repository, a committed file and a project with no tracked root pyproject.toml" case_gate_ignored_pytest
+t "make gate counts an ignored root conftest.py, a member named build and a test* directory, and ignores GIT_LITERAL_PATHSPECS" case_gate_ignored_pytest_members
+t "an inherited GIT_LITERAL_PATHSPECS does not hide a skip-worktree file from make gate or pre-push" case_gate_literal_pathspecs
 t "make gate records nothing for an ignored file pytest reads that appeared during the run" case_gate_ignored_pytest_during
 t "make gate records nothing for a POM profile activated by an environment variable, but does for an unset or empty one and a commented-out profile" case_gate_pom_env
 t "make gate reads the POMs of modules, profile modules and parents inside the tree, and nothing outside it" case_gate_pom_scope
