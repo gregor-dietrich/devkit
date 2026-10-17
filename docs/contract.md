@@ -1071,8 +1071,14 @@ run the tools from `.venv`.
 - `make audit` runs pip-audit on the third-party runtime dependencies
   `uv.lock` pins (`uv export --no-default-groups`, the project's own
   packages and its local path dependencies left out, what they depend on
-  kept), and passes, saying so, when there are none. It needs the network
-  and fails closed without it; neither `check` nor `test` runs it.
+  kept), and passes, saying so, when there are none. It runs pip-audit
+  twice over that export, against PyPI and then against OSV, both with
+  `--strict`, always both, and fails if either failed: PyPI's advisory data
+  omits advisories OSV carries, and OSV cannot tell an unknown package from
+  a clean one, so only PyPI's `--strict` fails closed on a dependency that
+  cannot be audited. It needs the network, both pypi.org's JSON API and
+  api.osv.dev, and fails closed without either; neither `check` nor `test`
+  runs it.
 - `make clean` removes `__pycache__`, `.pytest_cache`, `.ruff_cache`,
   `*.egg-info`, `dist`, `.coverage` and `.coverage.*` below the project
   root, skipping the root's `.git` and `.devkit`, every `.venv` and

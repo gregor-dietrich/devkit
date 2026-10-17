@@ -23,10 +23,18 @@ if ! grep -q '^[A-Za-z0-9]' "$tmp/requirements.txt"; then
 fi
 
 echo "Running pip-audit (needs the network)..."
+# Both services, always both so that each prints its findings: PyPI's advisory data omits advisories
+# OSV carries, and OSV cannot tell an unknown package from a clean one, so only PyPI's --strict
+# fails closed on a dependency that cannot be audited.
 # --strict: a dependency pip-audit could not audit fails the run instead of passing with a warning.
-"$pip_audit" --strict --no-deps --disable-pip -r "$tmp/requirements.txt" || {
+failed=false
+for service in pypi osv; do
+    echo "Auditing against $service..."
+    "$pip_audit" -s "$service" --strict --no-deps --disable-pip -r "$tmp/requirements.txt" || failed=true
+done
+if $failed; then
     echo "ERROR: pip-audit reported vulnerable or unauditable dependencies; see its output above." >&2
     exit 1
-}
+fi
 
 echo "Audit completed."

@@ -14,7 +14,8 @@
 #          tests/pinned_maven_test.sh, tests/mvn_checked_test.sh,
 #          tests/sealed_dir_test.sh,
 #          tests/coverage_floor_test.sh,
-#          tests/python_clean_test.sh, tests/java_clean_test.sh,
+#          tests/python_clean_test.sh, tests/python_audit_test.sh,
+#          tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/anchored_match_test.sh,
 #          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh
 #          and tests/tag_test.sh,
@@ -126,12 +127,12 @@
 #          Python pin below 3.11, its format, no .python-version,
 #          COVERAGE_FLOOR unset or not a percent, no install, MODULES against
 #          the workspace or as a glob, no [python.duplication] or
-#          [tool.vulture] paths) and audit (a vulnerable dependency) to fail
-#          for that reason. Expect make format to fix a format and an
-#          unused-import break so that lint passes, and audit to pass on
-#          current runtime dependencies, one of them through a local path
-#          dependency. In the workspace, whose core is a package and app a
-#          virtual member: test ONLY=packages/app tests app alone, lint
+#          [tool.vulture] paths) and audit (a vulnerable dependency, one only
+#          OSV lists) to fail for that reason. Expect make format to fix a
+#          format and an unused-import break so that lint passes, and audit
+#          to pass on current runtime dependencies, one of them through a
+#          local path dependency. In the workspace, whose core is a package
+#          and app a virtual member: test ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
 #          fails, and JUNIT_DIR=reports writes one report per member into the
 #          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
@@ -191,6 +192,7 @@ shell_tests() { # every test file of the shell part, run again by the floor part
   check "sealed_dir tests" "$root/tests/sealed_dir_test.sh"
   check "coverage_floor tests" "$root/tests/coverage_floor_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
+  check "python audit tests" "$root/tests/python_audit_test.sh"
   check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "anchored_match tests" "$root/tests/anchored_match_test.sh"
@@ -941,6 +943,15 @@ py_vulnerable() {
     make_says fail "$work/py-vulnerable" audit "in 1 package" "jinja2 3.1.4"
 }
 
+# A dependency whose advisory only OSV carries (mako 1.4.1, PYSEC-2026-4243 = GHSA-5639-2j2p-m4mx,
+# 2026-10): the PyPI run alone passes it, so only the OSV run can fail this. It stops discriminating
+# once PyPI lists the advisory, which is why tests/python_audit_test.sh stubs pip-audit and asserts
+# both runs.
+py_osv_only() {
+  py_copy single osv-only relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["mako==1.4.1"]/' &&
+    make_says fail "$work/py-osv-only" audit "mako 1.4.1" "PYSEC-2026-4243"
+}
+
 # Current runtime dependencies without advisories, neither one pip-audit imports: six, and attrs
 # through helper, a local path dependency (core's pyproject.toml renamed), which audit leaves out.
 py_audited() {
@@ -1007,6 +1018,7 @@ python_negatives() {
   check "python-uv-workspace: make lint ONLY=packages/app skips core's ruff passes" py_only_lint "$quotes"
   check "python-uv-workspace: JUNIT_DIR=reports writes one report per member into the project" py_junit
   check "python-uv-single: a vulnerable dependency fails make audit" py_vulnerable
+  check "python-uv-single: a dependency with an OSV-only advisory fails make audit" py_osv_only
   check "python-uv-single: make audit passes on current dependencies, leaving a path one out" py_audited
 }
 

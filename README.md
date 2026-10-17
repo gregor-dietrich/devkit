@@ -319,6 +319,10 @@ fails `make lint`: fix it, or exclude it with a
 `.python-version` older than 3.11: raise it with `requires-python`, then
 `uv lock` and `make install`.
 
+`make audit` in a uv project now also queries OSV (api.osv.dev), which a
+network allowing only PyPI must open. It takes longer (about half a minute
+on a 100-pin lock) and can now fail on advisories PyPI did not list.
+
 ### Upgrading from v0.6.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,
