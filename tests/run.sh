@@ -549,7 +549,7 @@ class HelperTest {
 JAVA
   check "java-monolith: an unknown assertion helper fails make lint, PMD finding one violation" \
     make_says fail "$dir" lint "has found 1 violation"
-  sed_into "$dir/pom.xml" 's|<project.build.sourceEncoding>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
+  sed_into "$dir/pom.xml" 's|<maven.compiler.release>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
   # A project's own resources configuration that would copy XML unfiltered must not reach the ruleset.
   sed_into "$dir/pom.xml" 's|</project>|  <build><plugins><plugin><artifactId>maven-resources-plugin</artifactId><configuration><nonFilteredFileExtensions><nonFilteredFileExtension>xml</nonFilteredFileExtension></nonFilteredFileExtensions></configuration></plugin></plugins></build>\n&|'
   check "java-monolith: pmd.extraAssertMethodNames makes make lint accept it, whatever the project's plugin-level resources configuration" \

@@ -24,6 +24,10 @@
   <packaging>pom</packaging>
 
   <properties>
+    <!-- What checkstyle.xml reads and the resources execution hard-codes. A project's own
+         <properties> override them. -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <checkstyle.version>14.3.0</checkstyle.version>
     <checkstyle-plugin.version>3.6.0</checkstyle-plugin.version>
     <compiler-plugin.version>3.16.0</compiler-plugin.version>
@@ -210,6 +214,9 @@
                    classpath gets a harmless ClassNotFoundException trace on stderr, after
                    which JUL falls back to its default manager. -->
               <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <!-- jacoco-maven-plugin writes the coverage report; quarkus-jacoco's own would show
+                   0%. A project that wants it sets this to true in its own configuration. -->
+              <quarkus.jacoco.report>false</quarkus.jacoco.report>
               <maven.home>${maven.home}</maven.home>
             </systemPropertyVariables>
           </configuration>
@@ -236,6 +243,9 @@
               <native.image.path>
                 ${project.build.directory}/${project.build.finalName}-runner</native.image.path>
               <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <!-- jacoco-maven-plugin writes the coverage report; quarkus-jacoco's own would show
+                   0%. A project that wants it sets this to true in its own configuration. -->
+              <quarkus.jacoco.report>false</quarkus.jacoco.report>
               <maven.home>${maven.home}</maven.home>
             </systemPropertyVariables>
           </configuration>

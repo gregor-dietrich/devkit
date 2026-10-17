@@ -786,6 +786,13 @@ inherit it, and Maven reads it through the link:
   (with a `justification`), the in-source alternative to
   `spotbugs-exclude.xml`, declares that artifact without a `<version>` or
   `<scope>`; one it states overrides the parent's.
+- It sets `project.build.sourceEncoding` and `project.reporting.outputEncoding`
+  to `UTF-8`, the encoding the shared configs read; a project's own
+  `<properties>` override them.
+- Surefire and failsafe set `quarkus.jacoco.report=false` in the test JVM:
+  jacoco-maven-plugin writes the coverage report, and quarkus-jacoco's own
+  would show 0%. A project that wants it back sets the property to `true` in
+  its own `<systemPropertyVariables>`.
 - It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
   `this-escape` and `classfile`, Error Prone with NullAway), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
