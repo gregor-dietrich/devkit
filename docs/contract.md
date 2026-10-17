@@ -656,11 +656,16 @@ one is missing or stale. A hook it did not write is never overwritten.
 ## Maven configuration
 
 Shared gate configs live in `java/config/` (`checkstyle.xml`,
-`pmd-ruleset.xml`, `eclipse-formatter.xml`). devkit's [parent
-POM](#parent-pom) reads them as
+`pmd-ruleset.xml`, `eclipse-formatter.xml`, `spotbugs-baseline.xml`).
+devkit's [parent POM](#parent-pom) reads them as
 `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD reads
 a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
-Project-specific files (`dependency-check-suppression.xml`,
+SpotBugs reads devkit's `spotbugs-baseline.xml` and then the module's own
+`spotbugs-exclude.xml`: devkit's excludes only
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION`, which reports every rethrow of a
+caught `RuntimeException`; PMD's `AvoidThrowingRawExceptionTypes` still
+rejects a new one. A project that sets `excludeFilterFile` itself replaces
+both. Project-specific files (`dependency-check-suppression.xml`,
 `spotbugs-exclude.xml`, `checkstyle-suppressions.xml`,
 `checkstyle-project.xml`) stay in the project.
 

@@ -12,4 +12,14 @@ public final class Greeter {
     public String greet(String name) {
         return name.toLowerCase().isBlank() ? "Hello, world" : "Hello, " + name;
     }
+
+    /** Parses {@code text}, rethrowing a RuntimeException it catches. */
+    public int parse(String text) {
+        try {
+            return Integer.parseInt(text);
+        } catch (RuntimeException e) {
+            e.addSuppressed(new IllegalStateException("parse failed"));
+            throw e;
+        }
+    }
 }

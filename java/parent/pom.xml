@@ -415,7 +415,7 @@
             </dependency>
           </dependencies>
           <configuration>
-            <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+            <excludeFilterFile>${maven.multiModuleProjectDirectory}/.devkit/java/config/spotbugs-baseline.xml,${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
             <effort>Max</effort>
             <threshold>Low</threshold>
           </configuration>
