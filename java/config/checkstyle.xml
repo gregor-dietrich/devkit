@@ -35,6 +35,12 @@
             default="checkstyle-suppressions.xml" />
         <property name="optional" value="false" />
     </module>
+    <!-- Test sources may suppress NullAway on a method that passes null on purpose; the ban on
+         the suppression (SuppressWarningsNullAway below) holds for main sources. -->
+    <module name="SuppressionSingleFilter">
+        <property name="id" value="SuppressWarningsNullAway" />
+        <property name="files" value="[\\/]src[\\/]test[\\/]" />
+    </module>
 
     <!-- Checks for whitespace                               -->
     <!-- See http://checkstyle.org/config_whitespace.html -->
@@ -201,9 +207,10 @@
             <property name="message"
                 value="@SuppressWarnings(&quot;PMD.DuplicatedCode&quot;) is banned - refactor the code to eliminate duplication properly." />
         </module>
-        <!-- Scoped exceptions live in each project's checkstyle-suppressions.xml: the
-             Jackson response DTOs whose no-arg deserialization constructors legitimately
-             leave fields unset, and test sources (Mockito/builder setup). -->
+        <!-- Test sources are exempt through the SuppressionSingleFilter above. Other scoped
+             exceptions live in each project's checkstyle-suppressions.xml: the Jackson
+             response DTOs whose no-arg deserialization constructors legitimately leave
+             fields unset. -->
         <module name="RegexpSinglelineJava">
             <property name="id" value="SuppressWarningsNullAway" />
             <property name="format"

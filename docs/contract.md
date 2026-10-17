@@ -841,6 +841,17 @@ inherit it, and Maven reads it through the link:
   `THIRD-PARTY.properties` instead, which it reads only under
   `license.useMissingFile`; there, `force` has it rewrite that file, with a
   fresh timestamp, on every build.
+- NullAway also checks test sources. It treats a field a test framework
+  injects as initialized (`ExcludedFieldAnnotations`: NullAway's own list,
+  which covers Mockito's `@Mock`, `@Spy`, `@Captor` and `@InjectMocks`,
+  JUnit's `@TempDir` and `jakarta.inject.Inject`, plus the property
+  `nullaway.excluded.field.annotations`, which adds Quarkus' `@InjectMock`
+  and `@InjectSpy`), and an AssertJ, Truth or Hamcrest assertion such as
+  `assertThat(x).isNotNull()` as a null check (`HandleTestAssertionLibraries`;
+  NullAway reads JUnit's `assertNotNull` as one anyway). A test that passes `null`
+  on purpose still suppresses NullAway on that method: the shared Checkstyle
+  config bans `@SuppressWarnings("NullAway")` in main sources and allows it
+  under `src/test`, so no project suppression line is needed for it.
 - flatten-maven-plugin (execution `flatten`, at `verify`, after the tests
   and Quarkus' build) writes the pom a lifecycle `install` or `deploy`
   publishes (to `target/.flattened-pom.xml`), in its `ossrh` mode. It
@@ -876,6 +887,7 @@ inherit it, and Maven reads it through the link:
   | `skipITs` | `true` |
   | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
   | `nullaway.annotated.packages` | `${project.groupId}` |
+  | `nullaway.excluded.field.annotations` | `io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy`; comma-separated, added to NullAway's own `ExcludedFieldAnnotations`, which an override does not remove |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
 
 - PMD does not read `pmd.extraAssertMethodNames` itself: at `initialize` the

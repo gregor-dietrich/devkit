@@ -588,6 +588,13 @@ negatives() {
     's/^package .*/&\n\nimport java.util.Objects;/; s/return name\./return Objects.requireNonNull(name)./'
   # GreeterTest imports the banned class too; only its suppression lets lint pass.
   negative suppression lint "Fixture project rule" checkstyle-suppressions.xml '/FixtureObjects/d'
+  # The shared config bans a NullAway suppression in main sources and exempts src/test, with no
+  # line in the fixture's checkstyle-suppressions.xml.
+  negative nullaway-suppression lint "fix nullability with @Nullable" "$main" \
+    's/^public final class/@SuppressWarnings("NullAway")\n&/'
+  edited "$work/nullaway-in-tests" "$test" 's/^    @Test$/    @SuppressWarnings("NullAway")\n&/'
+  check "java-monolith: a NullAway suppression in a test source passes make lint" \
+    make_says pass "$work/nullaway-in-tests" lint "Lint checks completed."
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'

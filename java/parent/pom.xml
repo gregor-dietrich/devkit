@@ -68,6 +68,10 @@
     <pmd.extraAssertMethodNames></pmd.extraAssertMethodNames>
     <skipITs>true</skipITs>
     <nullaway.annotated.packages>${project.groupId}</nullaway.annotated.packages>
+    <!-- Added to NullAway's own ExcludedFieldAnnotations (Mockito, @TempDir, jakarta.inject.Inject
+         and more), which stay in force: fields the Quarkus test extension injects are treated as
+         initialized. -->
+    <nullaway.excluded.field.annotations>io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy</nullaway.excluded.field.annotations>
     <!-- Appended to the Error Prone argument, e.g. -XepExcludedPaths:.*/generated-sources/.* -->
     <error-prone.extra.args></error-prone.extra.args>
   </properties>
@@ -174,6 +178,8 @@
               <arg>-XDcompilePolicy=simple</arg>
               <arg>-Xplugin:ErrorProne -Xep:NullAway:ERROR
                 -XepOpt:NullAway:AnnotatedPackages=${nullaway.annotated.packages}
+                -XepOpt:NullAway:ExcludedFieldAnnotations=${nullaway.excluded.field.annotations}
+                -XepOpt:NullAway:HandleTestAssertionLibraries=true
                 -Xep:FutureReturnValueIgnored:ERROR
                 -Xep:NullablePrimitive:ERROR
                 -Xep:NonApiType:ERROR
