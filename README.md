@@ -170,7 +170,8 @@ bump of the closure.
 When a plugin's version, or parent configuration that changes what a plugin
 resolves, changes in `java/parent/pom.xml`, run `make maven-checksums` and
 commit `java/checksums/checksums.sha256` with the change; so does a bump of
-the Maven `scripts/lib/pinned_maven.sh` pins. It records under that Maven,
+the Maven `scripts/lib/pinned_maven.sh` pins, and a change to a `java-*`
+fixture's dependencies. It records under that Maven,
 so it needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
 Maven Central, but no Maven on `PATH`.
 `tests/run.sh shell` fails on a pinned jar, or the pinned Maven
@@ -188,8 +189,9 @@ hours before the bump's commit (the cutoff), so a compromised release is
 likelier to be caught and withdrawn before it ships: a plugin or tool version in
 `java/parent/pom.xml`, the Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
 in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
-commit in `.gitea/workflows/`, and a fixture's `junit.version` or `uv.lock`
-in `tests/fixtures/`. A closure's lockfile is deleted and regenerated with
+commit in `.gitea/workflows/`, and a fixture's `junit.version`,
+`assertj.version` or `uv.lock` in `tests/fixtures/`. A closure's lockfile is
+deleted and regenerated with
 `npm install --package-lock-only --registry=https://registry.npmjs.org/
 --before=<cutoff>`, since over an existing lockfile `--before` filters
 nothing. A fixture's `uv.lock` is regenerated with `uv lock --upgrade

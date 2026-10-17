@@ -413,11 +413,19 @@
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>${spotbugs-plugin.version}</version>
           <dependencies>
-            <!-- The analyzer at spotbugs.version, not the plugin's default. -->
+            <!-- The analyzer at spotbugs.version, not the plugin's default. This replaces the
+                 plugin's own declaration, so it repeats that one's exclusion: the plugin logs
+                 through log4j-to-slf4j, and log4j-core would be a second log4j backend. -->
             <dependency>
               <groupId>com.github.spotbugs</groupId>
               <artifactId>spotbugs</artifactId>
               <version>${spotbugs.version}</version>
+              <exclusions>
+                <exclusion>
+                  <groupId>org.apache.logging.log4j</groupId>
+                  <artifactId>log4j-core</artifactId>
+                </exclusion>
+              </exclusions>
             </dependency>
           </dependencies>
           <configuration>

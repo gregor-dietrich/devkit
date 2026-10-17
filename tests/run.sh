@@ -24,7 +24,10 @@
 #          own tests rely on, and that each of those failures is reported,
 #          and that docs/contract.md lists the parent's *.version properties
 #          and execution ids, no more and no fewer, and that each way of
-#          drifting is reported,
+#          drifting is reported, that spotbugs-plugin.version is
+#          spotbugs.version plus a fourth component, and that the parent's
+#          SpotBugs analyzer dependency excludes log4j-core, as the plugin's
+#          own declaration does,
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin, plugin dependency and annotation processor the parent
 #          pins and of the plugins check_frontend_deps.py runs, and that a
@@ -195,6 +198,8 @@ shell_part() {
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
   check "parent: spotbugs-plugin.version is spotbugs.version plus a fourth component" spotbugs_versions_match
+  check "parent: the SpotBugs analyzer dependency excludes log4j-core, as the plugin's own declaration does" \
+    spotbugs_log4j_excluded "$root/java/parent/pom.xml"
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
     lists_reject 's|<includedLicense>Plexus<|<includedLicense>Plex\nus<|' "includedLicense entries that can never match"
   check "parent: the license lists check rejects an includedLicense name with a tab" \
@@ -783,6 +788,19 @@ spotbugs_versions_match() {
   plugin=$(sed -n 's|^ *<spotbugs-plugin.version>\(.*\)</spotbugs-plugin.version>.*|\1|p' "$root/java/parent/pom.xml")
   analyzer=$(spotbugs_version)
   [[ -n $analyzer && $plugin =~ ^${analyzer//./\\.}\.[0-9]+$ ]]
+}
+
+# spotbugs_log4j_excluded POM: POM's declaration of the SpotBugs analyzer as a plugin dependency, which
+# replaces the plugin's own, repeats that one's exclusion of log4j-core (the plugin logs through
+# log4j-to-slf4j).
+spotbugs_log4j_excluded() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+name = lambda e: e.findtext("m:artifactId", "", ns)
+deps = [d for p in ET.parse(sys.argv[1]).getroot().iterfind(".//m:plugin", ns) if name(p) == "spotbugs-maven-plugin"
+        for d in p.iterfind("m:dependencies/m:dependency", ns) if name(d) == "spotbugs"]
+ok = deps and all(any(name(e) == "log4j-core" for e in d.iterfind("m:exclusions/m:exclusion", ns)) for d in deps)
+sys.exit(None if ok else "the SpotBugs analyzer dependency does not exclude log4j-core")' "$1"
 }
 
 # source_encoding DIR: the parent's UTF-8 source and report encoding reach DIR, whose pom sets neither.

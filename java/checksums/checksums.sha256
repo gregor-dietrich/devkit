@@ -291,6 +291,9 @@ cd1beaa4560dc4dfdb826b9d809e464db22526dfb54264bae78a6ff7efb08e1f  javax/xml/bind
 99bcb9ce63b5c86e84f4831cb58f9dc2c1409b3ea36341e90f68f43a831d4189  joda-time/joda-time/2.10.4/joda-time-2.10.4.pom
 6f65df20eed028bc1a2eba1506e27f943203534d099f94e16b6842391afb72f5  joda-time/joda-time/2.14.2/joda-time-2.14.2.jar
 2d27339784451720f09c1c671ab5378141e2699116c620e762400850ebea0621  joda-time/joda-time/2.14.2/joda-time-2.14.2.pom
+90ea531731508eea75ff9295141c508d7f9a53d1a05f45b80f8f4999521426ef  net/bytebuddy/byte-buddy-parent/1.18.3/byte-buddy-parent-1.18.3.pom
+d78396e3c5bce3f2865c9186647481e5589d34cacc632484715b686108d17c66  net/bytebuddy/byte-buddy/1.18.3/byte-buddy-1.18.3.jar
+7157b622a0d6885cb5526a10f1220ddf090dbb52ca2fe38c32cc69c4f1530788  net/bytebuddy/byte-buddy/1.18.3/byte-buddy-1.18.3.pom
 3b3864f5b449e9c3c24b16861524b622b086563f44e0cd8384c8efc5a6052f82  net/java/dev/jna/jna-platform/5.19.1/jna-platform-5.19.1.jar
 3e9603f6f0e7a49c88378d2a82bcaf53e33ad67dbc90a8d5a27e09a9736fce50  net/java/dev/jna/jna-platform/5.19.1/jna-platform-5.19.1.pom
 281440811268e65d9e266b3cc898297e214e04f09740d0386ceeb4a8923d63bf  net/java/jvnet-parent/1/jvnet-parent-1.pom
@@ -696,6 +699,8 @@ b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38  org/apiguardia
 32355081d109095c3d5d374d5a43b4f4c1b75d549e983ef50723e2772e5302a0  org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.pom
 22b87dda9aab83fa1d0f3ea409b524e7a44921cf8f5f87999cf59046f0fe0bc3  org/assertj/assertj-bom/3.27.6/assertj-bom-3.27.6.pom
 1c09f6c04c905e1e5cdb22d5dfa5f11a496e19e881de0850b523ed53a0519f5b  org/assertj/assertj-bom/3.27.7/assertj-bom-3.27.7.pom
+c4a445426c3c2861666863b842cc4ec7bbb1c4226fefd370b6d2fe83d6c4ff0f  org/assertj/assertj-core/3.27.7/assertj-core-3.27.7.jar
+95a10dcfb3ba9aad4d0b5e9c523a8d583377bee5ecd4ba37e19e55a34667f079  org/assertj/assertj-core/3.27.7/assertj-core-3.27.7.pom
 29ba9c5ce1a94b700bd823c4ed612f5827b590f19a49775fd7eb8f997f8aa371  org/checkerframework/checker-qual/3.19.0/checker-qual-3.19.0.pom
 e4ce1376cc2735e1dde220b62ad0913f51297704daad155a33f386bc5db0d9f7  org/checkerframework/checker-qual/3.37.0/checker-qual-3.37.0.jar
 02392fbd4ce21901f945615472b1d4d4d3591b3aabdf013105f5c92ec32cb4f0  org/checkerframework/checker-qual/3.37.0/checker-qual-3.37.0.pom
