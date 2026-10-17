@@ -26,4 +26,9 @@ class GreeterTest {
         assertEquals(42, greeter.parse("42"));
         assertThrows(NumberFormatException.class, () -> greeter.parse("x"));
     }
+
+    @Test
+    void theParentSwitchesQuarkusJacocoReportOff() {
+        assertEquals("false", System.getProperty("quarkus.jacoco.report"));
+    }
 }

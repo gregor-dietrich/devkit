@@ -296,8 +296,17 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 The parent now manages `com.github.spotbugs:spotbugs-annotations` at the
 SpotBugs version it runs (`spotbugs.version`), in scope `provided`. A
 consumer that depends on it drops the `<version>` (and any property behind
-it) and the `<scope>` from that dependency; a version or scope it keeps
-overrides the parent's.
+it) and the `<scope>` from that dependency; a literal version or scope it
+keeps, or one behind a property of another name, overrides the parent's. A
+property of its own named `spotbugs.version` must go: the parent owns that
+name now, and `parent_check` fails every Maven target, naming it, until the
+property is removed.
+
+A multi-module project that kept one `checkstyle-xpath-suppressions.xml` at
+the root, which was read from Maven's working directory, moves its entries
+into each module's own file: each module now reads it from its own
+directory. A project that overrides the checkstyle plugin's
+`<propertyExpansion>` without the xpath key keeps the old behaviour.
 
 The license allowlist gains these names, so a consumer's own appended
 `<includedLicense>` entries for them become redundant and may be dropped:
@@ -309,22 +318,22 @@ The license allowlist gains these names, so a consumer's own appended
 `CDDL + GPLv2 with classpath exception`,
 `Universal Permissive License, Version 1.0` and `UPL-1.0`.
 
-Nothing else in a Maven project has to change, but these entries in its own
-files are now redundant and can go: `project.build.sourceEncoding` and
-`project.reporting.outputEncoding` in the root pom (the parent sets both to
-`UTF-8`); a `<suppress checks="AbbreviationAsWordInName"
-files=".*IT\.java$"/>` in `checkstyle-suppressions.xml` (the shared
-Checkstyle accepts failsafe's `*IT` names); the line exempting test sources
+These entries in a project's own files are now redundant and can go:
+`project.build.sourceEncoding` and `project.reporting.outputEncoding` in the
+root pom (the parent sets both to `UTF-8`); a `<suppress
+checks="AbbreviationAsWordInName" files=".*IT\.java$"/>` in
+`checkstyle-suppressions.xml`, if it covered nothing but the `*IT` class
+names (the shared Checkstyle accepts them); the line exempting test sources
 from the `@SuppressWarnings("NullAway")` ban (the shared config exempts
 `src/test` itself); a class-level `@SuppressWarnings("NullAway")` on a test
-class whose only unset fields Mockito, JUnit's `@TempDir`, `@Inject` or
-Quarkus' `@InjectMock` and `@InjectSpy` inject; a
-`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION` match in `spotbugs-exclude.xml`
-(devkit's `java/config/spotbugs-baseline.xml` excludes it, read before the
-module's own); and `%test.quarkus.jacoco.report=false` in
-`application.properties` (surefire and failsafe set it). A module's
-`checkstyle-xpath-suppressions.xml` is now read from the module's own
-directory, not Maven's working directory.
+class, if it covered nothing but fields Mockito, JUnit's `@TempDir`,
+`@Inject` or Quarkus' `@InjectMock` and `@InjectSpy` inject; a
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION` match in `spotbugs-exclude.xml`,
+unless the project sets `excludeFilterFile` itself (devkit's
+`java/config/spotbugs-baseline.xml` excludes it, read before the module's
+own); and `%test.quarkus.jacoco.report=false` in `application.properties`
+(surefire and failsafe set it). A removal that was hiding something else
+fails the build loudly.
 
 ### Upgrading from v0.6.x
 

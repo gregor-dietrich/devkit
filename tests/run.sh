@@ -86,7 +86,13 @@
 #          Expect lint to fail on a test whose only check is an assertion
 #          helper PMD does not know, until the pom's pmd.extraAssertMethodNames
 #          names it, and then to pass whatever plugin-level resources
-#          configuration the pom carries.
+#          configuration the pom carries. Expect the monolith to resolve
+#          spotbugs-annotations, provided, at the parent's spotbugs.version,
+#          SpotBugs to report that analyzer, the parent's UTF-8 encoding to
+#          reach it, jars under the common license spellings to pass,
+#          checkstyle-xpath-suppressions.xml to suppress a violation from
+#          another working directory too, and a NullAway suppression to fail
+#          lint in main sources and pass in tests.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.34 and ssh-keygen
@@ -188,6 +194,7 @@ shell_part() {
   check "tag tests" "$root/tests/tag_test.sh"
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
+  check "parent: spotbugs-plugin.version is spotbugs.version plus a fourth component" spotbugs_versions_match
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
     lists_reject 's|<includedLicense>Plexus<|<includedLicense>Plex\nus<|' "includedLicense entries that can never match"
   check "parent: the license lists check rejects an includedLicense name with a tab" \
@@ -315,15 +322,18 @@ checksums_reject() { # checksums_reject SED TEXT...: the check fails on the chec
 # tests and fixtures rely on: "MIT License", for foreign_group's override; "Unknown license", the
 # plugin's key for a dependency with no license, which failOnMissing must keep reporting as
 # foreign_group expects; "Eclipse Public License v2.0", the license of the fixtures' junit jars;
-# "The Apache License, Version 2.0", that of their opentest4j and apiguardian jars. No name is
-# listed twice.
+# "The Apache License, Version 2.0", that of their opentest4j and apiguardian jars; "GNU LESSER
+# GENERAL PUBLIC LICENSE, Version 2.1" and "The Apache Software License, Version 2.0", those of
+# java-monolith's spotbugs-annotations and its jsr305; "Apache-2.0", that of its assertj-core. No
+# name is listed twice.
 license_lists_whole() {
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 root = ET.parse(sys.argv[1]).getroot()
 included = [e.text or "" for e in root.iterfind(".//m:includedLicense", ns)]
 odd = lambda e: not e or re.search(r"[\n\t]|  |^\s|\s$", e)
-required = {"Eclipse Public License v2.0", "The Apache License, Version 2.0", "MIT License", "Unknown license"}
+required = {"Eclipse Public License v2.0", "The Apache License, Version 2.0", "MIT License", "Unknown license",
+    "GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1", "The Apache Software License, Version 2.0", "Apache-2.0"}
 problems = {
     "includedLicense entries that can never match": [e for e in included if odd(e)],
     "includedLicense entries listed twice": sorted({e for e in included if included.count(e) > 1}),
@@ -558,7 +568,9 @@ JAVA
 
 # A violation the shared config reports on an AST node (an abbreviation in a method name) fails lint
 # until checkstyle-xpath-suppressions.xml, which the parent wires like checkstyle-suppressions.xml,
-# suppresses it.
+# suppresses it. make lint runs in the project root, where the unwired property's default would find
+# the file too, so Checkstyle also runs from another working directory: only the parent's wiring to
+# ${project.basedir} finds the file there.
 xpath_suppression() {
   local dir=$work/negative-xpath
   edited "$dir" src/main/java/devkit/fixture/Greeter.java \
@@ -571,7 +583,10 @@ xpath_suppression() {
     <suppress-xpath checks="AbbreviationAsWordInName" query="//METHOD_DEF[./IDENT[@text='parseURL']]/IDENT" />
 </suppressions>
 XML
-  make_says pass "$dir" lint
+  make_says pass "$dir" lint || return
+  local mvn
+  mvn=$("$root/scripts/lib/pinned_maven.sh") &&
+    (cd "$work" && "$mvn" -B -q -f "$dir/pom.xml" -Dmaven.multiModuleProjectDirectory="$dir" checkstyle:check)
 }
 
 negatives() {
@@ -761,6 +776,24 @@ prepare() { # once per run: the temp dir, a clean environment and the published 
 # The spotbugs.version property of the parent under test.
 spotbugs_version() { sed -n 's|^ *<spotbugs.version>\(.*\)</spotbugs.version>.*|\1|p' "$root/java/parent/pom.xml"; }
 
+# spotbugs_versions_match: spotbugs-plugin.version is spotbugs.version plus a fourth component, so a
+# release that bumps the plugin and forgets the analyzer fails here, offline.
+spotbugs_versions_match() {
+  local plugin analyzer
+  plugin=$(sed -n 's|^ *<spotbugs-plugin.version>\(.*\)</spotbugs-plugin.version>.*|\1|p' "$root/java/parent/pom.xml")
+  analyzer=$(spotbugs_version)
+  [[ -n $analyzer && $plugin =~ ^${analyzer//./\\.}\.[0-9]+$ ]]
+}
+
+# source_encoding DIR: the parent's UTF-8 source and report encoding reach DIR, whose pom sets neither.
+source_encoding() {
+  local mvn help property
+  mvn=$("$root/scripts/lib/pinned_maven.sh") && help=$(frontend_plugins "$root" | grep ':maven-help-plugin:') || return
+  for property in project.build.sourceEncoding project.reporting.outputEncoding; do
+    [[ $(cd "$1" && "$mvn" -B -q "$help:evaluate" -Dexpression="$property" -DforceStdout) == UTF-8 ]] || return
+  done
+}
+
 # annotations_managed DIR: dependency:list, run by the pinned Maven, resolves DIR's spotbugs-annotations
 # at the parent's spotbugs.version, in scope provided.
 annotations_managed() {
@@ -789,6 +822,8 @@ java_part() {
     annotations_managed "$work/java-monolith"
   check "java-monolith: the SpotBugs run reports the parent's spotbugs.version" \
     analyzer_version "$work/java-monolith/target/spotbugsXml.xml"
+  check "java-monolith: the parent's UTF-8 source and report encoding reach a fixture that sets neither" \
+    source_encoding "$work/java-monolith"
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group

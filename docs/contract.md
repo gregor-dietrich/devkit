@@ -795,7 +795,11 @@ inherit it, and Maven reads it through the link:
   at it, in scope `provided`, so a project that uses `@SuppressFBWarnings`
   (with a `justification`), the in-source alternative to
   `spotbugs-exclude.xml`, declares that artifact without a `<version>` or
-  `<scope>`; one it states overrides the parent's.
+  `<scope>`; a literal version or scope, or one behind a property of
+  another name, overrides the parent's (a project property named
+  `spotbugs.version` fails `parent_check`, as every parent version
+  property does). The managed version and scope also apply where another
+  dependency brings the annotations in; nothing needs them at runtime.
 - It sets `project.build.sourceEncoding` and `project.reporting.outputEncoding`
   to `UTF-8`, the encoding the shared configs read; a project's own
   `<properties>` override them.
@@ -847,11 +851,12 @@ inherit it, and Maven reads it through the link:
   JUnit's `@TempDir` and `jakarta.inject.Inject`, plus the property
   `nullaway.excluded.field.annotations`, which adds Quarkus' `@InjectMock`
   and `@InjectSpy`), and an AssertJ, Truth or Hamcrest assertion such as
-  `assertThat(x).isNotNull()` as a null check (`HandleTestAssertionLibraries`;
-  NullAway reads JUnit's `assertNotNull` as one anyway). A test that passes `null`
-  on purpose still suppresses NullAway on that method: the shared Checkstyle
-  config bans `@SuppressWarnings("NullAway")` in main sources and allows it
-  under `src/test`, so no project suppression line is needed for it.
+  `assertThat(x).isNotNull()` as a null check
+  (`HandleTestAssertionLibraries`; NullAway reads JUnit's `assertNotNull` as
+  one anyway). A test that passes `null` on purpose still suppresses
+  NullAway on that method: the shared Checkstyle config bans
+  `@SuppressWarnings("NullAway")` in main sources and allows it under
+  `src/test`, so no project suppression line is needed for it.
 - flatten-maven-plugin (execution `flatten`, at `verify`, after the tests
   and Quarkus' build) writes the pom a lifecycle `install` or `deploy`
   publishes (to `target/.flattened-pom.xml`), in its `ossrh` mode. It
@@ -886,8 +891,8 @@ inherit it, and Maven reads it through the link:
   | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
   | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
-  | `nullaway.annotated.packages` | `${project.groupId}` |
-  | `nullaway.excluded.field.annotations` | `io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy`; comma-separated, added to NullAway's own `ExcludedFieldAnnotations`, which an override does not remove |
+  | `nullaway.annotated.packages` | `${project.groupId}`; comma-separated, without spaces |
+  | `nullaway.excluded.field.annotations` | `io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy`; comma-separated, without spaces, added to NullAway's own `ExcludedFieldAnnotations`, which an override does not remove |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
 
 - PMD does not read `pmd.extraAssertMethodNames` itself: at `initialize` the
@@ -915,7 +920,10 @@ inherit it, and Maven reads it through the link:
   multi-module project that keeps one `checkstyle-suppressions.xml` at the
   root overrides the checkstyle plugin's `<propertyExpansion>` in its own
   `<pluginManagement>`, which replaces both properties, as
-  `tests/fixtures/java-multimodule/pom.xml` does.
+  `tests/fixtures/java-multimodule/pom.xml` does; an override that leaves
+  `org.checkstyle.google.suppressionxpathfilter.config` out has that filter
+  read `checkstyle-xpath-suppressions.xml` from Maven's working directory,
+  the project root under make.
 - Maven merges any list the parent sets with a consumer's redeclaration
   element by element, by position, unless the consumer's list carries
   `combine.children="append"`: a redeclared `<compilerArgs>` silently drops

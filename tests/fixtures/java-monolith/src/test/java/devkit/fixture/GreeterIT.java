@@ -11,4 +11,9 @@ class GreeterIT {
     void greetsByName() {
         assertEquals("Hello, Ada", new Greeter().greet("Ada"));
     }
+
+    @Test
+    void theParentSwitchesQuarkusJacocoReportOff() {
+        assertEquals("false", System.getProperty("quarkus.jacoco.report"));
+    }
 }
