@@ -328,16 +328,20 @@ install`.
 network allowing only PyPI must open. It takes longer (about half a minute
 on a 100-pin lock) and can now fail on advisories PyPI did not list.
 
-Run `make hooks` to refresh the git hooks: `pre-push` then also warns, and
-`make gate` no longer records HEAD, while git ignores a file pytest reads in a
-uv project (one with a tracked root `pyproject.toml`): `pytest.toml`,
-`.pytest.toml`, `pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`,
-`setup.cfg` or `.coveragerc` in a directory holding a tracked `pyproject.toml`
-or above one, or a `conftest.py` outside `.venv`, other virtual environments
-and the directories pytest skips by default. Committing or removing the file
-restores the record. Both also count `PYTEST_PLUGINS` and `COVERAGE_RCFILE`
-being set; unsetting them restores it. `make check` warns that the hooks are
-stale until `make hooks` has run.
+`make gate` now refuses to record HEAD from the bump on. Run `make hooks` to
+refresh the git hooks, so `pre-push` also warns; `make check` warns that the
+hooks are stale until then. Both act when git ignores a file pytest reads in a
+project with a tracked root `pyproject.toml`: `pytest.toml`, `.pytest.toml`,
+`pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`,
+`.coveragerc` or `.coveragerc.toml` in a directory holding a tracked
+`pyproject.toml` or above one, a `conftest.py` in or above such a directory,
+or below one outside `.venv`, other virtual environments and the directories
+pytest skips by default, a test module (`test_*.py`, `*_test.py`) below one
+under the same exceptions, or a `pyvenv.cfg` or `conda-meta/history` in a
+directory that holds tracked files. Committing or removing the file restores
+the record. Both also count `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`,
+`COVERAGE_RCFILE` and `COVERAGE_FORCE_CONFIG` being set; unsetting them
+restores it. The exact rule is in [Git hooks](docs/contract.md#git-hooks).
 
 ### Upgrading from v0.6.x
 

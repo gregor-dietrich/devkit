@@ -535,8 +535,9 @@ one is missing or stale. A hook it did not write is never overwritten.
   `MAVEN_BASEDIR` (Maven's project directory, where `.mvn/` and the
   parent's gate configurations are read from), `MAVEN_DEBUG_OPTS` (any
   value counts: it is for mvnDebug's debugger, and the launcher hands it
-  to java), `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `COVERAGE_RCFILE`, a JVM
-  option that can skip tests (see below) in `MAVEN_OPTS`,
+  to java), `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`,
+  `COVERAGE_RCFILE`, `COVERAGE_FORCE_CONFIG`, a JVM option that can skip
+  tests (see below) in `MAVEN_OPTS`,
   `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`,
   `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs
   (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`, unless
@@ -627,28 +628,53 @@ one is missing or stale. A hook it did not write is never overwritten.
   properties are the machine's, which `pre-push` runs on too, not ambient: a
   profile they activate does not count, and a `-D` one is a JVM option
   above.
-- The files pytest reads whether git tracks them or not count only in a
-  project with a tracked root `pyproject.toml`: its configuration files
-  `pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
-  `pyproject.toml`, `tox.ini` and `setup.cfg`, and coverage's `.coveragerc`,
-  in every directory holding a tracked `pyproject.toml` and each directory
-  above it up to the top level (`make test` starts a session in each
-  member's directory, and pytest searches upward), and every `conftest.py`
-  except one below a directory pytest does not enter inside the member it
-  belongs to (the nearest directory holding a tracked `pyproject.toml`): one
+
+  The files pytest reads whether git tracks them or not count only in a project
+  with a tracked root `pyproject.toml`. A pyproject directory is the nearest
+  directory holding a tracked `pyproject.toml`. In every pyproject directory and
+  each directory above it up to the top level (`make test` starts a session in
+  each member's directory, and pytest searches upward) these count: the
+  configuration files `pytest.toml`, `.pytest.toml`, `pytest.ini`,
+  `.pytest.ini`, `pyproject.toml`, `tox.ini` and `setup.cfg`, and coverage's
+  `.coveragerc` and `.coveragerc.toml`; and a `conftest.py`, whatever its path
+  components are, because pytest loads every ancestor `conftest.py` of the
+  session directory at startup. Below a pyproject directory, every `conftest.py`
+  and every test module matching pytest's default `python_files` (`test_*.py`,
+  `*_test.py`) counts, except one below a directory pytest does not enter: one
   its default `norecursedirs` skips (`.*`, `venv`, `build`, `dist`,
-  `node_modules`, `*.egg`, `_darcs`, `CVS`, `{arch}`) or a virtual
-  environment (a directory holding a regular file `pyvenv.cfg` or
-  `conda-meta/history`). A member's `test*/conftest.py` always counts, as
-  pytest loads it at startup. The project's own
-  `norecursedirs`, `testpaths` and `collect_ignore` are not read, so a
-  `conftest.py` they skip still counts. Accepted misses (#157): a
-  `conftest.py` in a directory only a project setting makes pytest collect,
-  configuration above the top level, a path through a symlink or inside a
-  nested repository (an ignored nested repository does not count), an
-  ignored module that tests or plugins import, a `sitecustomize.py` in a
-  `PYTHONPATH` entry, and, on a case-insensitive filesystem, a name that
-  differs from a screened one only in case.
+  `node_modules`, `*.egg`, `_darcs`, `CVS`, `{arch}`), `__pycache__`, or a
+  virtual environment (a directory holding a regular file `pyvenv.cfg` or
+  `conda-meta/history`). A pyproject directory's `test*/conftest.py` always
+  counts, as pytest loads it at startup; a test module has no ancestor or
+  `test*/` rule, since pytest collects it (an ignored one can patch the code
+  under test by its import, and its tests lift coverage). A `pyvenv.cfg` or
+  `conda-meta/history` counts too when the directory it makes a virtual
+  environment is not the top level, is not below a directory pytest does not
+  enter (nor named like one) and holds a tracked file, which a real environment
+  never does: pytest skips any directory holding either file, so an ignored one
+  deselects the tracked tests inside it. The project's own `norecursedirs`,
+  `testpaths`, `python_files` and `collect_ignore` are not read, so a
+  `conftest.py` they skip still counts. Accepted misses (#157): a `conftest.py`
+  in a directory only a project setting makes pytest collect, a committed
+  setting that names an ignored file (`--cov-config`, `-p`, `pythonpath` or a
+  data path in `addopts`), which the screen does not parse, a test module
+  matching only the project's own `python_files`, configuration above the top
+  level, a path through a symlink or inside a nested repository (an ignored
+  nested repository does not count), an ignored module that tests, a
+  `conftest.py` or a plugin imports, a `sitecustomize.py` in a `PYTHONPATH`
+  entry, a crafted `.pyc` whose recorded source mtime and size match, or one
+  under `PYTHONPYCACHEPREFIX`, a pytest older than 8.3.2 (before 8.3.0 its
+  virtual-environment test looks for `bin/activate*`, and 8.3.0 and 8.3.1 read
+  only `pyvenv.cfg`, so it enters a directory holding only a marker it does not
+  read, whose `conftest.py` the screen drops), and, on a case-insensitive
+  filesystem or under `core.ignoreCase`, a name that differs from a screened one
+  only in case. A screen that cannot ask git, or meets a tracked
+  `pyproject.toml` path holding a newline, fails closed: `make gate` records
+  nothing and `pre-push` stays silent (the `.mvn/` screen above fails the same
+  way when git cannot list its files). Both screens neutralise the four
+  `GIT_*_PATHSPECS` variables for the git calls that rely on pathspec magic, and
+  an exported `BASHOPTS=nocasematch` does not fold their matches.
+
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -662,25 +688,28 @@ one is missing or stale. A hook it did not write is never overwritten.
   reflog, so a move away and back counts, and no reflog means no record), the
   ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
   `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`,
-  `PYTEST_PLUGINS`, `COVERAGE_RCFILE`, a JVM option
-  `pre-push` warns on above in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`,
-  `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `OPENJ9_JAVA_OPTIONS` or
-  `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs (`/usr/local/etc/mavenrc`,
-  `/etc/mavenrc` or `~/.mavenrc`, unless `MAVEN_SKIP_RC` is set) and a
-  `~/.m2/settings.xml` that defines profile properties or activates a
-  profile it does not define, or a regular file `~/.m2/extensions.xml`, is
-  present, git ignores none of `.mvn/maven.config`, `.mvn/extensions.xml`
-  and `.mvn/jvm.config`, no file pytest reads is one git ignores, and no POM
-  in scope depends on ambient state, as above (all three checked at the
-  start and again at the end of the run, as the tree state is).
-  Recording never changes the exit status, and a passing run that records
-  nothing says why. `pre-push` skips its gate only while HEAD equals the
-  record and the tree is still strictly clean.
+  `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`, `COVERAGE_RCFILE`,
+  `COVERAGE_FORCE_CONFIG`, a JVM option `pre-push` warns on above in
+  `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`,
+  `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs
+  (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`, unless
+  `MAVEN_SKIP_RC` is set) and a `~/.m2/settings.xml` that defines profile
+  properties or activates a profile it does not define, or a regular file
+  `~/.m2/extensions.xml`, is present, git ignores none of `.mvn/maven.config`,
+  `.mvn/extensions.xml` and `.mvn/jvm.config`, none of the pytest files above is
+  one git ignores, and no POM in scope depends on ambient state, as above (all
+  three checked at the start and again at the end of the run, as the tree state
+  is). Recording never changes the exit status, and a passing run that records
+  nothing says why. `pre-push` skips its gate only while HEAD equals the record
+  and the tree is still strictly clean.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.
 - `git commit --no-verify` and `git push --no-verify` skip the gates once;
-  CI stays the backstop.
+  CI stays the backstop. The screens in the hooks and in `make gate` guard
+  against state set for another reason or by accident, not against a
+  developer who evades them on purpose: `git push --no-verify` bypasses
+  `pre-push`, and a hook can be edited or removed.
 
 ## Maven configuration
 
