@@ -641,8 +641,10 @@ one is missing or stale. A hook it did not write is never overwritten.
   `conftest.py` they skip still counts. Accepted misses (#157): a
   `conftest.py` in a directory only a project setting makes pytest collect,
   configuration above the top level, a path through a symlink or inside a
-  nested repository (an ignored nested repository does not count), and an
-  ignored module that tests or plugins import.
+  nested repository (an ignored nested repository does not count), an
+  ignored module that tests or plugins import, a `sitecustomize.py` in a
+  `PYTHONPATH` entry, and, on a case-insensitive filesystem, a name that
+  differs from a screened one only in case.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
