@@ -731,6 +731,25 @@ prepare() { # once per run: the temp dir, a clean environment and the published 
   publish
 }
 
+# The spotbugs.version property of the parent under test.
+spotbugs_version() { sed -n 's|^ *<spotbugs.version>\(.*\)</spotbugs.version>.*|\1|p' "$root/java/parent/pom.xml"; }
+
+# annotations_managed DIR: dependency:list, run by the pinned Maven, resolves DIR's spotbugs-annotations
+# at the parent's spotbugs.version, in scope provided.
+annotations_managed() {
+  local mvn want
+  mvn=$("$root/scripts/lib/pinned_maven.sh") && want=$(spotbugs_version) && [[ -n $want ]] &&
+    (cd "$1" && "$mvn" -B -q dependency:list -DincludeArtifactIds=spotbugs-annotations -DoutputFile="$1.deps") &&
+    grep -qF "com.github.spotbugs:spotbugs-annotations:jar:$want:provided" "$1.deps"
+}
+
+# analyzer_version XML: SpotBugs' report XML names the parent's spotbugs.version as its analyzer.
+analyzer_version() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+got = ET.parse(sys.argv[1]).getroot().get("version")
+sys.exit(f"SpotBugs ran {got!r}, the parent says {sys.argv[2]!r}") if got != sys.argv[2] else None' "$1" "$(spotbugs_version)"
+}
+
 java_part() {
   prepare
   for fixture in "$root"/tests/fixtures/java-*/; do
@@ -739,11 +758,16 @@ java_part() {
   done
   check "java-monolith: the first make target downloads devkit's Maven" \
     grep -q "Downloading Maven $(maven_version "$root") from" "$work/java-monolith.check.log"
+  check "java-monolith: spotbugs-annotations, declared without a version, resolves, provided, to the parent's spotbugs.version" \
+    annotations_managed "$work/java-monolith"
+  check "java-monolith: the SpotBugs run reports the parent's spotbugs.version" \
+    analyzer_version "$work/java-monolith/target/spotbugsXml.xml"
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group
   check "java-multimodule: a dependency under an unlisted license fails every make test, until the module appends it to includedLicenses, and two dependencies under an allowed and a commercial license pass" \
     unlisted
+  check "java-multimodule: dependencies under the common spellings of allowed licenses pass make test" spellings
   negatives
 }
 
@@ -794,6 +818,22 @@ depend_on() { # depend_on DIR NAME: DIR's app depends on devkit.fixture.other:NA
 with_dep() {
   install_dep "${1##*/}" "${@:2}" && setup "$root/tests/fixtures/java-multimodule" "$1" &&
     depend_on "$1" "${1##*/}"
+}
+
+# Spellings of allowed licenses that real artifacts declare (Vaadin's and Undertow's
+# "Apache License Version 2.0" first): jars under each, in one module, pass make test.
+spellings() {
+  local proj=$work/spellings i=0 name
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
+  local names=("Apache License Version 2.0" "Apache 2.0" "Apache 2" "Eclipse Public License 2.0"
+    "Eclipse Public License, Version 2.0" "GNU General Public License, version 2 with the GNU Classpath Exception"
+    "GNU General Public License, version 2, with the Classpath Exception" "GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1"
+    "CDDL + GPLv2 with classpath exception" "Universal Permissive License, Version 1.0" "UPL-1.0")
+  with_dep "$proj" "${names[0]}" || return
+  for name in "${names[@]:1}"; do
+    install_dep "spelling-$((++i))" "$name" && depend_on "$proj" "spelling-$i" || return
+  done
+  ONLY=app make_says pass "$proj" test "Tests completed."
 }
 
 # The parent excludes the project's own groupId from the license check by a pattern that ends it

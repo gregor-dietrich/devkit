@@ -776,10 +776,16 @@ inherit it, and Maven reads it through the link:
   `eclipse-formatter.version`, `enforcer-plugin.version`,
   `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
   `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
-  `resources-plugin.version`, `spotbugs-plugin.version`,
+  `resources-plugin.version`, `spotbugs-plugin.version`, `spotbugs.version`,
   `spotless-plugin.version`, `surefire-plugin.version`), and manages the
   `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
-  JaCoCo matches the plugin's.
+  JaCoCo matches the plugin's. `spotbugs.version` is the analyzer
+  `spotbugs-plugin.version` runs, which SpotBugs is told to use as a plugin
+  dependency; the parent manages `com.github.spotbugs:spotbugs-annotations`
+  at it, in scope `provided`, so a project that uses `@SuppressFBWarnings`
+  (with a `justification`), the in-source alternative to
+  `spotbugs-exclude.xml`, declares that artifact without a `<version>` or
+  `<scope>`; one it states overrides the parent's.
 - It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
   `this-escape` and `classfile`, Error Prone with NullAway), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,

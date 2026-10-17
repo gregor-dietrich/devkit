@@ -39,6 +39,11 @@
   </dependencyManagement>
 
   <dependencies>
+    <!-- No version or scope: the parent manages spotbugs-annotations, provided, at the SpotBugs it runs. -->
+    <dependency>
+      <groupId>com.github.spotbugs</groupId>
+      <artifactId>spotbugs-annotations</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

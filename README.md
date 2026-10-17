@@ -291,6 +291,24 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
 
+### Upgrading from v0.7.x
+
+The parent now manages `com.github.spotbugs:spotbugs-annotations` at the
+SpotBugs version it runs (`spotbugs.version`), in scope `provided`. A
+consumer that depends on it drops the `<version>` (and any property behind
+it) and the `<scope>` from that dependency; a version or scope it keeps
+overrides the parent's.
+
+The license allowlist gains these names, so a consumer's own appended
+`<includedLicense>` entries for them become redundant and may be dropped:
+`Apache License Version 2.0`, `Apache 2.0`, `Apache 2`,
+`Eclipse Public License 2.0`, `Eclipse Public License, Version 2.0`,
+`GNU General Public License, version 2 with the GNU Classpath Exception`,
+`GNU General Public License, version 2, with the Classpath Exception`,
+`GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1`,
+`CDDL + GPLv2 with classpath exception`,
+`Universal Permissive License, Version 1.0` and `UPL-1.0`.
+
 ### Upgrading from v0.6.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,
