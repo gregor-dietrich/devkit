@@ -132,7 +132,7 @@ points at another pin: run `make check`.
 
 devkit is its own consumer: `make lint-repo`, `make hooks` and `make gate`
 work here as in a project, and `make test` runs all of `tests/run.sh`, so
-the push gate needs what its java and python parts need. By default
+the push gate needs what its java, python and floor parts need. By default
 (`GATES=tree`) the targets run the working tree's own scripts, so each
 change is gated by itself. With `GATES=release` they run the release
 `devkit.toml` pins, fetched by `devkitw` as a consumer's is, so a change

@@ -7,7 +7,8 @@
 # Maven scripts/lib/pinned_maven.sh pins, verified the same way. The audit job
 # runs make audit on every change, so a required ci check covers it: a new
 # advisory against a closure fails every pull request until a bump or an
-# audit-ignore entry lands (#58).
+# audit-ignore entry lands (#58). The shell job's floor part bootstraps the
+# pinned uv, hash-verified, and has it download CPython 3.11 and 3.14.
 name: ci
 
 on:
@@ -69,8 +70,8 @@ jobs:
         with:
           node-version: "22" # the newest 22.x, at or above engines.node in markdown/ and jscpd/package.json
           check-latest: true # not an older 22.x the runner has cached
-      - run: apt-get update -qq && apt-get install -y -qq make shellcheck procps # make: hooks_test; procps: pgrep, ps for kill_test
-      - run: tests/run.sh shell
+      - run: apt-get update -qq && apt-get install -y -qq make shellcheck procps python3-venv # make: hooks_test; procps: pgrep, ps for kill_test; python3-venv: the floor part's uv bootstrap
+      - run: tests/run.sh shell floor
 
   java:
     runs-on: ubuntu-latest

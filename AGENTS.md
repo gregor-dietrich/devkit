@@ -35,7 +35,8 @@ break a gate silently.
   before the bump's commit (README, "Gating devkit itself", lists the pins
   it covers). `devkit.toml`'s pin of devkit's own release is not one.
 - Shell scripts pass shellcheck; Python helpers run on python3 3.11 or
-  later (`scripts/lib/python.sh` checks the floor before any helper).
+  later (`scripts/lib/python.sh` checks the floor before any helper, and
+  `tests/run.sh floor` runs the shell part's tests under 3.11).
 - Markdown is hard-wrapped at 80 columns (`markdown/markdownlint.jsonc`).
 - Security-relevant paths, which take a full `/agent-kit:ai-review`
   rather than one reviewer: `devkitw` and the gate that delivers it
@@ -63,11 +64,12 @@ break a gate silently.
   decisions, gitleaks and markdownlint. `GATES=tree` (the default) runs the
   working tree's scripts, `GATES=release` those of the release
   `devkit.toml` pins; CI runs both (README, "Gating devkit itself").
-- `make test` runs all of `tests/run.sh`. `tests/run.sh shell`, `java` or
-  `python` runs one part; its header lists what each part needs. The
-  shell part needs the npm registry on first use; the java and python
-  parts build every fixture in a fresh cache and need the network on every
-  run.
+- `make test` runs all of `tests/run.sh`. `tests/run.sh shell`, `floor`, `java`
+  or `python` runs one part; its header lists what each part needs. The
+  shell part needs the npm registry on first use; the floor part runs the
+  shell part's tests under the CPython 3.11 the pinned uv provisions, and
+  it and the java and python parts need the network on every run (the java
+  and python parts build every fixture in a fresh cache).
 - `make audit` runs `npm audit` over the `markdown/` and `jscpd/`
   lockfiles; it needs the network, and neither `lint-repo`, `test` nor
   `gate` runs it. CI's `audit` job runs it on every pull request and every

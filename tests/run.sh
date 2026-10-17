@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [java]
-# [python], each part at most once (no argument runs all three). Prints
-# PASS/FAIL per check with its time and status. java and python share one temp
-# dir (TMPDIR is honoured) and the tree under test, published once.
+# devkit's test entrypoint, for CI and by hand: tests/run.sh [shell] [floor]
+# [java] [python], each part at most once (no argument runs all four). Prints
+# PASS/FAIL per check with its time and status. floor, java and python share
+# one temp dir (TMPDIR is honoured) and the tree under test, published once.
 #   shell  shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/make_test.sh,
 #          tests/kill_test.sh, tests/check_frontend_deps_test.sh,
@@ -42,6 +42,15 @@
 #          markdown/package.json and jscpd/package.json) with npm, which
 #          installs markdownlint-cli and jscpd from the npm registry on
 #          first use.
+#   floor  bootstrap the uv the python-uv-single fixture's uv.lock pins, have it
+#          create venvs of CPython 3.11 (the helpers' floor) and 3.14 (the
+#          newest, for the anchored-match gate that runs on the project's
+#          Python), check each version, and run every shell-part test (not
+#          the shellcheck run, not the parent checks) under 3.11 and the
+#          anchored_match tests under 3.14; uv's downloads stay in the temp
+#          dir, in the python part's isolation. Needs what the shell part
+#          needs, python3 with venv and pip, and the network (PyPI, github.com
+#          for uv's Python downloads, the npm registry).
 #   java   tag the tree under test, committed or not, as v<the version of
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
@@ -150,9 +159,9 @@ check() { # check LABEL COMMAND...: run COMMAND and report how it went
   shift
   "$@" || rc=$?
   if [[ $rc == 0 ]]; then
-    echo "PASS $label ($((SECONDS - start))s)"
+    echo "PASS ${label_prefix-}$label ($((SECONDS - start))s)"
   else
-    echo "FAIL $label (exit $rc, $((SECONDS - start))s)"
+    echo "FAIL ${label_prefix-}$label (exit $rc, $((SECONDS - start))s)"
     fails=$((fails + 1))
   fi
 }
@@ -161,8 +170,7 @@ shellcheck_all() {
   (cd "$root" && shellcheck -x devkitw scripts/**/*.sh tests/*.sh)
 }
 
-shell_part() {
-  check "shellcheck" shellcheck_all
+shell_tests() { # every test file of the shell part, run again by the floor part
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "make tests" "$root/tests/make_test.sh"
@@ -189,6 +197,11 @@ shell_part() {
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
   check "tag tests" "$root/tests/tag_test.sh"
+}
+
+shell_part() {
+  check "shellcheck" shellcheck_all
+  shell_tests
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
     license_lists_whole "$root/java/parent/pom.xml"
   check "parent: the license lists check rejects an includedLicense name wrapped over a line" \
@@ -1014,10 +1027,7 @@ shared_uv_copy() { # shared_uv_copy LOG COPY...: exactly one COPY exists, and LO
   [[ $# == 1 && -d $1 ]] && ! grep -q "Installing uv" "$log"
 }
 
-python_checks() {
-  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv fixture copies
-  first=${fixtures[0]%/}
-  pin=$(PROJECT_ROOT=$first python3 "$root/scripts/python/uv_project.py" uv-version)
+uv_sandbox() {
   # User-level uv configuration (XDG_CONFIG_HOME), the caches (XDG_CACHE_HOME) and uv's Python
   # downloads stay in $work, and pip reads no configuration file. The first make install
   # bootstraps uv, whatever uv is on PATH; later ones find its copy in the cache.
@@ -1025,6 +1035,13 @@ python_checks() {
   unset VIRTUAL_ENV PYTHONPATH $(compgen -e | grep -E '^(UV|PIP)_')
   export XDG_CONFIG_HOME=$work/config UV_PYTHON_INSTALL_DIR=$work/uv-python npm_config_cache=$work/npm-cache \
     PIP_CONFIG_FILE=/dev/null
+}
+
+python_checks() {
+  local fixtures=("$root"/tests/fixtures/python-*/) first pin uv fixture copies
+  first=${fixtures[0]%/}
+  pin=$(PROJECT_ROOT=$first python3 "$root/scripts/python/uv_project.py" uv-version)
+  uv_sandbox
   for fixture in "${fixtures[@]}"; do
     fixture=${fixture%/}
     run_fixture "$fixture" "install check lint test format"
@@ -1041,11 +1058,58 @@ python_checks() {
   python_negatives
 }
 
-[[ $# -gt 0 ]] || set -- shell java python
+floor_uv() { # the uv the python-uv-single fixture's uv.lock pins, bootstrapped as make install does; its path in $work/uv-cmd
+  (
+    cd "$root/tests/fixtures/python-uv-single"
+    export DEVKIT=$root PROJECT_ROOT=$PWD UV_BOOTSTRAP=true
+    # shellcheck source=SCRIPTDIR/../scripts/lib/get_uv.sh
+    . "$root/scripts/lib/get_uv.sh"
+    echo "$UV_CMD" >"$work/uv-cmd"
+  )
+}
+
+floor_venv() { # floor_venv VERSION DIR: a CPython VERSION venv at DIR, whose python3 reports VERSION; fails when either check does
+  local version=$1 dir=$2 before=$fails
+  # shellcheck disable=SC2031 # UV_CMD is set by floor_checks; floor_uv's subshell only reads it from the sourced script
+  check "floor: uv creates a CPython $version venv" "$UV_CMD" venv --quiet --python "$version" "$dir"
+  ((fails == before)) || return 1
+  check "floor: python3 on PATH is $version" \
+    env PATH="$dir/bin:$PATH" python3 -I -c "import sys; sys.exit(sys.version_info[:2] != (${version/./, }))"
+  ((fails == before))
+}
+
+# Never falls back to the system python3: a venv that cannot be built skips its tests.
+floor_checks() {
+  local before=$fails
+  uv_sandbox
+  check "floor: the pinned uv bootstraps" floor_uv
+  ((fails == before)) || return 0
+  UV_CMD=$(<"$work/uv-cmd")
+  cd "$work"
+  if floor_venv 3.11 "$work/floor-venv"; then
+    PATH=$work/floor-venv/bin:$PATH label_prefix='python3 3.11: ' shell_tests
+  fi
+  if floor_venv 3.14 "$work/newest-venv"; then
+    PATH=$work/newest-venv/bin:$PATH label_prefix='python3 3.14: ' \
+      check "anchored_match tests" "$root/tests/anchored_match_test.sh"
+  fi
+}
+
+floor_part() {
+  prepare
+  # A subshell for the isolation, as in python_part.
+  (
+    floor_checks
+    echo "$fails" >"$work/fails"
+  )
+  fails=$(<"$work/fails")
+}
+
+[[ $# -gt 0 ]] || set -- shell java python floor
 seen=' '
 for part in "$@"; do
-  [[ $part =~ ^(shell|java|python)$ && $seen != *" $part "* ]] || {
-    echo "usage: tests/run.sh [shell] [java] [python], each part at most once" >&2
+  [[ $part =~ ^(shell|floor|java|python)$ && $seen != *" $part "* ]] || {
+    echo "usage: tests/run.sh [shell] [floor] [java] [python], each part at most once" >&2
     exit 2
   }
   seen+="$part "
