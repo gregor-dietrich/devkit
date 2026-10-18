@@ -52,7 +52,8 @@ stub() { # stub NAME BODY
 }
 # shellcheck disable=SC2016 # the bodies expand when the stubs run
 {
-  stub curl 'echo "curl $*" >>"$LOG"
+  stub curl '[ "$1" != --help ] || { echo "${FAKE_CURL_HELP-}"; exit 0; }
+echo "curl $*" >>"$LOG"
 [ -z "${FAKE_CURL_FAIL-}" ] || exit 22
 while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$FAKE_ASSET" "$2"; shift; done'
   stub tar 'echo "tar $*" >>"$LOG"; PATH=${PATH#*:}; exec tar "$@"'
@@ -83,8 +84,8 @@ one_error() { # one_error TEXT: exactly one ERROR line, naming TEXT (the downloa
   errors=$(grep '^ERROR' <<<"$err" || :)
   [[ $rc == 1 && $errors == "ERROR: pinned Maven: "*"$1"* && $errors != *$'\n'* ]]
 }
-curled() { # curled URL: the one download curl was asked for
-  grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M -o $tools/.tmp.[^ ]*/asset.tar.gz $1$" "$LOG"
+curled() { # curled URL [RETRY]: the one download curl was asked for, retrying with RETRY
+  grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M --retry 3 ${2:---retry-connrefused} --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz $1$" "$LOG"
 }
 
 case_mismatch() {
@@ -103,6 +104,11 @@ case_install() {
     [[ $(ls -A "$dir") == "apache-maven-$version" ]] && ! compgen -G "$tools/.tmp.*" >/dev/null || return 1
   run
   [[ $rc == 0 && $out == "$launcher" && -z $err ]] && ! logged curl && ! logged tar
+}
+case_retry_all_errors() { # a curl that knows --retry-all-errors (7.71 or later) retries every failure
+  uncache "$dir"
+  FAKE_CURL_HELP='     --retry-all-errors  Retry all errors (with --retry)' run
+  [[ $rc == 0 && $out == "$launcher" ]] && curled "$central/$path" --retry-all-errors
 }
 case_bad_entry() { # an entry without a launcher is not downloaded over, link or not
   local ok=0
@@ -172,6 +178,7 @@ case_shipped_pin() {
 t "1 a mismatched asset fails before tar, caching nothing" case_mismatch
 t "2 a failed download fails, caching nothing" case_no_download
 t "3 a matching asset installs only the distribution, read-only; the next run downloads nothing" case_install
+t "3b a curl with --retry-all-errors retries every failure, an older one a refused connect" case_retry_all_errors
 t "4 an entry without a launcher, or a dangling link, fails without a download" case_bad_entry
 t "5 a relative cache root fails before any download" case_relative_cache
 t "6 DEVKIT_MAVEN_MIRROR replaces Central, a trailing slash dropped" case_mirror

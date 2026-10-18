@@ -26,9 +26,17 @@ fetch_sealed() {
     tmp=$(mktemp -d "${place%/*}/.tmp.XXXXXX") || fail "cannot create a stage beside $place"
     trap 'sealed_remove "$tmp"' EXIT
     trap 'exit 1' HUP INT TERM
-    # --max-filesize: a mirror is operator-chosen; the hash still decides.
+    # --max-filesize: a mirror is operator-chosen; the hash still decides. --retry: a fresh CI job
+    # downloads every tool, so a transient failure is retried rather than failing the job: with
+    # curl 7.71 or later every failure (--retry-all-errors: a dropped connection too, and with -f a
+    # 404, which only delays the error), before it a timeout, a refused connect or what that curl
+    # counts as a transient HTTP error. No retry starts after 300 s (each attempt has its own
+    # --max-time), and each one rewrites the file whose sha256 is checked below.
+    retry=--retry-connrefused
+    [[ $(curl --help all 2> /dev/null) != *--retry-all-errors* ]] || retry=--retry-all-errors
     curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M \
-      -o "$tmp/asset.tar.gz" "$url" || fail "cannot download $url"
+      --retry 3 "$retry" --retry-max-time 300 -o "$tmp/asset.tar.gz" "$url" ||
+      fail "cannot download $url"
     got=$(sha256_of "$tmp/asset.tar.gz") || fail "cannot hash the download of $url"
     [[ $got == "$pin" ]] ||
       fail "sha256 mismatch for $url: got $got, devkit pins $pin; nothing was unpacked"

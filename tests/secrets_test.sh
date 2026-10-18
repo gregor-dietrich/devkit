@@ -61,7 +61,8 @@ stub() { # stub NAME BODY
 # shellcheck disable=SC2016 # the bodies expand when the stubs run
 {
   stub uname 'case $1 in -s) echo "${FAKE_UNAME_S:-Linux}" ;; -m) echo "${FAKE_UNAME_M:-x86_64}" ;; esac'
-  stub curl 'echo "curl $*" >>"$LOG"
+  stub curl '[ "$1" != --help ] || { echo "${FAKE_CURL_HELP-}"; exit 0; }
+echo "curl $*" >>"$LOG"
 [ -z "${FAKE_CURL_FAIL-}" ] || exit 22
 while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$FAKE_ASSET" "$2"; shift; done'
   stub tar 'echo "tar $*" >>"$LOG"; PATH=${PATH#*:}; exec tar "$@"'
@@ -128,7 +129,7 @@ case_install() {
   run
   [[ $rc == 0 && -z $err && -x $installed/gitleaks && -z $(find "$installed" ! -type l -perm -u+w) ]] &&
     [[ $(ls -A "$installed") == gitleaks ]] && ! compgen -G "$tools/.tmp.*" >/dev/null &&
-    grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M -o $tools/.tmp.[^ ]*/asset.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_linux_x64.tar.gz$" "$LOG" &&
+    grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M --retry 3 --retry-connrefused --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_linux_x64.tar.gz$" "$LOG" &&
     grep -q "^tar -xzf $tools/.tmp.[^ ]*/asset.tar.gz -C $tools/.tmp.[^ ]* gitleaks$" "$LOG" || return 1
   run
   [[ $rc == 0 ]] && ! logged curl && ! logged tar

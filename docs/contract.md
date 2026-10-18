@@ -73,6 +73,12 @@ reason = "why the input cannot carry a newline"
 [[python.anchored-match.excluded]]
 file = "src/fixtures/py2.py"       # project-relative, one file
 reason = "why the file is not scanned"
+
+# Optional, one per pip-audit advisory the project accepts (make audit).
+[[python.audit.accepted]]
+package = "some-package"           # as pip-audit reports it (uv.lock names it), any PEP 503 spelling
+id = "GHSA-xxxx-xxxx-xxxx"         # the advisory's id or one of its aliases
+reason = "why the advisory does not apply, or has no fix"
 ```
 
 ```make
@@ -463,8 +469,11 @@ changes instead.
     commit or every line from gitleaks; git before 2.31 ignores these
     overrides. The rest of the configuration, `safe.directory` included,
     applies.
-  - It needs curl, tar, and `sha256sum` or `shasum`; the binary lands,
-    read-only, in
+  - It needs curl (7.52 or later, which added `--retry-connrefused`), tar,
+    and `sha256sum` or `shasum`; a failed download is
+    retried up to three times, none starting after 300 seconds (with curl
+    before 7.71 only a timeout, a refused connect or a transient HTTP
+    error, not a dropped connection); the binary lands, read-only, in
     `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-<version>-<platform>/`.
   - Limits: every scan reads git's diffs (`git log -p`, `git diff`), so
     lines that only a merge commit introduces (a conflict resolution) are
@@ -825,7 +834,9 @@ inherit it, and Maven reads it through the link:
   pins (the version and the SHA-256 of its distribution tarball live there),
   never `mvn` on `PATH` and never `./mvnw`. The first such target on a machine
   downloads it from Maven Central, which needs curl, tar, and `sha256sum` or
-  `shasum`, refuses it unless the SHA-256 matches, and keeps it, read-only, in
+  `shasum`, retries a failed download up to three times as for gitleaks
+  (Repository gates), refuses it unless the SHA-256 matches, and keeps it,
+  read-only, in
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/maven-<version>/`; later runs
   need no network for it. `DEVKIT_MAVEN_MIRROR`, an environment variable,
   replaces Central's base URL; empty means Central. Every Java target validates
@@ -1014,10 +1025,11 @@ inherit it, and Maven reads it through the link:
   `${pmd.extraAssertMethodNames}` (the only placeholder the file carries; any
   `${…}` added to it is expanded too), and PMD reads that copy. Every target
   that runs PMD runs `initialize` first; a bare `mvn pmd:check` reads the
-  previous build's copy, or fails after a `clean`. A project's plugin-level
-  maven-resources-plugin configuration and its build filters do not reach the
-  copy, and `maven.resources.skip` does not skip it; a project that
-  redeclares the execution `pmd-ruleset` itself does reach it.
+  previous build's copy, or fails after a `clean`. The CPD goals read no
+  ruleset, so a bare `mvn pmd:cpd-check` needs no `initialize`. A project's
+  plugin-level maven-resources-plugin configuration and its build filters do
+  not reach the copy, and `maven.resources.skip` does not skip it; a project
+  that redeclares the execution `pmd-ruleset` itself does reach it.
 
 - `MAVEN_ARGS` reaches every Maven call of the targets above:
   `MAVEN_ARGS=-Pproduction make install` applies a profile, and
@@ -1187,7 +1199,8 @@ run the tools from `.venv`.
   install`), and when a dev tool is missing from `.venv`. Before uv, it
   validates `devkit.toml`'s `[python.duplication]` (`duplication.py
   check-config`, see the copy-paste gate below) and `[python.anchored-match]`
-  (`anchored_match.py check-config`, see the anchored-match gate below).
+  (`anchored_match.py check-config`, see the anchored-match gate below), and
+  `[[python.audit.accepted]]` (`audit.py check-config`, see `make audit`).
 - uv. `scripts/lib/get_uv.sh` exports `UV_CMD`, devkit's per-user copy of
   the uv `uv.lock` pins, `uv-<version>-<platform>-<key>/bin/uv` in
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools`; `<platform>` is `uname -s`
@@ -1263,14 +1276,52 @@ run the tools from `.venv`.
 - `make audit` runs pip-audit on the third-party runtime dependencies
   `uv.lock` pins (`uv export --no-default-groups`, the project's own
   packages and its local path dependencies left out, what they depend on
-  kept), and passes, saying so, when there are none. It runs pip-audit
+  kept), and passes, saying so, only when there are none and no entry is
+  accepted (below; every entry is then stale). It runs pip-audit
   twice over that export, against PyPI and then against OSV, both with
-  `--strict`, always both, and fails if either failed: PyPI's advisory data
+  `--strict`, always both, and judges the two reports as the next
+  paragraph says (an exit status 1 whose findings are all accepted
+  passes): PyPI's advisory data
   omits advisories OSV carries, and OSV cannot tell an unknown package from
   a clean one, so only PyPI's `--strict` fails closed on a dependency that
   cannot be audited. It needs the network, both pypi.org's JSON API and
   api.osv.dev, and fails closed without either; neither `check` nor `test`
   runs it.
+
+  An advisory is accepted in `devkit.toml`, one
+  `[[python.audit.accepted]]` entry each, with `package`, `id` and a
+  non-blank `reason`, and no other key; `make check` and `make audit`
+  (before any network call) fail on a malformed entry, on a package that
+  is no Python package name, and on a repeat of one package (names
+  compared as PEP 503 normalizes them) and id. pip-audit writes JSON
+  reports (`--aliases on`), which `scripts/python/audit.py` judges. An
+  entry accepts a finding of either service when the package is the
+  same and `id` is the finding's id or one of its aliases, compared
+  case-insensitively (PyPI lists a PYSEC id and OSV a GHSA id of one
+  advisory; the aliases tie them, so one entry covers both rows). A row
+  both services report under one id is listed once, with the aliases and
+  fix versions of both. Every dependency of a report carries a version,
+  and every advisory its `aliases` and `fix_versions`, as pip-audit
+  writes them; a report without them fails. Any
+  version of the package matches. A finding that more than one entry
+  accepts fails, so that each entry stands for one finding: keep one. The
+  run fails on every finding no entry accepts, naming its package,
+  version, ids, fix versions and service, and on every stale entry, one
+  that neither service reports, which is judged only when both reports
+  were read. It also fails when a service exits with a status other than
+  0 and 1, or 1 with no advisory, leaves no readable report or an empty
+  one, or reports a dependency it skipped, and then says that staleness
+  was not judged. pip-audit drops a requirement whose environment
+  marker is false on the machine, so a project whose every runtime
+  dependency is so restricted (e.g. `sys_platform == "win32"`) gets an
+  empty report and fails on a machine where none of the markers holds.
+  `make audit` needs a pip-audit in the dev
+  group with `--format json` and `--aliases`; a project pinning one
+  without `--aliases` fails both runs with exit status 2 and upgrades it
+  (the fixtures pin 2.10.1). An entry has no expiry, and
+  keeps passing when a fixed release appears: a passing run lists each
+  accepted finding with its fix versions and reason, so a fix does not go
+  unseen.
 - `make clean` removes `__pycache__`, `.pytest_cache`, `.ruff_cache`,
   `*.egg-info`, `dist`, `.coverage` and `.coverage.*` below the project
   root, skipping the root's `.git` and `.devkit`, every `.venv` and

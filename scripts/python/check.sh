@@ -50,6 +50,7 @@ fi
 
 python3 -I "$DEVKIT/scripts/python/duplication.py" check-config
 python3 -I "$DEVKIT/scripts/python/anchored_match.py" check-config
+python3 -I "$DEVKIT/scripts/python/audit.py" check-config
 python3 -I "$DEVKIT/scripts/python/uv_project.py" vulture-paths > /dev/null
 
 # shellcheck source=SCRIPTDIR/../lib/get_uv.sh

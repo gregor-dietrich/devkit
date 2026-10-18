@@ -19,6 +19,7 @@
 #          tests/coverage_floor_test.sh, tests/coverage_test.sh,
 #          tests/version_check_test.sh, tests/python_invocations_test.sh,
 #          tests/python_clean_test.sh, tests/python_audit_test.sh,
+#          tests/python_audit_judge_test.sh,
 #          tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/anchored_match_test.sh,
 #          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh
@@ -236,6 +237,7 @@ shell_tests() { # every test file of the shell part, run again by the floor part
   check "python invocations tests" "$root/tests/python_invocations_test.sh"
   check "python clean tests" "$root/tests/python_clean_test.sh"
   check "python audit tests" "$root/tests/python_audit_test.sh"
+  check "python audit judge tests" "$root/tests/python_audit_judge_test.sh"
   check "java clean tests" "$root/tests/java_clean_test.sh"
   check "duplication tests" "$root/tests/duplication_test.sh"
   check "anchored_match tests" "$root/tests/anchored_match_test.sh"
@@ -1119,7 +1121,10 @@ installed() { # installed DIR: make install in DIR, its output shown only when i
 }
 
 relocked() { # relocked DIR: uv lock in DIR with the pinned uv, then installed
-  (cd "$1" && "$uv" lock -q) && installed "$1"
+  # Under the cutoff a fixture's committed uv.lock was made with (README, "Gating devkit itself"):
+  # what a test adds resolves no release younger than 24 hours, and the plain lock after it keeps
+  # the versions and drops the recorded cutoff (uv sync --locked rejects a lock that records one).
+  (cd "$1" && "$uv" lock -q --exclude-newer "24 hours" && "$uv" lock -q) && installed "$1"
 }
 
 # py_copy FIXTURE NAME INSTALL [FILE SED]: $work/py-NAME, a pinned copy of the python-uv-FIXTURE
@@ -1239,8 +1244,15 @@ py_formatted() { # py_formatted FILE SED: make format undoes SED's breaks, so th
 # A runtime dependency with known advisories, locked and installed. Not one pip-audit itself
 # imports (urllib3, requests, ...): .venv holds both, and an old pin of those breaks pip-audit.
 py_vulnerable() {
+  local dir=$work/py-vulnerable
   py_copy single vulnerable relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["jinja2==3.1.4"]/' &&
-    make_says fail "$work/py-vulnerable" audit "in 1 package" "jinja2" "3.1.4"
+    make_says fail "$dir" audit "in 1 package" "jinja2" "3.1.4" &&
+    accepted jinja2 GHSA-0000-0000-0000 "$dir" && make_says fail "$dir" audit "jinja2" "3.1.4" "stale"
+}
+
+# accepted PACKAGE ID DIR: DIR's devkit.toml gains an [[python.audit.accepted]] entry
+accepted() {
+  printf '\n[[python.audit.accepted]]\npackage = "%s"\nid = "%s"\nreason = "accepted by the python part"\n' "$1" "$2" >>"$3/devkit.toml"
 }
 
 # A dependency whose advisory only OSV carries (mako 1.4.1, PYSEC-2026-4243 = GHSA-5639-2j2p-m4mx,
@@ -1248,8 +1260,17 @@ py_vulnerable() {
 # once PyPI lists the advisory, which is why tests/python_audit_test.sh stubs pip-audit and asserts
 # both runs.
 py_osv_only() {
-  py_copy single osv-only relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["mako==1.4.1"]/' &&
-    make_says fail "$work/py-osv-only" audit "mako" "1.4.1" "PYSEC-2026-4243"
+  local dir=$work/py-osv-only out alias
+  py_copy single osv-only relocked pyproject.toml 's/^dependencies = \[\]/dependencies = ["mako==1.4.1"]/' || return
+  # One run: it must fail on the OSV-only row, and the alias the real row carries (read from the
+  # same output) is what an entry accepts it by.
+  out=$(make --no-print-directory -C "$dir" audit 2>&1) && { printf 'make audit passed:\n%s\n' "$out"; return 1; }
+  for text in mako 1.4.1 PYSEC-2026-4243; do
+    [[ $out == *"$text"* ]] || { printf 'no %s in:\n%s\n' "$text" "$out"; return 1; }
+  done
+  alias=$(grep 'PYSEC-2026-4243 (aliases' <<<"$out" | grep -o 'GHSA-[0-9a-z]\{4\}-[0-9a-z]\{4\}-[0-9a-z]\{4\}' | head -n 1 || true)
+  [[ -n $alias ]] || { printf 'no GHSA alias in:\n%s\n' "$out"; return 1; }
+  accepted mako "$alias" "$dir" && make_says pass "$dir" audit "Audit completed" "accepted by the python part"
 }
 
 # Current runtime dependencies without advisories, neither one pip-audit imports: six, and attrs

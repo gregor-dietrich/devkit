@@ -338,7 +338,19 @@ install`.
 
 `make audit` in a uv project now also queries OSV (api.osv.dev), which a
 network allowing only PyPI must open. It takes longer (about half a minute
-on a 100-pin lock) and can now fail on advisories PyPI did not list.
+on a 100-pin lock) and can now fail on advisories PyPI did not list. An
+advisory with no fixed release, or one that does not apply, is accepted in
+`devkit.toml` with a `[[python.audit.accepted]]` entry (package, advisory id
+or alias and a reason; the contract has the details).
+`make audit` needs a pip-audit with `--format json` and `--aliases` in the dev
+group (devkit's fixtures pin 2.10.1): a project pinning an older one that lacks
+`--aliases` fails both runs with exit status 2, and upgrades it with
+`uv lock --upgrade-package pip-audit`, then `make install`. A project whose
+every runtime dependency carries an environment marker that is false on the
+auditing machine (e.g. only `tomli ; python_version < '3.11'`, audited on 3.11
+or later) passed before and now fails: pip-audit drops those requirements and
+reports no dependency. `make audit` passes only on a machine where one of the
+markers holds.
 
 `make test` in a uv project now runs every pytest session with
 `--cache-clear` and a temporary `COVERAGE_FILE`, so a stale `.pytest_cache`
@@ -548,7 +560,8 @@ runs PMD fails; the console says only "PMD … has found N violations", and the
 rule and file are in `target/pmd.xml`. The parent now runs PMD on a filtered
 copy of the ruleset, made at `initialize`, so a script of the project's own or
 a CI step that runs `pmd:check` without a lifecycle phase runs `mvn initialize
-pmd:check`. The parent also pins maven-resources-plugin: a project removes any
+pmd:check`; `pmd:cpd-check` reads no ruleset and needs no `initialize`. The
+parent also pins maven-resources-plugin: a project removes any
 `resources-plugin.version` property of its own, which the parent check
 rejects, and its own resource processing (default-resources and
 default-testResources) moves from Maven's default 3.3.1 to 3.5.0.
@@ -692,10 +705,13 @@ a job or script that clears them runs `chmod -R u+w` on them first. An
 entry cached before the bump keeps writable directories until removed.
 
 A Maven project whose `./mvnw` launches a maven-wrapper jar
-(any `distributionType` but `only-script`) regenerates it script-only, since
-every target that runs Maven now fails on it: that launcher ignores
-`MAVEN_ARGS`, so a profile such as `MAVEN_ARGS=-Pproduction` was silently
-dropped wherever `./mvnw` ran instead of `mvn`. Run
+(any `distributionType` but `only-script`) regenerates it script-only when
+it upgrades to v0.6.x, since every target that runs Maven fails on it there:
+that launcher ignores `MAVEN_ARGS`, so a profile such as
+`MAVEN_ARGS=-Pproduction` was silently dropped wherever `./mvnw` ran instead
+of `mvn`. From v0.7.0 no target runs `./mvnw` (see "Upgrading from v0.6.x"),
+so a project upgrading straight to v0.7.0 or later may keep the jar; the
+step still helps where its own scripts run `./mvnw` with `MAVEN_ARGS`. Run
 
 ```sh
 ./mvnw -N org.apache.maven.plugins:maven-wrapper-plugin:3.3.4:wrapper -Dtype=only-script

@@ -49,8 +49,11 @@ break a gate silently.
   uv bootstrap's hashes, and the lockfiles in `markdown/` and `jscpd/`);
   what decides whether an advisory against them is silenced
   (`scripts/closure_audit.sh`, `scripts/closure_audit.py` and each
-  closure's `audit-ignore`); what pins the Maven plugin closure
-  (`java/checksums/`, `scripts/maven_checksums.sh`,
+  closure's `audit-ignore`), and against a uv consumer's dependencies
+  (`scripts/python/audit.sh`, `scripts/python/audit.py` and
+  `scripts/python/project_files.py`, which reads its accepted entries);
+  what pins the Maven plugin closure (`java/checksums/`,
+  `scripts/maven_checksums.sh`,
   `scripts/lib/get_maven.sh`, `scripts/lib/mvn_checked.sh` and
   `scripts/java/check_frontend_deps.py`, whose constants name plugins the
   file must hold);
