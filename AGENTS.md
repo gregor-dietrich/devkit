@@ -113,5 +113,3 @@ Generic method is agent-kit's and is not restated here: its skills
 (reviews), `debugging`, `design-exploration`, and `plan-create` /
 `plan-run` (planning and executing a change). This file holds only what
 is specific to devkit.
-
-<!-- agent-kit:codex-bridge -->
