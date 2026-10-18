@@ -3,13 +3,14 @@
 set -euo pipefail
 
 cd "$PROJECT_ROOT"
-# shellcheck source=SCRIPTDIR/../lib/python.sh
-. "$DEVKIT/scripts/lib/python.sh"
-python3_floor || exit 1
 # shellcheck source=SCRIPTDIR/../lib/select_modules.sh
 . "$DEVKIT/scripts/lib/select_modules.sh"
+# shellcheck source=SCRIPTDIR/../lib/get_uv.sh
+UV_BOOTSTRAP=false . "$DEVKIT/scripts/lib/get_uv.sh"
 # shellcheck source=SCRIPTDIR/../lib/get_venv.sh
 . "$DEVKIT/scripts/lib/get_venv.sh"
+# A .venv that drifted from uv.lock would run the tests against other code than the lock names.
+venv_synced
 pytest=$(venv_tool pytest)
 floor=${COVERAGE_FLOOR:-}
 [[ -n $floor ]] || {
@@ -36,6 +37,9 @@ echo "Starting tests${ONLY:+ for $ONLY}..."
 
 # One session per member, in its directory, so its own pytest configuration applies; each
 # member's coverage is held to the floor on its own, never combined.
+# --cache-clear: a stale .pytest_cache (--lf, --sw) steers no session; COVERAGE_FILE: the data
+# file is the session's own, so no stale .coverage (--cov-append) reaches the floor and a data_file
+# in the configuration loses to it.
 # Numbered reports: names may repeat without JUNIT_DIR, and a session that writes none must
 # not be judged by an earlier one's.
 n=0
@@ -43,8 +47,8 @@ for member in $SELECTED; do
     json=$tmp/$((++n)).json label=$member
     [[ $member != . ]] || label=$(name .)
     echo "Testing $label..."
-    (cd "$member" && "$pytest" --cov-branch --cov-report="json:$json" \
-        ${JUNIT_DIR:+--junitxml="$JUNIT_DIR/$(name "$member").xml"})
+    (cd "$member" && COVERAGE_FILE="$tmp/$n.coverage" "$pytest" --cache-clear --cov-branch \
+        --cov-report="json:$json" ${JUNIT_DIR:+--junitxml="$JUNIT_DIR/$(name "$member").xml"})
     python3 -I "$DEVKIT/scripts/python/coverage_floor.py" "$json" "$floor" "$label"
 done
 

@@ -1,6 +1,9 @@
 # devkit: Java/Maven targets. Include after common.mk (docs/contract.md).
 #
-# Profile, set by the project Makefile before the includes:
+# Profile, set by the project Makefile before the includes, with `:=` and never reading the
+# variable's earlier value (`?=`, `+=` and `X := $(X) y` take the environment's). The command
+# line and `make -e` count too, except under `make gate` and pre-push, where only the Makefile
+# does (docs/contract.md):
 #   JAVA_VERSION  JDK major Maven must run on, exactly (the parent's enforcer)
 #   MODULES       Maven module directories, space-separated; empty = monolith
 #   FRONTEND_DIR  directory holding the Vaadin frontend: one of MODULES, or `.`
@@ -20,6 +23,15 @@
 # `audit` reads NVD_API_KEY from the environment, else from .env.build, and
 # fails without one.
 
+# An inherited FRONTEND_DIR or JAVA_VERSION never counts (see common.mk's
+# PROJECT_ROOT); a command-line value, and `make -e`, still do. Only these
+# scripts read them, so common.mk leaves them alone for a uv project.
+ifeq ($(origin FRONTEND_DIR),environment)
+FRONTEND_DIR :=
+endif
+ifeq ($(origin JAVA_VERSION),environment)
+JAVA_VERSION :=
+endif
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
 FRONTEND_DIR := $(strip $(FRONTEND_DIR))
 JAVA_VERSION := $(strip $(JAVA_VERSION))

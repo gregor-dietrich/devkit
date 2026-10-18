@@ -1,6 +1,9 @@
 # devkit: uv (Python) targets. Include after common.mk (docs/contract.md).
 #
-# Profile, set by the project Makefile before the includes:
+# Profile, set by the project Makefile before the includes, with `:=` and never reading the
+# variable's earlier value (`?=`, `+=` and `X := $(X) y` take the environment's). The command
+# line and `make -e` count too, except under `make gate` and pre-push, where only the Makefile
+# does (docs/contract.md):
 #   MODULES         uv workspace member directories as uv.lock records them, space-separated;
 #                   empty = a single package at the root
 #   COVERAGE_FLOOR  percent (0-100) of combined statement and branch coverage (--cov-branch)
@@ -24,6 +27,11 @@
 # Environment: JUNIT_DIR, when set, makes `test` write one JUnit XML report per package
 # there. `audit` needs the network.
 
+# An inherited COVERAGE_FLOOR never counts (see common.mk's PROJECT_ROOT); a
+# command-line value, and `make -e`, still do.
+ifeq ($(origin COVERAGE_FLOOR),environment)
+COVERAGE_FLOOR :=
+endif
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
 COVERAGE_FLOOR := $(strip $(COVERAGE_FLOOR))
 
@@ -43,7 +51,7 @@ lint: ## Run lint-repo, then ruff check, ruff format --check, vulture, the ancho
 format: ## Run format-md, then apply ruff's fixes and format with ruff
 	@"$(DEVKIT)/scripts/python/format.sh"
 
-test: ## Run each package's pytest suite and hold its statement and branch coverage to COVERAGE_FLOOR
+test: ## Check that .venv matches uv.lock, then run each package's pytest suite and hold its statement and branch coverage to COVERAGE_FLOOR
 	@"$(DEVKIT)/scripts/python/test.sh"
 
 audit: ## Run pip-audit on the runtime dependencies uv.lock pins (needs the network)

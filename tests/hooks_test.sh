@@ -1343,11 +1343,11 @@ case_gate_ignored_pytest_screen() { # conftest.py above a project directory, __p
   g add -A && g commit -q --no-verify -m newline
   ignored pytest.ini
   norecord "the files pytest reads could not be screened" || return 1
-  # Only the screen's listing fails: strictly_clean passes, and nothing records.
+  # Only the screen's listing fails (not the gitlink one, ls-files -s): strictly_clean passes, and nothing records.
   pomproj pyproject.toml '[project]'
   shim=$work/shim
   mkdir -p "$shim"
-  printf '#!/bin/bash\nif [[ " $* " == *" ls-files "* && " $* " == *" -z "* ]]; then exit 1; fi\nexec %q "$@"\n' "$(command -v git)" >"$shim/git"
+  printf '#!/bin/bash\nif [[ " $* " == *" ls-files "* && " $* " == *" -z "* && " $* " != *" -s "* ]]; then exit 1; fi\nexec %q "$@"\n' "$(command -v git)" >"$shim/git"
   chmod +x "$shim/git"
   norecord "the files pytest reads could not be screened" PATH="$shim:$PATH" || return 1
   if ! unwarned; then
@@ -1436,8 +1436,216 @@ case_pre_push_ignored_pytest() { # the hook warns on the same files, and still g
   say git push -q origin main
   [[ $rc == 0 && $out == *"WARNING: $pytest_pre pytest.ini, tests/conftest.py $pytest_post."* ]] && logged "$both"
 }
+hidden() { # the clone's status is empty although file holds an edit (the premise of the cases below)
+  [[ -z $(g --no-optional-locks status --porcelain) && $(<"$clone/file") == two ]]
+}
+strip() { # strip: a clean filter that maps "two" to the committed "one", for file; edit then changes the content, not the size
+  echo 'file filter=strip' >>"$clone/.git/info/attributes"
+  g config filter.strip.clean 'sed s/two/one/'
+}
+edit() { echo two >"$clone/file"; }
+case_gate_clean_filter() { # a clean filter can make an edit read as clean
+  local reason="git reads tracked files through a clean filter or the ident attribute (it can hide an edit): strip"
+  fresh
+  strip
+  edit
+  hidden || return 1
+  norecord "$reason" || return 1
+  # The same through a C-quoted path, which no edit is needed to find.
+  fresh
+  echo x >"$clone/é.q"
+  g add é.q && g commit -q --no-verify -m q
+  [[ $(g ls-files) == *'"\303\251.q"'* ]] || return 1
+  echo '*.q filter=strip' >>"$clone/.git/info/attributes"
+  # Not a conforming process filter: the screen refuses before any status
+  # hashes the file through it, so git's reaction to the handshake is moot.
+  g config filter.strip.process 'cat'
+  norecord "$reason" || return 1
+  # An attribute whose driver is not configured, and a driver no path uses.
+  fresh
+  echo 'file filter=nope' >>"$clone/.git/info/attributes"
+  g config filter.other.clean cat
+  gate
+  [[ $rc == 0 && $out == "make gate: recorded"* && -f $(rec) ]] || return 1
+  # The same, with the attribute unset, set or unspecified by a later line
+  # (a set one names the driver "set", which is not configured).
+  local later
+  for later in 'file -filter' 'file filter' 'file !filter'; do
+    fresh
+    printf '%s\n' 'file filter=strip' "$later" >>"$clone/.git/info/attributes"
+    g config filter.strip.clean 'sed s/two/one/'
+    gate
+    [[ $rc == 0 && $out == "make gate: recorded"* && -f $(rec) ]] || return 1
+  done
+  # A driver literally named set is a driver, not the attribute's state.
+  fresh
+  echo 'file filter=set' >>"$clone/.git/info/attributes"
+  g config filter.set.clean cat
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): set"
+}
+case_gate_clean_filter_two() { # two configured drivers at once are both named
+  fresh
+  echo x >"$clone/other"
+  g add other && g commit -q --no-verify -m o
+  printf '%s\n' 'file filter=strip' 'other filter=cat2' >>"$clone/.git/info/attributes"
+  g config filter.strip.clean cat
+  g config filter.cat2.clean cat
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): strip, cat2"
+}
+case_gate_clean_filter_during() { # a filter that applies to a file that appeared during the run
+  fresh
+  norecord "a clean filter or ident attribute that appeared during the run applies to tracked files (it can hide an edit): strip" \
+    DURING='echo "file filter=strip" >>.git/info/attributes && git config filter.strip.clean cat'
+}
+stale() { # a stat a clean filter validated, kept after the filter is removed: status reads the edit as clean
+  strip
+  sleep 1 # the edit's timestamp must differ from the index's
+  edit
+  g status --porcelain >/dev/null
+  sleep 1
+  g status --porcelain >/dev/null
+  g config --unset filter.strip.clean
+  hidden || return 1
+}
+case_gate_stale_stat() { # the stat of a removed clean filter cannot hide an edit
+  fresh
+  stale || return 1
+  norecord "the tree was not clean at the start"
+}
+case_pre_push_stale_stat() {
+  gated || return 1
+  stale || return 1
+  say git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both"
+}
+case_gate_clean_filter_submodule() { # a clean filter a submodule's own configuration applies to its files
+  fresh
+  local sub=$work/case/sub
+  git init -q "$sub" && echo x >"$sub/f" && git -C "$sub" add f && git -C "$sub" commit -q -m s
+  g -c protocol.file.allow=always submodule -q add "$sub" sm
+  g commit -q --no-verify -m sm
+  echo 'f filter=strip' >>"$clone/.git/modules/sm/info/attributes"
+  git -C "$clone/sm" config filter.strip.clean cat
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): sm:strip"
+}
+case_gate_ident() { # ident collapses $Id: sha $ to $Id$, so a same-size edit inside it reads clean
+  fresh
+  echo 'file ident' >>"$clone/.git/info/attributes"
+  # shellcheck disable=SC2016 # the literal keyword
+  echo '$Id$' >"$clone/file"
+  g add file && g commit -q --no-verify -m id
+  rm "$clone/file" && g checkout -q -- file
+  # shellcheck disable=SC2016 # the literal keyword
+  [[ $(<"$clone/file") == '$Id: '*' $' ]] || return 1
+  sed -i 's/[0-9a-f]\{40\}/0000000000000000000000000000000000000000/' "$clone/file"
+  [[ -z $(g --no-optional-locks status --porcelain) ]] || return 1
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): ident attribute"
+}
+case_gate_dedup_collisions() { # the dedup key is the submodule and the driver, not their joined label
+  local sub=$work/case/sub
+  fresh
+  git init -q "$sub" && echo x >"$sub/f" && git -C "$sub" add f && git -C "$sub" commit -q -m s
+  g -c protocol.file.allow=always submodule -q add "$sub" .a
+  g -c protocol.file.allow=always submodule -q add "$sub" a
+  g commit -q --no-verify -m sm
+  local m
+  for m in .a a; do
+    echo 'f filter=strip' >>"$clone/.git/modules/$m/info/attributes"
+    git -C "$clone/$m" config filter.strip.clean cat
+  done
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): .a:strip, a:strip" || return 1
+  # A top-level driver named sm:strip and submodule sm's driver strip.
+  fresh
+  git init -q "$sub" && echo x >"$sub/f" && git -C "$sub" add f && git -C "$sub" commit -q -m s
+  g -c protocol.file.allow=always submodule -q add "$sub" sm
+  g commit -q --no-verify -m sm
+  echo 'f filter=strip' >>"$clone/.git/modules/sm/info/attributes"
+  git -C "$clone/sm" config filter.strip.clean cat
+  echo 'file filter=sm:strip' >>"$clone/.git/info/attributes"
+  g config filter.sm:strip.clean cat
+  norecord "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): sm:strip, sm:strip"
+}
+case_gate_gitlink_unlisted() { # an embedded repository: git submodule cannot list its filters
+  fresh
+  git init -q "$clone/emb" && echo x >"$clone/emb/f" && git -C "$clone/emb" add f && git -C "$clone/emb" commit -q -m e
+  g add emb 2>/dev/null
+  g commit -q --no-verify -m emb
+  [[ $(g ls-files -s emb) == 160000* ]] || return 1
+  norecord "a gitlink has no .gitmodules entry: emb (git submodule cannot list its clean filters)"
+}
+replaced() { # replaced DIR FILE: stage an edit of FILE and replace HEAD by a commit holding it, so git sees no change
+  local tree fake
+  echo two >"$1/$2"
+  git -C "$1" add "$2"
+  tree=$(git -C "$1" write-tree)
+  fake=$(git -C "$1" commit-tree "$tree" -m fake)
+  git -C "$1" replace -f "$(git -C "$1" rev-parse HEAD)" "$fake"
+  [[ -z $(git -C "$1" --no-optional-locks status --porcelain) ]]
+}
+case_gate_replace_ref() { # a replace ref hides an edit from a plain status
+  fresh
+  replaced "$clone" file || return 1
+  [[ -z $(g --no-optional-locks status --porcelain) ]] || return 1
+  norecord "the tree was not clean at the start" || return 1
+  # The same in a submodule, where --no-replace-objects does not reach.
+  fresh
+  local sub=$work/case/sub
+  git init -q "$sub" && echo x >"$sub/f" && git -C "$sub" add f && git -C "$sub" commit -q -m s
+  g -c protocol.file.allow=always submodule -q add "$sub" sm
+  g commit -q --no-verify -m sm
+  replaced "$clone/sm" f || return 1
+  [[ -z $(g --no-optional-locks status --porcelain) ]] || return 1
+  norecord "the tree was not clean at the start"
+}
+case_pre_push_clean_filter() { # the record does not skip the gate while a clean filter applies
+  gated || return 1
+  strip
+  edit
+  hidden || return 1
+  say git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both"
+}
+fsmonitor() { # fsmonitor: a hook that reports no change (version 1: no output), with status having marked every entry valid
+  printf '#!/bin/sh\nexit 0\n' >"$work/fsmonitor-hook"
+  chmod +x "$work/fsmonitor-hook"
+  g config core.fsmonitor "$work/fsmonitor-hook"
+  g config core.fsmonitorHookVersion 1
+  g status --porcelain >/dev/null
+  g status --porcelain >/dev/null
+  sleep 1 # the edit's timestamp must differ from the index's
+  edit
+}
+# Both fsmonitor cases are pinned by the fresh-index status as well as by the
+# flag, so neither flag is pinned on its own.
+case_gate_fsmonitor() { # an fsmonitor hook that misses an edit
+  fresh
+  fsmonitor
+  hidden || return 1
+  norecord "the tree was not clean at the start"
+}
+case_pre_push_fsmonitor() {
+  gated || return 1
+  fsmonitor
+  hidden || return 1
+  say git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both"
+}
+case_gate_env() { # git's local environment variables are unset, as pre-push does
+  fresh
+  gate GIT_DIR="$clone/.git" GIT_INDEX_FILE="$work/no-such-index"
+  [[ $rc == 0 && $out == "make gate: recorded"* && -f $(rec) ]] && logged "$both" || return 1
+  # Injected configuration cannot hide an edit either.
+  fresh
+  strip
+  g config --unset filter.strip.clean
+  edit
+  [[ -n $(g --no-optional-locks status --porcelain) ]] || return 1
+  local params="'filter.strip.clean=sed s/two/one/'"
+  [[ -z $(GIT_CONFIG_PARAMETERS=$params g --no-optional-locks status --porcelain) ]] || return 1
+  norecord "the tree was not clean at the start" GIT_CONFIG_PARAMETERS="$params"
+}
 case_jvm_screen_parity() { # the hook stays self-contained, so the two copies must not drift
-  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn ignored_pytest pytest_skips printable pathspec_git strictly_clean identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
+  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn ignored_pytest pytest_skips printable pathspec_git strictly_clean clean_filters identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
   alt=$(IFS='|' && echo "${names[*]}")
   local extract="/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^($alt)\\(\\)/,/^}/p"
   a=$(sed -En "$extract" "$root/scripts/gate.sh")
@@ -1657,7 +1865,7 @@ t "pre-push ignores a deletion-only push" case_pre_push_deletion
 t "pre-push installed directly exits 0 on zero refs" case_pre_push_no_refs
 t "pre-push.devkit with zero refs runs the gate" case_pre_push_side_no_refs
 t "pre-push ignores ONLY and says so" case_pre_push_only
-t "gate.sh and pre-push define the JVM options screen, the settings.xml checks, ignored_mvn, ignored_pytest, pytest_skips, printable, pathspec_git, strictly_clean and the POM profile scan identically" case_jvm_screen_parity
+t "gate.sh and pre-push define the JVM options screen, the settings.xml checks, ignored_mvn, ignored_pytest, pytest_skips, printable, pathspec_git, strictly_clean, clean_filters and the POM profile scan identically" case_jvm_screen_parity
 t "pre-push warns on variables, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
 t "pre-push warns on a settings.xml activeProfile it does not define and on ignored .mvn/ files, not on a directory at ~/.m2/extensions.xml" case_pre_push_home_files
 t "pre-push warns on POM profiles activated by an environment variable or an untracked file, in modules and parents too, and still gates" case_pre_push_poms
@@ -1708,6 +1916,20 @@ t "make gate reads POMs and files the same under GIT_ICASE_PATHSPECS and GIT_LIT
 t "make gate counts an ignored root conftest.py, a member named build and a test* directory, and ignores GIT_LITERAL_PATHSPECS" case_gate_ignored_pytest_members
 t "an inherited GIT_LITERAL_PATHSPECS does not hide a skip-worktree file from make gate or pre-push" case_gate_literal_pathspecs
 t "make gate records nothing for an ignored file pytest reads that appeared during the run" case_gate_ignored_pytest_during
+t "make gate records nothing while a clean filter applies to a tracked file (also through a C-quoted path or process), but does for an unconfigured driver, an unused one and an unset attribute" case_gate_clean_filter
+t "make gate records nothing for a clean filter that applied during the run" case_gate_clean_filter_during
+t "make gate names every configured clean driver" case_gate_clean_filter_two
+t "pre-push still gates when a clean filter hides an edit from a recorded HEAD" case_pre_push_clean_filter
+t "make gate sees an edit under a stat a since-removed clean filter validated" case_gate_stale_stat
+t "pre-push still gates in the same case, from a recorded HEAD" case_pre_push_stale_stat
+t "make gate records nothing for a clean filter configured in a submodule" case_gate_clean_filter_submodule
+t "make gate records nothing for the ident attribute" case_gate_ident
+t "make gate names submodule and top-level drivers whose labels collide" case_gate_dedup_collisions
+t "make gate records nothing for a gitlink without a .gitmodules entry, and says so" case_gate_gitlink_unlisted
+t "make gate sees an edit a replace ref hides, in a submodule too" case_gate_replace_ref
+t "make gate sees an edit an fsmonitor hook missed" case_gate_fsmonitor
+t "pre-push still gates when an fsmonitor hook hides an edit from a recorded HEAD" case_pre_push_fsmonitor
+t "make gate unsets git's local environment variables, so GIT_INDEX_FILE and GIT_CONFIG_PARAMETERS cannot hide anything" case_gate_env
 t "make gate records nothing for a POM profile activated by an environment variable, but does for an unset or empty one and a commented-out profile" case_gate_pom_env
 t "make gate reads the POMs of modules, profile modules and parents inside the tree, and nothing outside it" case_gate_pom_scope
 t "make gate records nothing for a POM profile activated by an untracked or ignored file or a property path, but does for a tracked or absent one" case_gate_pom_files

@@ -9,7 +9,14 @@
 #   - HEAD exists, and the ref backend lets us see it move (files, with a
 #     HEAD reflog), since a run that moved HEAD verified no single commit;
 #   - the tree was strictly clean at the start and at the end, so the verdict
-#     is about the commit, not about edits or untracked files;
+#     is about the commit, not about edits or untracked files (read without
+#     fsmonitor or the untracked cache, with git's local environment variables
+#     (`git rev-parse --local-env-vars`) unset);
+#   - no tracked file's filter attribute names a driver with a clean or process
+#     command, and none has the ident attribute, which can make an edited file
+#     read as clean;
+#   - no replace ref (refs/replace/, in a submodule too) hides an edit: the
+#     status reads with replacement off, in submodules by core.useReplaceRefs;
 #   - git ignores none of the .mvn/ files Maven reads, which a tree that is
 #     clean by git's account would hide;
 #   - git ignores none of the files pytest reads (its configuration, coverage's
@@ -25,6 +32,12 @@ set -uo pipefail
 shopt -u nocasematch # an exported BASHOPTS can fold every case and [[ == ]] match
 
 cd "$PROJECT_ROOT" || exit 1
+# As scripts/hooks/pre-push.sh: the stages and the screens see the repository as
+# a plain shell would (GIT_DIR, GIT_INDEX_FILE, GIT_CONFIG_PARAMETERS ... could
+# point git at another tree or inject filter or fsmonitor configuration).
+while IFS= read -r var; do
+    unset "$var"
+done < <(git rev-parse --local-env-vars)
 
 if [[ -n "${ONLY-}" ]]; then
     echo "ERROR: make gate runs the whole push gate and records the result; unset ONLY (it is '$ONLY')." >&2
@@ -40,14 +53,103 @@ pathspec_git() {
 
 # strictly_clean: no change, untracked file or dirty submodule (ignored files
 # are fine) and no assume-unchanged or skip-worktree entry; a failing git
-# command is not clean. Duplicated in scripts/hooks/pre-push.sh, which stays
-# self-contained. No `ls-files | grep -q`: grep's early exit would SIGPIPE it.
+# command is not clean. The status call reads the tree itself: no fsmonitor
+# hook and no untracked cache (either can hide an edit or a new file), and no
+# index write (--no-optional-locks), and no replace refs (also in submodules:
+# core.useReplaceRefs travels in the environment where GIT_NO_REPLACE_OBJECTS
+# does not). It runs a second time against a throwaway index read from HEAD, so
+# no stat validated under an earlier conversion hides an edit. A clean filter or
+# the ident attribute can still hide one: clean_filters screens for that.
+# Duplicated in scripts/hooks/pre-push.sh, which stays self-contained.
+# No `ls-files | grep -q`: grep's early exit would SIGPIPE it.
 strictly_clean() {
-    local status files
-    status=$(git status --porcelain --untracked-files=all --ignore-submodules=none 2> /dev/null) || return 1
+    local status files tmp rc
+    status=$(git --no-replace-objects -c core.useReplaceRefs=false --no-optional-locks -c core.fsmonitor=false -c core.untrackedCache=false \
+        status --porcelain --untracked-files=all --ignore-submodules=none 2> /dev/null) || return 1
     [[ -z "$status" ]] || return 1
     files=$(pathspec_git ls-files -v -- :/ 2> /dev/null) || return 1
-    ! grep -q '^[a-zS]' <<< "$files"
+    ! grep -q '^[a-zS]' <<< "$files" || return 1
+    # The same status against a throwaway index read from HEAD: with no stat
+    # to trust, git hashes every tracked file anew, through the conversions
+    # now in force, so a stat that a clean filter since removed once validated
+    # cannot hide an edit. GIT_INDEX_FILE is set for these two calls only. The
+    # index lives in the git directory (TMPDIR could be in the work tree), and
+    # read-tree runs no hook (post-index-change could rewrite the index).
+    tmp=$(mktemp -d "$(git rev-parse --absolute-git-dir)/devkit-index.XXXXXX") || return 1
+    status=$(
+        export GIT_INDEX_FILE="$tmp/index"
+        git --no-replace-objects -c core.useReplaceRefs=false -c core.hooksPath=/dev/null read-tree HEAD &&
+            git --no-replace-objects -c core.useReplaceRefs=false --no-optional-locks -c core.fsmonitor=false -c core.untrackedCache=false \
+                status --porcelain --untracked-files=all --ignore-submodules=none
+    ) 2> /dev/null && rc=0 || rc=$?
+    rm -rf -- "$tmp"
+    [[ $rc == 0 && -z "$status" ]]
+}
+
+# clean_filters: sets clean_filtered to the drivers (a line each, first seen
+# first; <submodule path>:<driver> for an initialized submodule's own files and
+# configuration) that the filter attribute of some tracked path names and that
+# have filter.<driver>.clean or .process configured, and to "ident attribute"
+# (likewise prefixed) for a tracked path with the ident attribute set: git
+# status hashes such a file through the filter, or collapses $Id: ... $ to
+# $Id$, which can make an edit read as clean. Fails when git does (status 2,
+# with unlisted holding the paths, when a gitlink has no .gitmodules entry:
+# git submodule foreach cannot list them). No -z for check-attr: --stdin
+# unquotes the C-quoted lines ls-files prints, and a line is `path: attribute:
+# value`, so the attribute and value are the last two ": "-separated fields.
+# pipefail is set in the substitution because pre-push.sh sets none.
+# Duplicated in scripts/hooks/pre-push.sh.
+clean_filters() {
+    local attrs line value attr driver kind label key dir subs rec path top seen=$'\n' listed=$'\n'
+    clean_filtered="" unlisted=""
+    top=$(git rev-parse --show-toplevel 2> /dev/null) || return 1
+    while IFS= read -r -d '' rec; do
+        path=${rec#*$'\n'}
+        listed="$listed$path"$'\n'
+    done < <(git config -z -f "$top/.gitmodules" --get-regexp '^submodule\..*\.path$' 2> /dev/null)
+    rec=$(set -o pipefail; pathspec_git ls-files -s -z --full-name -- :/ | tr '\0' '\n') 2> /dev/null || return 1
+    while IFS= read -r line; do
+        [[ "$line" == 160000\ * ]] || continue
+        path=${line#*$'\t'}
+        [[ "$listed" == *$'\n'"$path"$'\n'* ]] || unlisted="${unlisted:+$unlisted$'\n'}$path"
+    done <<< "$rec"
+    [[ -z "$unlisted" ]] || return 2
+    # shellcheck disable=SC2016 # $displaypath is for the shell git runs
+    subs=$(git submodule foreach --quiet --recursive 'printf "%s\n" "$displaypath"' 2> /dev/null) || return 1
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] || continue
+        attrs=$(set -o pipefail; pathspec_git -C "$dir" ls-files -- :/ | git -C "$dir" check-attr -a --stdin |
+            { grep -E ': (filter|ident): ' || [[ $? == 1 ]]; }) 2> /dev/null || return 1
+        while IFS= read -r line; do
+            value=${line##*: }
+            attr=${line%: *}
+            attr=${attr##*: }
+            label=ident\ attribute
+            case $attr in
+                # Only an empty value is skipped: check-attr prints set and unset for a bare or
+                # negated attribute and for a driver so named alike, and git matches the literal value.
+                filter) driver=$value; [[ -n "$driver" ]] || continue; label=$driver; key=$dir$'\t'$driver ;;
+                ident) [[ "$value" == set ]] || continue; driver=""; key=$dir$'\t\t' ;;
+                *) continue ;;
+            esac
+            [[ "$dir" == . ]] || label=$dir:$label
+            [[ "$seen" != *$'\n'"$key"$'\n'* ]] || continue
+            seen="$seen$key"$'\n'
+            if [[ -z "$driver" ]]; then
+                clean_filtered="${clean_filtered:+$clean_filtered$'\n'}$label"
+                continue
+            fi
+            # exit 1: not set; anything else is a failure.
+            for kind in clean process; do
+                git -C "$dir" config --get "filter.$driver.$kind" > /dev/null 2>&1
+                case $? in
+                    0) clean_filtered="${clean_filtered:+$clean_filtered$'\n'}$label"; break ;;
+                    1) ;;
+                    *) return 1 ;;
+                esac
+            done
+        done <<< "$attrs"
+    done <<< ".${subs:+$'\n'$subs}"
 }
 
 # ignored_mvn: sets mvn_ignored to the ignored ones (a line each) among the three
@@ -640,7 +742,15 @@ if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     rm -f "$record" 2> /dev/null # a run in progress or a failing run leaves none
     head=$(git rev-parse --verify --quiet HEAD)
     [[ -n "$head" ]] || why "HEAD has no commit"
-    strictly_clean || why "the tree was not clean at the start"
+    # The filters first: with one in force the record is refused anyway, and
+    # the fresh-index status would push every filtered file through it.
+    clean_filters && cf=ok || cf=$?
+    case $cf in
+        ok) [[ -z "$clean_filtered" ]] || why "git reads tracked files through a clean filter or the ident attribute (it can hide an edit): $(printable "$clean_filtered")" ;;
+        2) why "a gitlink has no .gitmodules entry: $(printable "$unlisted") (git submodule cannot list its clean filters)" ;;
+        *) why "the clean filters could not be listed" ;;
+    esac
+    [[ $cf != ok || -n "$clean_filtered" ]] || strictly_clean || why "the tree was not clean at the start"
     ignored_mvn || why "git could not list the ignored files under .mvn/"
     [[ -z "$mvn_ignored" ]] || why "git ignores .mvn/ files Maven reads: ${mvn_ignored//$'\n'/, } (they can skip tests)"
     ignored_pytest || why "the files pytest reads could not be screened"
@@ -740,12 +850,20 @@ fi
 [[ -n "$reasons" ]] || marker=$(mktemp "$record.XXXXXX") || why "no marker could be created"
 
 # Cleared, an outer `make -i/-k/-n/-o` cannot reach a stage, nor can makefiles
-# MAKEFILES adds. A command-line VAR=value still reaches the stages' environment.
+# MAKEFILES adds. A command-line VAR=value still reaches the stages' environment
+# (profile variables are the exception: the inner make ignores an inherited one;
+# docs/contract.md).
 env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKELEVEL -u MAKEFILES make --no-print-directory lint-repo test
 rc=$?
 
 if [[ "$rc" -eq 0 && -z "$reasons" ]]; then
-    strictly_clean || why "the tree changed during the run"
+    clean_filters && cf=ok || cf=$?
+    case $cf in
+        ok) [[ -z "$clean_filtered" ]] || why "a clean filter or ident attribute that appeared during the run applies to tracked files (it can hide an edit): $(printable "$clean_filtered")" ;;
+        2) why "a gitlink with no .gitmodules entry appeared during the run: $(printable "$unlisted") (git submodule cannot list its clean filters)" ;;
+        *) why "the clean filters could not be listed" ;;
+    esac
+    [[ $cf != ok || -n "$clean_filtered" ]] || strictly_clean || why "the tree changed during the run"
     # Tree state, like strictly_clean, so checked at both ends. The environment
     # cannot change under the run and nothing it does writes the home-directory
     # files, so those checks above run at the start only.

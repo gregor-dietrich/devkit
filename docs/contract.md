@@ -191,11 +191,30 @@ include .devkit/make/python-uv.mk
   never as `$(DEVKIT)/make/...`: `include` splits on spaces, so a cache
   path containing one would break. The `ifeq ($(DEVKIT),)` guard stays,
   since it is what reports a failed `devkitw`.
-- `make/common.mk` sets `PROJECT_ROOT := $(CURDIR)`, so an inherited
-  environment value never wins (a command-line `PROJECT_ROOT=...` still
-  does), strips `MODULES` and `JAVA_VERSION` of the blanks a trailing comment
-  leaves, and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR
-  COVERAGE_FLOOR ONLY DEVKIT` to every recipe. In a Maven project
+- `make/common.mk` sets `PROJECT_ROOT` to `$(CURDIR)`, so an inherited
+  environment value never wins, not even under `make -e` (a command-line
+  `PROJECT_ROOT=...` still does, and so does a project's own line after the
+  include). Likewise a `MODULES`, `FRONTEND_DIR` or
+  `JAVA_VERSION` inherited from the environment does not count as such
+  (`python-uv.mk` does the same for `COVERAGE_FLOOR`, `java-maven.mk` for
+  `FRONTEND_DIR` and `JAVA_VERSION`, so a uv project's recipes still see an
+  inherited `JAVA_VERSION`): a project that omits one gets it empty, while a
+  command-line value and `make -e` still count (not under `make gate`,
+  below). A `MAKEFLAGS` or `GNUMAKEFLAGS` in the environment that carries
+  `MODULES=x` counts as a command-line value, and a `MAKEFILES` file's
+  assignment as a makefile one; `make gate` clears all three. Write the
+  profile lines with `:=`, as the skeletons do, and never read the variable's
+  earlier value: `?=` leaves the value empty when the environment sets the
+  variable, and `+=` or `MODULES := $(MODULES) x` take the environment's
+  value (`MODULES += a` with `MODULES=b` inherited yields `b a`). An empty
+  `COVERAGE_FLOOR` fails `check` and `test`; an empty `JAVA_VERSION` fails
+  every Maven target (`scripts/lib/mvn_checked.sh`); an empty `FRONTEND_DIR`
+  means no frontend, so the frontend pin check is skipped silently: set it in
+  the Makefile with `:=`; a `MODULES` left empty in a workspace is caught by
+  `make check` only. `common.mk` strips `MODULES` of the
+  blanks a trailing comment leaves (`java-maven.mk` strips `FRONTEND_DIR` and
+  `JAVA_VERSION`), and exports `PROJECT_ROOT PROJECT JAVA_VERSION MODULES
+  FRONTEND_DIR COVERAGE_FLOOR ONLY DEVKIT` to every recipe. In a Maven project
   `JAVA_VERSION` is the JDK major Maven must run on, exactly, a plain number
   (`25`): `check` and every lifecycle build enforce it (see Parent POM).
 - `make/common.mk` sets `SHELL := /bin/bash`, so recipes (devkit's and the
@@ -679,14 +698,41 @@ one is missing or stale. A hook it did not write is never overwritten.
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
-  `VAR=value` still reaches the stages' environment), and refuses `ONLY`.
+  `VAR=value` still reaches the stages' environment, except that a profile
+  variable (`MODULES`, `FRONTEND_DIR`, `JAVA_VERSION`, `COVERAGE_FLOOR`)
+  counts under `make gate` only from the Makefile: with `MAKEFLAGS` cleared,
+  a command-line `make gate MODULES=x` or `make -e gate` reaches the inner
+  make as inherited and is ignored), and refuses `ONLY`.
   Before the stages it removes the old record. When they pass, it records HEAD
   in `git rev-parse --git-path devkit-verified-head` (per worktree), but only
   if the project is the git top level, HEAD has a commit, the tree was
   strictly clean at the start and at the end (no change, no untracked file, no
   dirty submodule, no assume-unchanged or skip-worktree entry; ignored files
-  are fine), HEAD did not move during the run (detected through HEAD and its
-  reflog, so a move away and back counts, and no reflog means no record), the
+  are fine; `git status` runs with `core.fsmonitor` and `core.untrackedCache`
+  off, without the optional index lock and with replace refs
+  (`refs/replace/`, in a submodule too) off, and a second time against a
+  throwaway index read from HEAD (kept in the git directory, and read without
+  hooks), so git hashes every tracked file anew and a stat that a
+  since-removed clean filter validated hides no edit; a submodule's own index
+  is not re-read that way; `make gate` unsets git's local environment
+  variables, as `pre-push` does, so neither an fsmonitor hook nor injected
+  `GIT_CONFIG_PARAMETERS` can hide a change; the unset reaches the stages too,
+  so a `safe.directory` or other setting supplied only through
+  `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` is lost
+  to them, and a stage such as `lint-secrets` can fail on dubious ownership
+  under `make gate` where `make lint-repo` passes: set it in the global or
+  system git config), no tracked file's `filter` attribute names a driver with
+  `filter.<driver>.clean` or `.process` configured and none has the `ident`
+  attribute set (git reads such a file through the filter, or collapses
+  `$Id: ... $` to `$Id$`, which can make an edit read as clean, in an
+  initialized submodule against its own configuration too; a project that
+  tracks files through git-lfs therefore gets no record, and `pre-push` runs
+  its gate; checked at both ends too), no gitlink lacks a `.gitmodules` entry
+  (`git submodule` cannot list its filters, so an embedded repository added
+  with `git add` gets no record until it has an entry or `git rm --cached
+  <path>` removes it), HEAD did not move during the run (detected through HEAD
+  and its reflog, so a move away and back counts, and no reflog means no
+  record), the
   ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
   `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`,
   `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`, `COVERAGE_RCFILE`,
@@ -701,8 +747,9 @@ one is missing or stale. A hook it did not write is never overwritten.
   one git ignores, and no POM in scope depends on ambient state, as above (all
   three checked at the start and again at the end of the run, as the tree state
   is). Recording never changes the exit status, and a passing run that records
-  nothing says why. `pre-push` skips its gate only while HEAD equals the record
-  and the tree is still strictly clean.
+  nothing says why. `pre-push` skips its gate only while HEAD equals the record,
+  the tree is still strictly clean (read as above) and no clean filter or
+  `ident` attribute applies to a tracked file.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.
@@ -1123,7 +1170,8 @@ run the tools from `.venv`.
 - Pins and drift. `.python-version` pins CPython and the `uv` package in
   `uv.lock` pins uv; neither is a profile variable. `make check` fails, one
   `ERROR` line with its remedy each, when `python3` is older than 3.11,
-  when `COVERAGE_FLOOR` is unset or not a percent from 0 to 100, when
+  when `COVERAGE_FLOOR` is unset (an inherited environment value never
+  counts) or not a percent from 0 to 100, when
   `.python-version` is missing, no `major.minor[.patch]` or older than 3.11
   (`make lint`'s anchored-match gate runs under `.venv`'s Python, so `make
   lint` fails as well when that Python is older than 3.11), when
@@ -1153,13 +1201,14 @@ run the tools from `.venv`.
   other hashes gets its own. devkit never runs a `uv` on `PATH`, nor the
   one inside `.venv`. Only `make install` creates the copy, read-only, when
   it is missing, and
-  `check` and `audit` fail until then: pip, in a throwaway venv of
+  `check`, `test` and `audit` fail until then: pip, in a throwaway venv of
   `python3`, installs the machine's uv wheel from the index pip's own
   configuration names (PyPI unless `pip.conf` or a `PIP_*` variable such as
   `PIP_INDEX_URL` names another), and only a wheel whose sha256 `uv.lock`
   lists. A copy that does not report the pinned version fails with the
   command that removes it. devkit's targets always use the project's
-  `.venv`: `get_uv.sh` unsets `UV_PROJECT_ENVIRONMENT`.
+  `.venv`, in the project at `$PWD`: `get_uv.sh` unsets
+  `UV_PROJECT_ENVIRONMENT`, `UV_PROJECT` and `UV_WORKING_DIR`.
 - `make install` runs `uv sync --locked --all-packages --all-extras`: it
   creates or repairs `.venv`, with the pinned CPython, which uv provisions
   when it is missing. It fails when `uv.lock` is stale against
@@ -1174,8 +1223,34 @@ run the tools from `.venv`.
   lists) and the copy-paste gate always scan the whole project.
 - `make format` runs `ruff check --fix --exit-zero`, then `ruff format`, on
   the project or the `ONLY` selection: it rewrites and never judges.
-- `make test` runs one pytest session per member of the selection, in the
-  member's directory, with branch coverage (`--cov-branch`). Each
+- `make test` first asks the pinned uv whether `.venv` matches `uv.lock`
+  (`uv sync --check --frozen --offline --all-packages --all-extras`, as
+  `make check` does) and fails with uv's report otherwise: run `make
+  install`. That catches a package installed or removed behind uv's back and
+  a `uv.lock` changed since the install, and touching a workspace member's
+  (or a packaged root's) `pyproject.toml`, which makes uv rebuild the
+  editable member, whose entry points or pytest plugins may have changed
+  (as `make check` already did); any other file in `.venv` uv does not
+  hash it does not (a stray `.pth` file, `sitecustomize.py`, an edited file
+  in site-packages, an entry script such as `.venv/bin/pytest`,
+  `pyvenv.cfg`), and `rm -rf .venv && make install` is the remedy for those.
+  It judges `.venv` against `uv.lock`, not `uv.lock` against
+  `pyproject.toml`: `make install`'s `--locked` does, and CI's install step
+  catches a stale lock. A project whose `[tool.uv] cache-keys` name a git
+  commit or a source-file glob makes uv treat it as needing a rebuild after
+  every new commit or matching edit, so `make test`, `make gate` (which
+  runs on the commit) and CI's test step fail until `make install`: run it
+  after each commit or edit, or drop the cache key. It then runs one
+  pytest session per member of the selection, in the member's directory,
+  with branch coverage (`--cov-branch`), `--cache-clear` (it empties
+  everything the suite keeps in pytest's cache, `config.cache` values and
+  `.pytest_cache/d/` too, so a stale `.pytest_cache` steers no session
+  through `--lf` or `--sw`; a project that sets `-p no:cacheprovider` in its
+  `addopts` keeps no cache, and the option is still accepted) and a
+  temporary `COVERAGE_FILE` (a stale `.coverage` or a `data_file` setting
+  never reaches the floor, even under `--cov-append`; `make test` leaves no
+  `.coverage`, so a project that wants a report adds `--cov-report=html` or
+  `xml` to its `addopts`). Each
   session's combined statement and branch coverage must reach
   `COVERAGE_FLOOR`: per package, never combined. The project's pytest
   configuration activates coverage (e.g. `addopts = "--cov=src"`); a

@@ -300,22 +300,32 @@ pins, never a `uv` on `PATH`, and keeps a copy per platform and set of
 hashes the lock records for that uv (and per libc and pointer width of
 `python3`), not per version ([uv
 projects](docs/contract.md#uv-projects)). After the bump, run `make install`
-once on each machine: `make check` and `make audit` fail, naming it, until
-then, and a CI job that runs either on a restored `.venv` runs `make install`
-first. The install needs python3's venv and pip even where a uv of the
-pinned version is on `PATH`: a CI image that provided only uv adds them
-(`python3-venv` on Debian and Ubuntu). pip still fetches the uv wheel from
-the index its own configuration names, and installs only a wheel whose
-sha256 `uv.lock` lists: a network that reaches PyPI only through a mirror,
-or has uv only on a private index, sets `index-url` in `pip.conf` or
-`PIP_INDEX_URL`; putting uv on `PATH` no longer works around it. Behind a
-TLS-inspecting proxy, pip also needs its own `cert` setting (`pip.conf` or
-`PIP_CERT`): a uv on `PATH` may have had its own trust configuration. The
-old copies in `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv` are unused by
-v0.8.x: once no project on the machine pins an older devkit, and while no
-devkit run is in progress, `chmod -R u+w "$d" && rm -rf "$d"` removes them,
-with `d` set to that directory. A cache hit is not re-verified, so
-`devkit/tools` is not restored from a shared CI cache.
+once on each machine: `make check`, `make test` and `make audit` fail,
+naming it, until then, and a CI job that runs any of them on a restored
+`.venv` runs `make install` first. `make test` also fails, with uv's report, on
+a `.venv` that drifted from `uv.lock` (a package installed or removed behind
+uv's back, a `uv.lock` changed since `make install`, or a workspace member's
+or a packaged root's `pyproject.toml` touched, as uv then rebuilds the editable
+member): run `make install`. A project whose `[tool.uv] cache-keys` name a git
+commit or a source-file glob has uv rebuild it after every new commit or
+matching edit, so `make test`, `make gate` (which runs on the commit) and CI's
+test step fail until `make install`: run it after each commit or edit, or drop
+the cache key. The check judges `.venv` against `uv.lock`, not `uv.lock`
+against `pyproject.toml`; `make install` and CI's install step catch a stale
+lock. The install needs python3's venv and pip even where a uv of the pinned
+version is on `PATH`: a CI image that provided only uv adds them (`python3-venv`
+on Debian and Ubuntu). pip still fetches the uv wheel from the index its own
+configuration names, and installs only a wheel whose sha256 `uv.lock` lists: a
+network that reaches PyPI only through a mirror, or has uv only on a private
+index, sets `index-url` in `pip.conf` or `PIP_INDEX_URL`; putting uv on `PATH`
+no longer works around it. Behind a TLS-inspecting proxy, pip also needs its own
+`cert` setting (`pip.conf` or `PIP_CERT`): a uv on `PATH` may have had its own
+trust configuration. The old copies in
+`${XDG_CACHE_HOME:-$HOME/.cache}/devkit/uv` are unused by v0.8.x: once no
+project on the machine pins an older devkit, and while no devkit run is in
+progress, `chmod -R u+w "$d" && rm -rf "$d"` removes them, with `d` set to that
+directory. A cache hit is not re-verified, so `devkit/tools` is not restored
+from a shared CI cache.
 
 The anchored-match gate now parses with `.venv`'s Python, the CPython
 `.python-version` pins, so a newer `python3` put first on `PATH` only for
@@ -329,6 +339,28 @@ install`.
 `make audit` in a uv project now also queries OSV (api.osv.dev), which a
 network allowing only PyPI must open. It takes longer (about half a minute
 on a 100-pin lock) and can now fail on advisories PyPI did not list.
+
+`make test` in a uv project now runs every pytest session with
+`--cache-clear` and a temporary `COVERAGE_FILE`, so a stale `.pytest_cache`
+(`--lf`, `--sw`, `config.cache` values, `.pytest_cache/d/`) or `.coverage`
+(`--cov-append`) steers no run, and it writes no `.coverage`: a project that
+wants a report adds `--cov-report=html` (or `xml`) to its pytest `addopts`.
+Every make target now ignores a `MODULES`, `COVERAGE_FLOOR`,
+`FRONTEND_DIR` or `JAVA_VERSION` inherited from the environment (a uv
+project still passes an inherited `JAVA_VERSION` to its recipes), as it
+already did `PROJECT_ROOT`: CI or a project that supplied one that way sets
+it in the Makefile with `:=`, never reading the variable's earlier value
+(`?=` leaves it empty when the environment sets the variable; `+=` and
+`MODULES := $(MODULES) x` take the environment's). An empty `COVERAGE_FLOOR`
+fails `check` and `test`, an empty `JAVA_VERSION` fails every Maven target,
+an empty `FRONTEND_DIR` skips the frontend pin check silently, and a
+`MODULES` left empty in a workspace is caught by `make check` only. A
+`MAKEFLAGS` or `GNUMAKEFLAGS` in the environment carrying `MODULES=x` counts
+as a command-line value, and a `MAKEFILES` file's assignment as a makefile
+one; `make gate` clears all three. A command-line `make VAR=value` still
+counts, except under `make gate` and `pre-push`: `gate.sh` clears
+`MAKEFLAGS`, so `make gate MODULES=x` or `make -e gate` reaches the inner
+make as inherited and is ignored there.
 
 `make gate` now refuses to record HEAD from the bump on. Run `make hooks` to
 refresh the git hooks, so `pre-push` also warns; `make check` warns that the
@@ -344,6 +376,19 @@ directory that holds tracked files. Committing or removing the file restores
 the record. Both also count `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`,
 `COVERAGE_RCFILE` and `COVERAGE_FORCE_CONFIG` being set; unsetting them
 restores it. The exact rule is in [Git hooks](docs/contract.md#git-hooks).
+A clean filter on a tracked file stops the record too: a `filter` attribute
+naming a driver with `filter.<driver>.clean` or `.process` configured, git-lfs
+included, because git reads such a file through the filter and the filter can
+hide an edit; so does the `ident` attribute, which collapses `$Id: ... $` to
+`$Id$`. `pre-push` then runs its gate. A gitlink without a `.gitmodules`
+entry (an embedded repository added with `git add`) stops it as well, because
+git cannot list its filters: add the `.gitmodules` entry or run
+`git rm --cached <path>`. A replace ref (`refs/replace/`) no longer hides an
+edit from the record. `make gate` also unsets git's local environment
+variables for the stages, `GIT_CONFIG_COUNT` and its keys and values
+included: a `safe.directory` supplied only that way is lost to them, and a
+stage such as `lint-secrets` can fail on dubious ownership under `make gate`
+where `make lint-repo` passes. Set it in the global or system git config.
 
 The parent now manages `com.github.spotbugs:spotbugs-annotations` at the
 SpotBugs version it runs (`spotbugs.version`), in scope `provided`. A

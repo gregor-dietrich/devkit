@@ -6,9 +6,20 @@
 # after the includes.
 SHELL := /bin/bash
 
-# `:=`, not `?=`: an inherited PROJECT_ROOT must not aim the git targets at
-# another repository. A command-line PROJECT_ROOT=... still overrides it.
+# An inherited PROJECT_ROOT must not aim the targets at another repository,
+# not even under `make -e`; a command-line PROJECT_ROOT=... still does, and so
+# does a project's own line after the include (the override applies only to
+# the inherited value).
 PROJECT_ROOT := $(CURDIR)
+ifeq ($(origin PROJECT_ROOT),environment override)
+override PROJECT_ROOT := $(CURDIR)
+endif
+# Likewise an inherited MODULES never counts, so a project that omits it is not
+# steered by the caller's shell; a command-line value, and `make -e`, still do.
+# The language files do the same for their own variables.
+ifeq ($(origin MODULES),environment)
+MODULES :=
+endif
 # A trailing "# comment" on a profile line leaves trailing blanks in the value.
 MODULES := $(strip $(MODULES))
 export PROJECT_ROOT PROJECT JAVA_VERSION MODULES FRONTEND_DIR COVERAGE_FLOOR ONLY DEVKIT

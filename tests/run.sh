@@ -153,7 +153,12 @@
 #          gate reads, which it must report with .venv's Python), run no .pth
 #          file of .venv's site-packages in that gate (with -S dropped, in a
 #          scratch copy of lint.sh, it must), test
-#          (coverage, coverage not activated), install (a stale uv.lock),
+#          (coverage, coverage not activated, a package installed behind uv's
+#          back or a uv.lock changed without make install, the pinned uv copy
+#          missing, a workspace member's or a packaged root's pyproject.toml
+#          touched; and make test must clear pytest's cache, --lf in addopts,
+#          and ignore a stale .coverage under --cov-append), install (a stale
+#          uv.lock),
 #          check (a tool missing from .venv, no pytest-cov, the Python pin, a
 #          Python pin of 3.10 or 3.9, which fails, and of 3.11, which passes
 #          the floor and fails at the next check, its format, no
@@ -1140,11 +1145,69 @@ py_removed() { # py_removed NAME TARGET TEXT FIXTURE FILE: without FILE, make TA
   py_copy "$4" "$1" "" && rm "$work/py-$1/$5" && make_says fail "$work/py-$1" "$2" "$3"
 }
 
+py_touched() { # py_touched FIXTURE FILE [SED]: FILE touched after the install (SED first, relocked) fails make test until make install
+  local dir=$work/py-touched-$1
+  if [[ -n ${3:-} ]]; then py_copy "$1" "touched-$1" relocked "$2" "$3"; else py_copy "$1" "touched-$1" installed; fi || return
+  make_says pass "$dir" test || return # the control: untouched, make test passes
+  sleep 1 # the touch must change the mtime uv compares
+  touch "$dir/$2"
+  make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock" "make install"
+}
+
+py_no_uv() { # the pinned uv copy missing (an empty tools cache) fails make test, saying make install
+  py_copy single no-uv installed &&
+    XDG_CACHE_HOME=$work/no-uv-cache make_says fail "$work/py-no-uv" test "is not installed in" "make install"
+}
+
 py_uninstalled() { # a dev tool removed from .venv behind uv's back is drift
   local dir=$work/py-uninstalled
   py_copy single uninstalled installed &&
     "$uv" pip uninstall -q --python "$dir/.venv/bin/python" vulture &&
-    make_says fail "$dir" check "uv cannot confirm .venv matches uv.lock"
+    make_says fail "$dir" check "uv cannot confirm .venv matches uv.lock" &&
+    make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock"
+}
+
+py_drifted() { # py_drifted NAME: a package installed behind uv's back (extra), or a uv.lock changed without make install (lock), fails make test
+  local dir=$work/py-drift-$1
+  py_copy single "drift-$1" installed || return
+  # Under devkit's 24-hour pin cutoff (README, Gating devkit itself), and the lock change drops a dependency, so nothing resolves anew.
+  if [[ $1 == extra ]]; then
+    "$uv" pip install -q --exclude-newer "24 hours" --python "$dir/.venv/bin/python" six
+  else
+    sed_into "$dir/pyproject.toml" 's/"vulture", //' && (cd "$dir" && "$uv" lock -q)
+  fi && make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock" "make install"
+}
+
+py_cache_cleared() { # --lf in addopts, a planted lastfailed naming one test: make test still runs both and passes
+  local dir=$work/py-cache-cleared
+  py_copy single cache-cleared installed pyproject.toml 's/^addopts = "/addopts = "--lf /' || return
+  mkdir -p "$dir/.pytest_cache/v/cache" &&
+    echo '{"tests/test_greeter.py::test_rejects_a_blank_name": true}' >"$dir/.pytest_cache/v/cache/lastfailed" &&
+    make_says pass "$dir" test "2 passed"
+}
+
+# py_stale_coverage NAME FILE SED: SED on pyproject.toml makes --cov-append (and a data_file) in the
+# configuration read FILE, which a direct pytest run fills in full, with the branch data make test
+# collects, so that it combines; a test deleted: make test fails the floor and leaves FILE alone.
+py_stale_coverage() {
+  local dir=$work/py-$1 before
+  py_copy single "$1" installed pyproject.toml "$3" &&
+    (cd "$dir" && .venv/bin/pytest -q --cov-branch >/dev/null 2>&1) && [[ -s $dir/$2 ]] || return
+  sed_into "$dir/tests/test_greeter.py" "/^def test_rejects_a_blank_name/,\$d" && before=$(cksum <"$dir/$2") &&
+    make_says fail "$dir" test "is below COVERAGE_FLOOR 100%" && [[ $(cksum <"$dir/$2") == "$before" ]]
+}
+
+py_no_cacheprovider() { # -p no:cacheprovider in addopts: pytest still accepts --cache-clear, so make test passes
+  py_copy single no-cacheprovider installed pyproject.toml 's/^addopts = "/addopts = "-p no:cacheprovider /' &&
+    make_says pass "$work/py-no-cacheprovider" test "2 passed"
+}
+
+py_redirected() { # UV_PROJECT or UV_WORKING_DIR naming a synced project does not vouch for a drifted one
+  local dir=$work/py-redirected
+  py_copy single redirect-synced installed && py_copy single redirected installed &&
+    "$uv" pip install -q --exclude-newer "24 hours" --python "$dir/.venv/bin/python" six &&
+    UV_PROJECT=$work/py-redirect-synced make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock" &&
+    UV_WORKING_DIR=$work/py-redirect-synced make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock"
 }
 
 py_only_app() { # ONLY=packages/app tests app, and never core
@@ -1278,6 +1341,23 @@ python_negatives() {
     's|packages/core packages/app|packages/core|'
   py_negative modules-glob check "holds a glob character" workspace "" Makefile 's|packages/core packages/app|packages/*|'
   check "python-uv-single: a tool removed from .venv fails make check" py_uninstalled
+  check "python-uv-single: a package installed behind uv's back fails make test" py_drifted extra
+  check "python-uv-single: a uv.lock changed without make install fails make test" py_drifted lock
+  check "python-uv-workspace: a touched member pyproject.toml fails make test until make install" \
+    py_touched workspace packages/core/pyproject.toml
+  check "python-uv-single: a touched packaged root's pyproject.toml fails make test until make install" \
+    py_touched single pyproject.toml \
+    's/^package = false/package = true\n\n[build-system]\nrequires = ["uv_build>=0.12.23,<0.13"]\nbuild-backend = "uv_build"/'
+  check "python-uv-single: a missing pinned uv copy fails make test, saying make install" py_no_uv
+  check "python-uv-single: make test clears pytest's cache, so --lf in addopts runs every test" py_cache_cleared
+  check "python-uv-single: make test ignores a stale .coverage under --cov-append and leaves it alone" \
+    py_stale_coverage stale-coverage .coverage 's/^addopts = "/addopts = "--cov-append /'
+  # shellcheck disable=SC2016 # sed's own $ addresses the last line
+  check "python-uv-single: make test ignores a stale file named by a data_file setting and leaves it alone" \
+    py_stale_coverage stale-data-file .stale-coverage \
+    '$s/$/\n\n[tool.coverage.run]\ndata_file = ".stale-coverage"/; s/^addopts = "/addopts = "--cov-append /'
+  check "python-uv-single: -p no:cacheprovider in addopts still passes make test" py_no_cacheprovider
+  check "python-uv-single: UV_PROJECT or UV_WORKING_DIR naming a synced project does not hide drift from make test" py_redirected
   check "python-uv-workspace: make test ONLY=packages/app tests app alone" py_only_app
   check "python-uv-workspace: make lint ONLY=packages/app skips core's ruff passes" py_only_lint "$quotes"
   check "python-uv-workspace: JUNIT_DIR=reports writes one report per member into the project" py_junit

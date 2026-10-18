@@ -15,8 +15,9 @@
 #
 # Why it differs from the pinned Maven bootstrap (#131, #44): the pin and the hashes are the
 # project's, so pip matches the wheel by its tags (fetch.sh fits a tarball devkit pins). Only
-# install bootstraps: check and audit need .venv, which only install creates, lint, test and
-# format run no uv, and check stays offline, so Maven's reason for fetching lazily does not apply.
+# install bootstraps: check, test and audit need .venv, which only install creates, lint and
+# format run no uv, and check and test stay offline, so Maven's reason for fetching lazily does
+# not apply.
 #
 # Where it no longer differs: never a uv on PATH (it came first until v0.7.x; a matching version
 # is not the same bits, and uv enforces uv.lock's hashes as Maven enforces java/checksums), never
@@ -118,5 +119,7 @@ uv_is_pin "$UV_CMD" || {
     exit 1
 }
 export UV_CMD
-# uv would sync UV_PROJECT_ENVIRONMENT, but get_venv.sh and every target use the project's .venv.
-unset UV_PROJECT_ENVIRONMENT
+# uv would sync UV_PROJECT_ENVIRONMENT, or the project UV_PROJECT or UV_WORKING_DIR names, but
+# get_venv.sh and every target use the project's .venv: every target that sources this acts on the
+# project in $PWD.
+unset UV_PROJECT_ENVIRONMENT UV_PROJECT UV_WORKING_DIR

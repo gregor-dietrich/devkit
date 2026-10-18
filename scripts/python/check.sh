@@ -69,12 +69,7 @@ if [[ ${venv_version%.*} != "$pin_minor" || ($pin == *.*.* && $venv_version != "
 fi
 echo "Python: .venv runs $venv_version (.python-version: $pin)"
 
-if ! sync_out=$("$UV_CMD" sync --check --frozen --offline --all-packages --all-extras 2>&1); then
-    echo "ERROR: uv cannot confirm .venv matches uv.lock. It reported:" >&2
-    echo "    ${sync_out//$'\n'/$'\n'    }" >&2
-    echo "If that is drift, run make install; an unreadable uv.lock or unwritable cache is its own fix." >&2
-    exit 1
-fi
+venv_synced
 echo ".venv matches uv.lock."
 
 for tool in ruff pytest vulture pip-audit; do
