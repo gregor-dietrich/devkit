@@ -1,6 +1,7 @@
 package devkit.fixture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Objects;
 
@@ -18,5 +19,16 @@ class GreeterTest {
     @Test
     void greetsTheWorldWhenTheNameIsBlank() {
         assertEquals("Hello, world", greeter.greet(" "));
+    }
+
+    @Test
+    void parsesNumbersAndRethrowsWhatFails() {
+        assertEquals(42, greeter.parse("42"));
+        assertThrows(NumberFormatException.class, () -> greeter.parse("x"));
+    }
+
+    @Test
+    void theParentSwitchesQuarkusJacocoReportOff() {
+        assertEquals("false", System.getProperty("quarkus.jacoco.report"));
     }
 }

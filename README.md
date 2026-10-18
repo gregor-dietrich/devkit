@@ -170,7 +170,8 @@ bump of the closure.
 When a plugin's version, or parent configuration that changes what a plugin
 resolves, changes in `java/parent/pom.xml`, run `make maven-checksums` and
 commit `java/checksums/checksums.sha256` with the change; so does a bump of
-the Maven `scripts/lib/pinned_maven.sh` pins. It records under that Maven,
+the Maven `scripts/lib/pinned_maven.sh` pins, and a change to a `java-*`
+fixture's dependencies. It records under that Maven,
 so it needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
 Maven Central, but no Maven on `PATH`.
 `tests/run.sh shell` fails on a pinned jar, or the pinned Maven
@@ -188,8 +189,9 @@ hours before the bump's commit (the cutoff), so a compromised release is
 likelier to be caught and withdrawn before it ships: a plugin or tool version in
 `java/parent/pom.xml`, the Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
 in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
-commit in `.gitea/workflows/`, and a fixture's `junit.version` or `uv.lock`
-in `tests/fixtures/`. A closure's lockfile is deleted and regenerated with
+commit in `.gitea/workflows/`, and a fixture's `junit.version`,
+`assertj.version` or `uv.lock` in `tests/fixtures/`. A closure's lockfile is
+deleted and regenerated with
 `npm install --package-lock-only --registry=https://registry.npmjs.org/
 --before=<cutoff>`, since over an existing lockfile `--before` filters
 nothing. A fixture's `uv.lock` is regenerated with `uv lock --upgrade
@@ -342,6 +344,64 @@ directory that holds tracked files. Committing or removing the file restores
 the record. Both also count `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`,
 `COVERAGE_RCFILE` and `COVERAGE_FORCE_CONFIG` being set; unsetting them
 restores it. The exact rule is in [Git hooks](docs/contract.md#git-hooks).
+
+The parent now manages `com.github.spotbugs:spotbugs-annotations` at the
+SpotBugs version it runs (`spotbugs.version`), in scope `provided`. A
+consumer that depends on it drops the `<version>` (and any property behind
+it) and the `<scope>` from that dependency; a literal version or scope it
+keeps, or one behind a property of another name, overrides the parent's. A
+property of its own named `spotbugs.version` must go: the parent owns that
+name now, and `parent_check` fails every Maven target, naming it, until the
+property is removed. The managed scope also reaches a declaration that keeps
+its `<version>` but has no `<scope>`, and copies other dependencies bring in.
+The annotations and their `jsr305` leave the runtime classpath and the
+packaged artifacts with no edit, but `provided` is not transitive: a module
+(or a downstream user) that got `@SuppressFBWarnings` through another module
+stops compiling with "package edu.umd.cs.findbugs.annotations does not
+exist". Each module that uses the annotations declares the artifact itself
+(no version, no scope), or the root pom declares it once in its
+`<dependencies>` so every module inherits it.
+
+A multi-module project that kept one `checkstyle-xpath-suppressions.xml` at
+the root, which was read from Maven's working directory, moves its entries
+into each module's own file: each module now reads it from its own
+directory. A project that overrides the checkstyle plugin's
+`<propertyExpansion>` sets
+`org.checkstyle.google.suppressionxpathfilter.config=${maven.multiModuleProjectDirectory}/checkstyle-xpath-suppressions.xml`
+beside its suppression key to keep the root file, as
+`tests/fixtures/java-multimodule/pom.xml` does for
+`checkstyle-suppressions.xml`; leaving the key out falls back to Maven's
+working directory, the old behaviour.
+
+The license allowlist gains these names, so a consumer's own appended
+`<includedLicense>` entries for them become redundant and may be dropped:
+`Apache License Version 2.0`, `Apache 2.0`, `Apache 2`,
+`Eclipse Public License 2.0`, `Eclipse Public License, Version 2.0`,
+`GNU General Public License, version 2 with the GNU Classpath Exception`,
+`GNU General Public License, version 2, with the Classpath Exception`,
+`GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1`,
+`CDDL + GPLv2 with classpath exception`,
+`Universal Permissive License, Version 1.0` and `UPL-1.0`.
+
+These entries in a project's own files are now redundant and can go:
+`project.build.sourceEncoding` and `project.reporting.outputEncoding` in the
+root pom (the parent sets both to `UTF-8`); a `<suppress
+checks="AbbreviationAsWordInName" files=".*IT\.java$"/>` in
+`checkstyle-suppressions.xml`, if it covered nothing but the `*IT` class
+names (the shared Checkstyle accepts them); the line exempting test sources
+from the `@SuppressWarnings("NullAway")` ban (the shared config exempts
+`src/test` itself); a class-level `@SuppressWarnings("NullAway")` on a test
+class, if it covered nothing but fields Mockito, JUnit's `@TempDir`,
+`@Inject` or Quarkus' `@InjectMock` and `@InjectSpy` inject; a
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION` match in `spotbugs-exclude.xml`,
+unless the project sets `excludeFilterFile` itself (devkit's
+`java/config/spotbugs-baseline.xml` excludes it, read before the module's
+own); and `%test.quarkus.jacoco.report=false` in `application.properties`
+(surefire and failsafe set it). A removal that was hiding something else
+fails the build loudly. The parent's system property outranks
+`application.properties`, so a project that relies on quarkus-jacoco's own
+report sets `quarkus.jacoco.report` to `true` in its own
+`<systemPropertyVariables>`.
 
 ### Upgrading from v0.6.x
 

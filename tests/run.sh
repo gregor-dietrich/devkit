@@ -29,7 +29,14 @@
 #          own tests rely on, and that each of those failures is reported,
 #          and that docs/contract.md lists the parent's *.version properties
 #          and execution ids, no more and no fewer, and that each way of
-#          drifting is reported,
+#          drifting is reported, that spotbugs-plugin.version is
+#          spotbugs.version plus a fourth component, and that the parent's
+#          SpotBugs analyzer dependency excludes log4j-core, as the plugin's
+#          own declaration does, and that the parent itself declares UTF-8
+#          as its source and report encoding, and that each of those three
+#          checks rejects a copy of the parent that breaks it (a plugin
+#          bumped alone, a log4j exclusion of another groupId, no report
+#          encoding),
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin, plugin dependency and annotation processor the parent
 #          pins and of the plugins check_frontend_deps.py runs, and that a
@@ -108,7 +115,17 @@
 #          Expect lint to fail on a test whose only check is an assertion
 #          helper PMD does not know, until the pom's pmd.extraAssertMethodNames
 #          names it, and then to pass whatever plugin-level resources
-#          configuration the pom carries.
+#          configuration the pom carries. Expect the monolith to resolve
+#          spotbugs-annotations, provided, at the parent's spotbugs.version,
+#          SpotBugs to report that analyzer, the parent's UTF-8 encoding to
+#          reach it, jars under the common license spellings to pass,
+#          checkstyle-xpath-suppressions.xml to suppress a violation from
+#          another working directory and another
+#          maven.multiModuleProjectDirectory too, a NullAway suppression to
+#          fail lint in main sources, also in a checkout below a src/test
+#          directory, and pass in tests, make test with the integration tests
+#          on (MAVEN_ARGS=-DskipITs=false) to pass, and the parent's
+#          exclusions on the SpotBugs analyzer to equal the plugin pom's own.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.34 and ssh-keygen
@@ -239,6 +256,17 @@ shell_part() {
     lists_reject 's|<includedLicense>Plexus</includedLicense>|&&|' "includedLicense entries listed twice"
   check "parent: the license lists check rejects an allowlist without a required name" \
     lists_reject '/<includedLicense>Unknown license</d' "required names missing from the allowlist"
+  check "parent: spotbugs-plugin.version is spotbugs.version plus a fourth component" spotbugs_versions_match
+  check "parent: the SpotBugs analyzer dependency excludes log4j-core, as the plugin's own declaration does" \
+    spotbugs_log4j_excluded "$root/java/parent/pom.xml"
+  check "parent: java/parent/pom.xml declares UTF-8 as the source and report encoding" \
+    parent_encodings "$root/java/parent/pom.xml"
+  check "parent: the spotbugs-plugin.version check rejects a plugin bumped without the analyzer" \
+    lists_reject 's|<spotbugs-plugin.version>4.10.5.0<|<spotbugs-plugin.version>4.10.6.0<|' "" spotbugs_versions_match
+  check "parent: the log4j-core exclusion check rejects an exclusion of another groupId" \
+    lists_reject '/<exclusion>/,/<\/exclusion>/s|<groupId>org.apache.logging.log4j<|<groupId>org.example<|' "does not exclude log4j-core" spotbugs_log4j_excluded
+  check "parent: the encoding check rejects a parent without the report encoding" \
+    lists_reject '/<project.reporting.outputEncoding>/d' "" parent_encodings
   check "parent: docs/contract.md lists the parent's version properties and execution ids, no more and no fewer" \
     contract_lists_match "$root/java/parent/pom.xml" "$root/docs/contract.md"
   check "parent: the contract lists check rejects a version property the contract does not list" \
@@ -354,15 +382,18 @@ checksums_reject() { # checksums_reject SED TEXT...: the check fails on the chec
 # tests and fixtures rely on: "MIT License", for foreign_group's override; "Unknown license", the
 # plugin's key for a dependency with no license, which failOnMissing must keep reporting as
 # foreign_group expects; "Eclipse Public License v2.0", the license of the fixtures' junit jars;
-# "The Apache License, Version 2.0", that of their opentest4j and apiguardian jars. No name is
-# listed twice.
+# "The Apache License, Version 2.0", that of their opentest4j and apiguardian jars; "GNU LESSER
+# GENERAL PUBLIC LICENSE, Version 2.1" and "The Apache Software License, Version 2.0", those of
+# java-monolith's spotbugs-annotations and its jsr305; "Apache-2.0", that of its assertj-core. No
+# name is listed twice.
 license_lists_whole() {
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 root = ET.parse(sys.argv[1]).getroot()
 included = [e.text or "" for e in root.iterfind(".//m:includedLicense", ns)]
 odd = lambda e: not e or re.search(r"[\n\t]|  |^\s|\s$", e)
-required = {"Eclipse Public License v2.0", "The Apache License, Version 2.0", "MIT License", "Unknown license"}
+required = {"Eclipse Public License v2.0", "The Apache License, Version 2.0", "MIT License", "Unknown license",
+    "GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1", "The Apache Software License, Version 2.0", "Apache-2.0"}
 problems = {
     "includedLicense entries that can never match": [e for e in included if odd(e)],
     "includedLicense entries listed twice": sorted({e for e in included if included.count(e) > 1}),
@@ -372,10 +403,13 @@ bad = {k: v for k, v in problems.items() if v}
 sys.exit(f"license lists: {bad!r}") if bad or not included else None' "$1"
 }
 
-lists_reject() { # lists_reject SED TEXT: the check fails on the parent run through SED (which must change it), saying TEXT
-  local edited err
-  edited=$(sed "$1" "$root/java/parent/pom.xml") && [[ $edited != "$(<"$root/java/parent/pom.xml")" ]] &&
-    ! err=$(license_lists_whole /dev/stdin <<<"$edited" 2>&1) && [[ $err == *"$2"* ]]
+lists_reject() { # lists_reject SED TEXT [CHECK]: CHECK (default license_lists_whole) fails on a copy of the parent run through SED (which must change it), saying TEXT
+  local copy err
+  copy=$(mktemp) && sed "$1" "$root/java/parent/pom.xml" >"$copy" && ! cmp -s "$copy" "$root/java/parent/pom.xml" &&
+    ! err=$("${3:-license_lists_whole}" "$copy" 2>&1) && [[ $err == *"$2"* ]]
+  local status=$?
+  rm -f "$copy"
+  return $status
 }
 
 # contract_lists_match POM CONTRACT: docs/contract.md lists, by hand, the parent's version properties
@@ -589,15 +623,56 @@ class HelperTest {
 JAVA
   check "java-monolith: an unknown assertion helper fails make lint, PMD finding one violation" \
     make_says fail "$dir" lint "has found 1 violation"
-  sed_into "$dir/pom.xml" 's|<project.build.sourceEncoding>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
+  sed_into "$dir/pom.xml" 's|<maven.compiler.release>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
   # A project's own resources configuration that would copy XML unfiltered must not reach the ruleset.
   sed_into "$dir/pom.xml" 's|</project>|  <build><plugins><plugin><artifactId>maven-resources-plugin</artifactId><configuration><nonFilteredFileExtensions><nonFilteredFileExtension>xml</nonFilteredFileExtension></nonFilteredFileExtensions></configuration></plugin></plugins></build>\n&|'
   check "java-monolith: pmd.extraAssertMethodNames makes make lint accept it, whatever the project's plugin-level resources configuration" \
     make_says pass "$dir" lint
 }
 
+# A violation the shared config reports on an AST node (an abbreviation in a method name) fails lint
+# until checkstyle-xpath-suppressions.xml, which the parent wires like checkstyle-suppressions.xml,
+# suppresses it. make lint runs in the project root, where the unwired property's default would find
+# the file too, so Checkstyle also runs from another working directory, and with a
+# maven.multiModuleProjectDirectory other than the project: only the parent's wiring to
+# ${project.basedir} finds the file there, not one to the former (equal to it in a monolith).
+xpath_suppression() {
+  local dir=$work/negative-xpath other=$work/negative-xpath-root
+  edited "$dir" src/main/java/devkit/fixture/Greeter.java \
+    's|^}$|\n    /** Parses. */\n    public String parseURL() {\n        return "";\n    }\n}|' &&
+    make_says fail "$dir" lint "Checkstyle violation" || return
+  cat >"$dir/checkstyle-xpath-suppressions.xml" <<'XML'
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC "-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration 1.2//EN" "https://checkstyle.org/dtds/suppressions_1_2_xpath_experimental.dtd">
+<suppressions>
+    <suppress-xpath checks="AbbreviationAsWordInName" query="//METHOD_DEF[./IDENT[@text='parseURL']]/IDENT" />
+</suppressions>
+XML
+  make_says pass "$dir" lint || return
+  local mvn
+  mvn=$("$root/scripts/lib/pinned_maven.sh") && mkdir "$other" && ln -s "$dir/.devkit" "$other/.devkit" &&
+    (cd "$work" && "$mvn" -B -q -f "$dir/pom.xml" -Dmaven.multiModuleProjectDirectory="$other" checkstyle:check)
+}
+
+# nullaway_below_src_test FILE: the NullAway-suppression break of FILE in a monolith copy below a
+# src/test directory still fails make lint.
+nullaway_below_src_test() {
+  local dir=$work/ancestor/src/test/proj
+  mkdir -p "${dir%/*}" &&
+    edited "$dir" "$1" 's/^public final class/@SuppressWarnings("NullAway")\n&/' &&
+    make_says fail "$dir" lint "fix nullability with @Nullable"
+}
+
+# nullaway_in_tests DIR FILE: FILE of the monolith copy DIR carries the suppression (the sed must have
+# changed it), and make lint passes.
+nullaway_in_tests() {
+  grep -qF '@SuppressWarnings("NullAway")' "$1/$2" && make_says pass "$1" lint "Lint checks completed."
+}
+
 negatives() {
   assert_helper_checks
+  check "java-monolith: checkstyle-xpath-suppressions.xml suppresses a violation make lint reports" \
+    xpath_suppression
   local main=src/main/java/devkit/fixture/Greeter.java
   local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
   negative format lint "format violations" "$main" "$indent"
@@ -608,6 +683,16 @@ negatives() {
     's/^package .*/&\n\nimport java.util.Objects;/; s/return name\./return Objects.requireNonNull(name)./'
   # GreeterTest imports the banned class too; only its suppression lets lint pass.
   negative suppression lint "Fixture project rule" checkstyle-suppressions.xml '/FixtureObjects/d'
+  # The shared config bans a NullAway suppression in main sources and exempts src/test, with no
+  # line in the fixture's checkstyle-suppressions.xml.
+  negative nullaway-suppression lint "fix nullability with @Nullable" "$main" \
+    's/^public final class/@SuppressWarnings("NullAway")\n&/'
+  # The exemption is of the checkout's own src/test, not of an ancestor directory named so.
+  check "java-monolith: a NullAway suppression in a main source fails make lint in a checkout below a src/test directory" \
+    nullaway_below_src_test "$main"
+  edited "$work/nullaway-in-tests" "$test" 's/^    @Test$/    @SuppressWarnings("NullAway")\n&/'
+  check "java-monolith: a NullAway suppression in a test source passes make lint" \
+    nullaway_in_tests "$work/nullaway-in-tests" "$test"
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
@@ -664,7 +749,7 @@ negatives() {
 # and the scope in .mvn/maven.config: the wrapper's keys, last on the command line, must win.
 tampered_plugin() {
   local proj=$work/negative-checksum m2=$work/m2-checksum version dir jar hash
-  version=$(sed -n 's|.*<compiler-plugin.version>\(.*\)</compiler-plugin.version>.*|\1|p' "$root/java/parent/pom.xml")
+  version=$(parent_property compiler-plugin.version)
   [[ -n $version ]] || return
   dir=org/apache/maven/plugins/maven-compiler-plugin/$version jar=maven-compiler-plugin-$version.jar
   hash=$(sed -n "s|^\([0-9a-f]*\)  $dir/$jar\$|\1|p" "$root/java/checksums/checksums.sha256")
@@ -778,6 +863,101 @@ isolated() { # isolated COMMAND...: run COMMAND in a subshell, so that no later 
   fails=$(<"$work/fails")
 }
 
+# parent_property NAME [POM]: the value of POM's (default: the parent under test) property NAME, when on one line.
+parent_property() { sed -n "s|^ *<$1>\\(.*\\)</$1>.*|\\1|p" "${2:-$root/java/parent/pom.xml}"; }
+
+# spotbugs_version [POM]: the spotbugs.version property of the parent under test.
+spotbugs_version() { parent_property spotbugs.version "$@"; }
+
+# spotbugs_versions_match: spotbugs-plugin.version is spotbugs.version plus a fourth component, so a
+# release that bumps the plugin and forgets the analyzer fails here, offline.
+spotbugs_versions_match() {
+  local plugin analyzer
+  plugin=$(parent_property spotbugs-plugin.version "$@")
+  analyzer=$(spotbugs_version "$@")
+  [[ -n $analyzer && $plugin =~ ^${analyzer//./\\.}\.[0-9]+$ ]]
+}
+
+# spotbugs_log4j_excluded POM: POM's declaration of the SpotBugs analyzer as a plugin dependency, which
+# replaces the plugin's own, repeats that one's exclusion of log4j-core (the plugin logs through
+# log4j-to-slf4j).
+spotbugs_log4j_excluded() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+name = lambda e: e.findtext("m:artifactId", "", ns)
+deps = [d for p in ET.parse(sys.argv[1]).getroot().iterfind(".//m:plugin", ns) if name(p) == "spotbugs-maven-plugin"
+        for d in p.iterfind("m:dependencies/m:dependency", ns) if name(d) == "spotbugs"]
+ok = deps and all(any((e.findtext("m:groupId", "", ns), name(e)) == ("org.apache.logging.log4j", "log4j-core") for e in d.iterfind("m:exclusions/m:exclusion", ns)) for d in deps)
+sys.exit(None if ok else "the SpotBugs analyzer dependency does not exclude log4j-core")' "$1"
+}
+
+# parent_encodings POM: POM itself declares UTF-8 as the source and report encoding. Maven 3.10's super POM
+# sets both too, so source_encoding below cannot tell when the parent drops them.
+parent_encodings() {
+  local property
+  for property in project.build.sourceEncoding project.reporting.outputEncoding; do
+    grep -qx " *<$property>UTF-8</$property>" "$1" || return
+  done
+}
+
+# source_encoding DIR: the parent's UTF-8 source and report encoding reach DIR, whose pom sets neither
+# (one help:evaluate of the project's properties).
+source_encoding() {
+  local mvn help property
+  mvn=$("$root/scripts/lib/pinned_maven.sh") && help=$(frontend_plugins "$root" | grep ':maven-help-plugin:') &&
+    (cd "$1" && "$mvn" -B -q "$help:evaluate" -Dexpression=project.properties -Doutput="$1.properties") || return
+  for property in project.build.sourceEncoding project.reporting.outputEncoding; do
+    grep -qF "<$property>UTF-8</$property>" "$1.properties" || return
+  done
+}
+
+# annotations_managed DIR: dependency:list, run by the pinned Maven, resolves DIR's spotbugs-annotations
+# at the parent's spotbugs.version, in scope provided.
+annotations_managed() {
+  local mvn want dep
+  mvn=$("$root/scripts/lib/pinned_maven.sh") && want=$(spotbugs_version) && [[ -n $want ]] &&
+    dep=$(frontend_plugins "$root" | grep ':maven-dependency-plugin:') &&
+    (cd "$1" && "$mvn" -B -q "$dep:list" -DincludeArtifactIds=spotbugs-annotations -DoutputFile="$1.deps") &&
+    grep -qF "com.github.spotbugs:spotbugs-annotations:jar:$want:provided" "$1.deps"
+}
+
+# integration_tests DIR: make test in DIR with the integration tests on passes, and failsafe ran GreeterIT
+# (make coverage, which also runs them, ignores test failures).
+integration_tests() {
+  local -x MAVEN_ARGS=-DskipITs=false
+  make_says pass "$1" test "Tests completed." && [[ -f $1/target/failsafe-reports/devkit.fixture.GreeterIT.txt ]]
+}
+
+# spotbugs_exclusions_match PARENT_POM M2: PARENT_POM's declaration of the analyzer as a plugin dependency,
+# which replaces the plugin's own, excludes the same artifacts as the plugin's own declaration, in the
+# plugin's pom in the local repository M2 (a later plugin release may add an exclusion).
+spotbugs_exclusions_match() {
+  local plugin
+  plugin=$(parent_property spotbugs-plugin.version "$1") && [[ -n $plugin ]] || return
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+name = lambda e: e.findtext("m:artifactId", "", ns)
+def excluded(deps):
+    found = [d for d in deps if name(d) == "spotbugs"]
+    if len(found) != 1:
+        sys.exit(f"{len(found)} declarations of the SpotBugs analyzer where one is expected")
+    return {(e.findtext("m:groupId", "", ns), name(e)) for e in found[0].iterfind("m:exclusions/m:exclusion", ns)}
+parent = ET.parse(sys.argv[1]).getroot()
+own = ET.parse(sys.argv[2]).getroot()
+ours = excluded(d for p in parent.iterfind(".//m:plugin", ns) if name(p) == "spotbugs-maven-plugin"
+                for d in p.iterfind("m:dependencies/m:dependency", ns))
+theirs = excluded(own.iterfind("m:dependencies/m:dependency", ns))
+sys.exit(f"the parent excludes {sorted(ours)!r}, the plugin {sorted(theirs)!r}") if ours != theirs else None' \
+    "$1" "$2/com/github/spotbugs/spotbugs-maven-plugin/$plugin/spotbugs-maven-plugin-$plugin.pom"
+}
+
+# analyzer_version XML: SpotBugs' report XML names the parent's spotbugs.version as its analyzer.
+analyzer_version() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+got = ET.parse(sys.argv[1]).getroot().get("version")
+sys.exit(f"SpotBugs ran {got!r}, the parent says {sys.argv[2]!r}") if got != sys.argv[2] else None' "$1" "$(spotbugs_version)"
+}
+
 java_part() {
   prepare
   publish
@@ -787,11 +967,22 @@ java_part() {
   done
   check "java-monolith: the first make target downloads devkit's Maven" \
     grep -q "Downloading Maven $(maven_version "$root") from" "$work/java-monolith.check.log"
+  check "java-monolith: spotbugs-annotations, declared without a version, resolves, provided, to the parent's spotbugs.version" \
+    annotations_managed "$work/java-monolith"
+  check "java-monolith: the SpotBugs run reports the parent's spotbugs.version" \
+    analyzer_version "$work/java-monolith/target/spotbugsXml.xml"
+  check "java-monolith: the parent's UTF-8 source and report encoding reach a fixture that sets neither" \
+    source_encoding "$work/java-monolith"
+  check "java-monolith: make test with the integration tests on passes, the parent's quarkus.jacoco.report=false reaching failsafe too" \
+    integration_tests "$work/java-monolith"
+  check "parent: the SpotBugs analyzer dependency excludes what the plugin's own declaration of it excludes" \
+    spotbugs_exclusions_match "$root/java/parent/pom.xml" "$HOME/.m2/repository"
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group
   check "java-multimodule: a dependency under an unlisted license fails every make test, until the module appends it to includedLicenses, and two dependencies under an allowed and a commercial license pass" \
     unlisted
+  check "java-multimodule: dependencies under the common spellings of allowed licenses pass make test" spellings
   negatives
 }
 
@@ -842,6 +1033,22 @@ depend_on() { # depend_on DIR NAME: DIR's app depends on devkit.fixture.other:NA
 with_dep() {
   install_dep "${1##*/}" "${@:2}" && setup "$root/tests/fixtures/java-multimodule" "$1" &&
     depend_on "$1" "${1##*/}"
+}
+
+# Spellings of allowed licenses that real artifacts declare (Vaadin's and Undertow's
+# "Apache License Version 2.0" first): jars under each, in one module, pass make test.
+spellings() {
+  local proj=$work/spellings i=0 name
+  local -x MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o"
+  local names=("Apache License Version 2.0" "Apache 2.0" "Apache 2" "Eclipse Public License 2.0"
+    "Eclipse Public License, Version 2.0" "GNU General Public License, version 2 with the GNU Classpath Exception"
+    "GNU General Public License, version 2, with the Classpath Exception" "GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1"
+    "CDDL + GPLv2 with classpath exception" "Universal Permissive License, Version 1.0" "UPL-1.0")
+  with_dep "$proj" "${names[0]}" || return
+  for name in "${names[@]:1}"; do
+    install_dep "spelling-$((++i))" "$name" && depend_on "$proj" "spelling-$i" || return
+  done
+  ONLY=app make_says pass "$proj" test "Tests completed."
 }
 
 # The parent excludes the project's own groupId from the license check by a pattern that ends it

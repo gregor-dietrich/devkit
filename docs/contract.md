@@ -16,6 +16,7 @@ devkit is written against this page; change it here first.
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
 | `checkstyle-suppressions.xml` | Maven: the project's Checkstyle exemptions, in every module, the root included; required (`<suppressions/>` when none) |
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
+| `checkstyle-xpath-suppressions.xml` | Maven, optional: the project's Checkstyle XPath exemptions, in any module, read from that module's directory (see Parent POM) |
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
 | `pyproject.toml` | uv: the package, or a virtual workspace root (no `[project]` table) whose members are the packages; its `dev` dependency group lists ruff, pytest, pytest-cov, vulture, pip-audit and uv, and `[tool.vulture]` sets `paths` (see uv projects) |
 | `.python-version` | uv: the CPython version, `major.minor` or `major.minor.patch`, 3.11 or later |
@@ -714,20 +715,27 @@ one is missing or stale. A hook it did not write is never overwritten.
 ## Maven configuration
 
 Shared gate configs live in `java/config/` (`checkstyle.xml`,
-`pmd-ruleset.xml`, `eclipse-formatter.xml`). devkit's [parent
-POM](#parent-pom) reads them as
+`pmd-ruleset.xml`, `eclipse-formatter.xml`, `spotbugs-baseline.xml`).
+devkit's [parent POM](#parent-pom) reads them as
 `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD reads
 a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
-Project-specific files (`dependency-check-suppression.xml`,
-`spotbugs-exclude.xml`, `checkstyle-suppressions.xml`,
-`checkstyle-project.xml`) stay in the project.
+SpotBugs reads devkit's `spotbugs-baseline.xml` and then the module's own
+`spotbugs-exclude.xml`: devkit's excludes only
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION`, which reports every rethrow of a
+caught `RuntimeException`; PMD's `AvoidThrowingRawExceptionTypes` still
+rejects a `throw new RuntimeException(…)`. A project that sets
+`excludeFilterFile` itself replaces both. Project-specific files
+(`dependency-check-suppression.xml`, `spotbugs-exclude.xml`,
+`checkstyle-suppressions.xml`, `checkstyle-project.xml`) stay in the project.
 
 A rule that names a class, helper or field the project writes belongs to
 the project, not to the shared configs: PMD's UnitTestShouldIncludeAssert runs
 with its defaults, and a project names its own assertion helpers in the
 `pmd.extraAssertMethodNames` property ([Parent POM](#parent-pom)). The shared
 configs do keep the stack's conventions: JBoss Logging as the facade, a
-static `LOG` logger field and `jakarta.annotation.Nullable`. A project's own
+static `LOG` logger field, `jakarta.annotation.Nullable`, and failsafe's `*IT`
+names for integration tests, which Checkstyle's `AbbreviationAsWordInName`
+accepts. A project's own
 Checkstyle rules live in `checkstyle-project.xml` at the project root, a
 complete Checkstyle configuration (a `Checker` root). The parent runs it as
 the checkstyle plugin's execution `project`, with its own `configLocation`,
@@ -738,7 +746,10 @@ execution's `check` goal binds to `verify` by default, so `make test`,
 `make coverage` and `make install` run the project's rules too. The
 execution inherits the plugin-level `propertyExpansion`, so a
 `SuppressionFilter` on `${org.checkstyle.google.suppressionfilter.config}`
-reuses the project's `checkstyle-suppressions.xml`. A project with no rules
+reuses the project's `checkstyle-suppressions.xml`; the shared config's
+optional `SuppressionXpathFilter` likewise reads
+`checkstyle-xpath-suppressions.xml` from each module's directory, when the
+file exists. A project with no rules
 of its own commits an empty `<module name="Checker"/>`; `make check` fails
 when the file is missing.
 
@@ -834,10 +845,34 @@ inherit it, and Maven reads it through the link:
   `eclipse-formatter.version`, `enforcer-plugin.version`,
   `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
   `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
-  `resources-plugin.version`, `spotbugs-plugin.version`,
+  `resources-plugin.version`, `spotbugs-plugin.version`, `spotbugs.version`,
   `spotless-plugin.version`, `surefire-plugin.version`), and manages the
   `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
-  JaCoCo matches the plugin's.
+  JaCoCo matches the plugin's. `spotbugs.version` is the analyzer
+  `spotbugs-plugin.version` runs, which SpotBugs is told to use as a plugin
+  dependency; the parent manages `com.github.spotbugs:spotbugs-annotations`
+  at it, in scope `provided`, so a project that uses `@SuppressFBWarnings`
+  (with a `justification`, a convention the gates do not check), the
+  in-source alternative to `spotbugs-exclude.xml`, declares that artifact
+  without a `<version>` or `<scope>`; a literal version or scope, or one
+  behind a property of another name, overrides the parent's (a project
+  property named `spotbugs.version` fails `parent_check`, as every parent
+  version property does). The managed version and scope also apply to a declaration
+  that keeps its `<version>` but has no `<scope>`, and where another
+  dependency brings the annotations in. The annotations and their `jsr305`
+  leave the runtime classpath and the packaged artifacts with no edit, but
+  `provided` is not transitive: a module (or a downstream user) that got the
+  annotations through another module stops compiling ("package
+  edu.umd.cs.findbugs.annotations does not exist"). Each module that uses
+  them declares the artifact itself (no version, no scope), or the root pom
+  declares it once in its `<dependencies>` so every module inherits it.
+- It sets `project.build.sourceEncoding` and `project.reporting.outputEncoding`
+  to `UTF-8`, the encoding the shared configs read; a project's own
+  `<properties>` override them.
+- Surefire and failsafe set `quarkus.jacoco.report=false` in the test JVM:
+  jacoco-maven-plugin writes the coverage report, and quarkus-jacoco's own
+  would show 0%. A project that wants it back sets the property to `true` in
+  its own `<systemPropertyVariables>`.
 - It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
   `this-escape` and `classfile`, Error Prone with NullAway), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
@@ -876,6 +911,18 @@ inherit it, and Maven reads it through the link:
   `THIRD-PARTY.properties` instead, which it reads only under
   `license.useMissingFile`; there, `force` has it rewrite that file, with a
   fresh timestamp, on every build.
+- NullAway also checks test sources. It treats a field a test framework
+  injects as initialized (`ExcludedFieldAnnotations`: NullAway's own list,
+  which covers Mockito's `@Mock`, `@Spy`, `@Captor` and `@InjectMocks`,
+  JUnit's `@TempDir` and `jakarta.inject.Inject`, plus the property
+  `nullaway.excluded.field.annotations`, which adds Quarkus' `@InjectMock`
+  and `@InjectSpy`), and an AssertJ, Truth or Hamcrest assertion such as
+  `assertThat(x).isNotNull()` as a null check
+  (`HandleTestAssertionLibraries`; NullAway reads JUnit's `assertNotNull` as
+  one anyway). A test that passes `null` on purpose still suppresses
+  NullAway on that method: the shared Checkstyle config bans
+  `@SuppressWarnings("NullAway")` in main sources and allows it under
+  `src/test`, so no project suppression line is needed for it.
 - flatten-maven-plugin (execution `flatten`, at `verify`, after the tests
   and Quarkus' build) writes the pom a lifecycle `install` or `deploy`
   publishes (to `target/.flattened-pom.xml`), in its `ossrh` mode. It
@@ -910,7 +957,8 @@ inherit it, and Maven reads it through the link:
   | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
   | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
-  | `nullaway.annotated.packages` | `${project.groupId}` |
+  | `nullaway.annotated.packages` | `${project.groupId}`; comma-separated, without spaces |
+  | `nullaway.excluded.field.annotations` | `io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy`; comma-separated, without spaces, added to NullAway's own `ExcludedFieldAnnotations`, which an override keeps; an override replaces this whole value, these two included, so a project adding a name repeats them |
   | `error-prone.extra.args` | empty; appended to the Error Prone argument, e.g. `-XepExcludedPaths:.*/generated-sources/.*` |
 
 - PMD does not read `pmd.extraAssertMethodNames` itself: at `initialize` the
@@ -933,11 +981,17 @@ inherit it, and Maven reads it through the link:
 - It commits the files the table above lists. `.mvn/jvm.config` carries
   the `jdk.compiler` `--add-exports` and `--add-opens` lines as devkit's
   `tests/fixtures/java-monolith/.mvn/jvm.config` lists them. The parent
-  reads `checkstyle-suppressions.xml` and `spotbugs-exclude.xml` from
-  `${project.basedir}`; a multi-module project that keeps one
-  `checkstyle-suppressions.xml` at the root overrides the checkstyle
-  plugin's `<propertyExpansion>` in its own `<pluginManagement>`, as
-  `tests/fixtures/java-multimodule/pom.xml` does.
+  reads `checkstyle-suppressions.xml`, `checkstyle-xpath-suppressions.xml`
+  (optional) and `spotbugs-exclude.xml` from `${project.basedir}`; a
+  multi-module project that keeps one `checkstyle-suppressions.xml` at the
+  root overrides the checkstyle plugin's `<propertyExpansion>` in its own
+  `<pluginManagement>`, which replaces both properties, as
+  `tests/fixtures/java-multimodule/pom.xml` does; a project that also keeps
+  one `checkstyle-xpath-suppressions.xml` at the root sets
+  `org.checkstyle.google.suppressionxpathfilter.config=${maven.multiModuleProjectDirectory}/checkstyle-xpath-suppressions.xml`
+  beside it, and an override that leaves that key out has the filter read
+  `checkstyle-xpath-suppressions.xml` from Maven's working directory, the
+  project root under make.
 - Maven merges any list the parent sets with a consumer's redeclaration
   element by element, by position, unless the consumer's list carries
   `combine.children="append"`: a redeclared `<compilerArgs>` silently drops
@@ -984,7 +1038,7 @@ inherit it, and Maven reads it through the link:
 building devkit's `java-*` test fixtures through `make lint`, `test`,
 `coverage`, `install` and `format` resolves: the parent's plugins and their
 dependencies, the annotation processors (Error Prone, NullAway) and the
-fixtures' own test dependencies, plus the closure of dependency-check's goals
+fixtures' dependencies, plus the closure of dependency-check's goals
 (recorded without an NVD key through the plugin's `help` goal; the closure
 its analysis downloads at run time, not through Maven, is not) and of the
 help and dependency plugins that `check_frontend_deps.py` runs. Each line is

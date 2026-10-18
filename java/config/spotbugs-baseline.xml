@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- devkit's SpotBugs baseline, read before the module's own spotbugs-exclude.xml (the plugin
+     copies each filter into target/ under its own file name, so the two names must differ).
+     THROWS_METHOD_THROWS_RUNTIMEEXCEPTION reports every throw of an expression typed exactly
+     RuntimeException, so also the rethrow of a caught one. PMD's AvoidThrowingRawExceptionTypes
+     already rejects a throw new RuntimeException(...). -->
+<FindBugsFilter xmlns="http://findbugs.sourceforge.net/filter/3.0.0">
+  <Match>
+    <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION" />
+  </Match>
+</FindBugsFilter>

@@ -35,6 +35,14 @@
             default="checkstyle-suppressions.xml" />
         <property name="optional" value="false" />
     </module>
+    <!-- Test sources may suppress NullAway on a method that passes null on purpose; the ban on
+         the suppression (SuppressWarningsNullAway below) holds for main sources. The pattern is
+         matched against the absolute path, so it takes the last src/test (an ancestor directory of
+         the checkout may be named so) and only when no src/main or src/test follows it. -->
+    <module name="SuppressionSingleFilter">
+        <property name="id" value="SuppressWarningsNullAway" />
+        <property name="files" value="[\\/]src[\\/]test[\\/](?!.*[\\/]src[\\/](main|test)[\\/])" />
+    </module>
 
     <!-- Checks for whitespace                               -->
     <!-- See http://checkstyle.org/config_whitespace.html -->
@@ -201,9 +209,10 @@
             <property name="message"
                 value="@SuppressWarnings(&quot;PMD.DuplicatedCode&quot;) is banned - refactor the code to eliminate duplication properly." />
         </module>
-        <!-- Scoped exceptions live in each project's checkstyle-suppressions.xml: the
-             Jackson response DTOs whose no-arg deserialization constructors legitimately
-             leave fields unset, and test sources (Mockito/builder setup). -->
+        <!-- Test sources are exempt through the SuppressionSingleFilter above. Other scoped
+             exceptions live in each project's checkstyle-suppressions.xml: the Jackson
+             response DTOs whose no-arg deserialization constructors legitimately leave
+             fields unset. -->
         <module name="RegexpSinglelineJava">
             <property name="id" value="SuppressWarningsNullAway" />
             <property name="format"
@@ -428,6 +437,8 @@
         <module name="AbbreviationAsWordInName">
             <property name="ignoreFinal" value="false" />
             <property name="allowedAbbreviationLength" value="0" />
+            <!-- Failsafe's default integration-test names: IT*, *IT and *ITCase. -->
+            <property name="allowedAbbreviations" value="IT" />
             <property name="tokens"
                 value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, ANNOTATION_DEF, ANNOTATION_FIELD_DEF,
                     PARAMETER_DEF, VARIABLE_DEF, METHOD_DEF, PATTERN_VARIABLE_DEF, RECORD_DEF,

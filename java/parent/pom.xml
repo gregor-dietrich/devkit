@@ -24,6 +24,10 @@
   <packaging>pom</packaging>
 
   <properties>
+    <!-- What checkstyle.xml reads and the resources execution hard-codes. A project's own
+         <properties> override them. -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <checkstyle.version>14.3.0</checkstyle.version>
     <checkstyle-plugin.version>3.6.0</checkstyle-plugin.version>
     <compiler-plugin.version>3.16.0</compiler-plugin.version>
@@ -39,6 +43,10 @@
     <pmd-plugin.version>3.28.0</pmd-plugin.version>
     <resources-plugin.version>3.5.0</resources-plugin.version>
     <spotbugs-plugin.version>4.10.5.0</spotbugs-plugin.version>
+    <!-- The analyzer spotbugs-plugin.version runs (the plugin's version is the analyzer's plus a
+         fourth component, so Maven cannot derive one from the other): a release that bumps the
+         plugin bumps this too. Also drives spotbugs-annotations. See dependencyManagement. -->
+    <spotbugs.version>4.10.5</spotbugs.version>
     <spotless-plugin.version>3.10.4</spotless-plugin.version>
     <surefire-plugin.version>3.6.0</surefire-plugin.version>
 
@@ -60,6 +68,10 @@
     <pmd.extraAssertMethodNames></pmd.extraAssertMethodNames>
     <skipITs>true</skipITs>
     <nullaway.annotated.packages>${project.groupId}</nullaway.annotated.packages>
+    <!-- Added to NullAway's own ExcludedFieldAnnotations (Mockito, @TempDir, jakarta.inject.Inject
+         and more), which stay in force: fields the Quarkus test extension injects are treated as
+         initialized. -->
+    <nullaway.excluded.field.annotations>io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy</nullaway.excluded.field.annotations>
     <!-- Appended to the Error Prone argument, e.g. -XepExcludedPaths:.*/generated-sources/.* -->
     <error-prone.extra.args></error-prone.extra.args>
   </properties>
@@ -91,6 +103,17 @@
         <artifactId>org.jacoco.agent</artifactId>
         <version>${jacoco-plugin.version}</version>
         <classifier>runtime</classifier>
+      </dependency>
+      <!-- The annotations (@SuppressFBWarnings) follow the analyzer the gate runs. Management adds
+      no dependency; a project that uses them declares spotbugs-annotations without a version or
+      scope. They are provided: nothing needs them at runtime, and at compile scope the artifact
+      would carry com.google.code.findbugs:jsr305 (javax.annotation.Nullable, which the shared
+      Checkstyle bans) into the runtime classpath, the packaged artifacts and downstream users. -->
+      <dependency>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-annotations</artifactId>
+        <version>${spotbugs.version}</version>
+        <scope>provided</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -155,6 +178,8 @@
               <arg>-XDcompilePolicy=simple</arg>
               <arg>-Xplugin:ErrorProne -Xep:NullAway:ERROR
                 -XepOpt:NullAway:AnnotatedPackages=${nullaway.annotated.packages}
+                -XepOpt:NullAway:ExcludedFieldAnnotations=${nullaway.excluded.field.annotations}
+                -XepOpt:NullAway:HandleTestAssertionLibraries=true
                 -Xep:FutureReturnValueIgnored:ERROR
                 -Xep:NullablePrimitive:ERROR
                 -Xep:NonApiType:ERROR
@@ -195,6 +220,9 @@
                    classpath gets a harmless ClassNotFoundException trace on stderr, after
                    which JUL falls back to its default manager. -->
               <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <!-- jacoco-maven-plugin writes the coverage report; quarkus-jacoco's own would show
+                   0%. A project that wants it sets this to true in its own configuration. -->
+              <quarkus.jacoco.report>false</quarkus.jacoco.report>
               <maven.home>${maven.home}</maven.home>
             </systemPropertyVariables>
           </configuration>
@@ -221,6 +249,9 @@
               <native.image.path>
                 ${project.build.directory}/${project.build.finalName}-runner</native.image.path>
               <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <!-- jacoco-maven-plugin writes the coverage report; quarkus-jacoco's own would show
+                   0%. A project that wants it sets this to true in its own configuration. -->
+              <quarkus.jacoco.report>false</quarkus.jacoco.report>
               <maven.home>${maven.home}</maven.home>
             </systemPropertyVariables>
           </configuration>
@@ -293,7 +324,10 @@
                      as "There are some dependencies with no license". -->
                 <includedLicenses>
                   <!-- Apache -->
+                  <includedLicense>Apache 2</includedLicense>
+                  <includedLicense>Apache 2.0</includedLicense>
                   <includedLicense>Apache License 2.0</includedLicense>
+                  <includedLicense>Apache License Version 2.0</includedLicense>
                   <includedLicense>Apache License, 2.0</includedLicense>
                   <includedLicense>Apache License, Version 2.0</includedLicense>
                   <includedLicense>Apache Software License - Version 2.0</includedLicense>
@@ -323,8 +357,10 @@
                   <includedLicense>Eclipse Public License - v 1.0</includedLicense>
                   <includedLicense>Eclipse Public License - v 2.0</includedLicense>
                   <includedLicense>Eclipse Public License 1.0</includedLicense>
+                  <includedLicense>Eclipse Public License 2.0</includedLicense>
                   <includedLicense>Eclipse Public License v. 2.0</includedLicense>
                   <includedLicense>Eclipse Public License v2.0</includedLicense>
+                  <includedLicense>Eclipse Public License, Version 2.0</includedLicense>
                   <!-- Public domain -->
                   <includedLicense>Public Domain</includedLicense>
                   <includedLicense>Public Domain, per Creative Commons CC0</includedLicense>
@@ -334,8 +370,12 @@
                   <includedLicense>Similar to Apache License but with the acknowledgment clause removed</includedLicense>
                   <includedLicense>The SAX License</includedLicense>
                   <includedLicense>The W3C License</includedLicense>
+                  <includedLicense>UPL-1.0</includedLicense>
+                  <includedLicense>Universal Permissive License, Version 1.0</includedLicense>
                   <!-- Weak copyleft: CDDL, LGPL, MPL -->
+                  <includedLicense>CDDL + GPLv2 with classpath exception</includedLicense>
                   <includedLicense>COMMON DEVELOPMENT AND DISTRIBUTION LICENSE (CDDL) Version 1.0</includedLicense>
+                  <includedLicense>GNU LESSER GENERAL PUBLIC LICENSE, Version 2.1</includedLicense>
                   <includedLicense>GNU Lesser General Public License</includedLicense>
                   <includedLicense>GNU Library General Public License v2.1 or later</includedLicense>
                   <includedLicense>LGPL-2.1</includedLicense>
@@ -344,6 +384,8 @@
                   <includedLicense>Mozilla Public License, Version 2.0</includedLicense>
                   <!-- GPL with the Classpath Exception. Not the Universal FOSS Exception: it
                        covers only FOSS software, so a FOSS project appends it. -->
+                  <includedLicense>GNU General Public License, version 2 with the GNU Classpath Exception</includedLicense>
+                  <includedLicense>GNU General Public License, version 2, with the Classpath Exception</includedLicense>
                   <includedLicense>GPL-2.0-with-classpath-exception</includedLicense>
                   <includedLicense>GPL2 w/ CPE</includedLicense>
                   <includedLicense>The GNU General Public License (GPL), Version 2, With Classpath Exception</includedLicense>
@@ -370,8 +412,24 @@
           <groupId>com.github.spotbugs</groupId>
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>${spotbugs-plugin.version}</version>
+          <dependencies>
+            <!-- The analyzer at spotbugs.version, not the plugin's default. This replaces the
+                 plugin's own declaration, so it repeats that one's exclusion: the plugin logs
+                 through log4j-to-slf4j, and log4j-core would be a second log4j backend. -->
+            <dependency>
+              <groupId>com.github.spotbugs</groupId>
+              <artifactId>spotbugs</artifactId>
+              <version>${spotbugs.version}</version>
+              <exclusions>
+                <exclusion>
+                  <groupId>org.apache.logging.log4j</groupId>
+                  <artifactId>log4j-core</artifactId>
+                </exclusion>
+              </exclusions>
+            </dependency>
+          </dependencies>
           <configuration>
-            <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+            <excludeFilterFile>${maven.multiModuleProjectDirectory}/.devkit/java/config/spotbugs-baseline.xml,${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
             <effort>Max</effort>
             <threshold>Low</threshold>
           </configuration>
@@ -497,7 +555,8 @@
           <configuration>
             <configLocation>${maven.multiModuleProjectDirectory}/.devkit/java/config/checkstyle.xml</configLocation>
             <propertyExpansion>
-              org.checkstyle.google.suppressionfilter.config=${project.basedir}/checkstyle-suppressions.xml</propertyExpansion>
+              org.checkstyle.google.suppressionfilter.config=${project.basedir}/checkstyle-suppressions.xml
+              org.checkstyle.google.suppressionxpathfilter.config=${project.basedir}/checkstyle-xpath-suppressions.xml</propertyExpansion>
             <consoleOutput>true</consoleOutput>
             <!-- No failsOnError: it stops Checkstyle before the plugin logs the violation, so
                  under make lint's -q only "There is 1 error reported" would show. failOnViolation
