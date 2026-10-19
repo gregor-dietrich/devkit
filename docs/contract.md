@@ -1274,19 +1274,30 @@ run the tools from `.venv`.
   members of one name fail. `make test` does not
   lint; the full gate is `make lint test`.
 - `make audit` runs pip-audit on the third-party runtime dependencies
-  `uv.lock` pins (`uv export --no-default-groups`, the project's own
-  packages and its local path dependencies left out, what they depend on
-  kept), and passes, saying so, only when there are none and no entry is
-  accepted (below; every entry is then stale). It runs pip-audit
-  twice over that export, against PyPI and then against OSV, both with
-  `--strict`, always both, and judges the two reports as the next
-  paragraph says (an exit status 1 whose findings are all accepted
-  passes): PyPI's advisory data
-  omits advisories OSV carries, and OSV cannot tell an unknown package from
-  a clean one, so only PyPI's `--strict` fails closed on a dependency that
-  cannot be audited. It needs the network, both pypi.org's JSON API and
-  api.osv.dev, and fails closed without either; neither `check` nor `test`
-  runs it.
+  `uv.lock` pins (`uv export --no-default-groups --all-packages
+  --all-extras --format pylock.toml`: every member's and every extra's,
+  the project's own packages and its local path dependencies left out,
+  what they depend on kept), every one of them on every machine: pip-audit
+  reads the export with `--locked`, which ignores environment markers, so
+  a dependency only another platform or Python installs
+  (`sys_platform == "win32"`) is audited too, and one `devkit.toml` is
+  judged alike everywhere. Before pip-audit runs, an export that is not a
+  pylock 1.x file naming each package and its version fails, and so does
+  a package it pins from a git, URL or local file or directory source,
+  which pip-audit cannot audit against an index (a git or URL one it
+  would audit as the PyPI release of its name and version). When
+  `uv.lock` pins none, `make audit` passes without running pip-audit,
+  saying so, only when no entry is accepted (below; every entry is then
+  stale). It runs pip-audit twice over that export, against PyPI and then
+  against OSV, both with `--strict`, always both, and judges the two
+  reports as the next paragraph says (an exit status 1 whose findings are
+  all accepted passes): PyPI's advisory data omits advisories OSV carries,
+  and OSV cannot tell an unknown package from a clean one, so only PyPI's
+  `--strict` fails closed on a dependency that cannot be audited. It needs
+  the network, both pypi.org's JSON API and api.osv.dev, and fails closed
+  without either; the export also downloads any artifact whose hash
+  `uv.lock` lacks, from its index, to compute it. Neither `check` nor
+  `test` runs it.
 
   An advisory is accepted in `devkit.toml`, one
   `[[python.audit.accepted]]` entry each, with `package`, `id` and a
@@ -1309,16 +1320,16 @@ run the tools from `.venv`.
   version, ids, fix versions and service, and on every stale entry, one
   that neither service reports, which is judged only when both reports
   were read. It also fails when a service exits with a status other than
-  0 and 1, or 1 with no advisory, leaves no readable report or an empty
-  one, or reports a dependency it skipped, and then says that staleness
-  was not judged. pip-audit drops a requirement whose environment
-  marker is false on the machine, so a project whose every runtime
-  dependency is so restricted (e.g. `sys_platform == "win32"`) gets an
-  empty report and fails on a machine where none of the markers holds.
-  `make audit` needs a pip-audit in the dev
-  group with `--format json` and `--aliases`; a project pinning one
-  without `--aliases` fails both runs with exit status 2 and upgrades it
-  (the fixtures pin 2.10.1). An entry has no expiry, and
+  0 and 1, or 1 with no advisory, leaves no readable report, or reports
+  a dependency it skipped, and then says that staleness was not judged.
+  A report that leaves out a package the export pins fails too (a name
+  `uv.lock` forks into two versions counts twice), and staleness is then
+  not judged. `make audit` needs a pip-audit in the dev group with
+  `--locked`, `--format json` and `--aliases`; a project pinning one
+  without one of them fails both runs with exit status 2 and upgrades it
+  (the fixtures pin 2.10.1), and a uv whose `uv export` has
+  `--format pylock.toml` (the fixtures pin 0.12.23). An entry has no
+  expiry, and
   keeps passing when a fixed release appears: a passing run lists each
   accepted finding with its fix versions and reason, so a fix does not go
   unseen.

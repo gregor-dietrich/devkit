@@ -342,15 +342,19 @@ on a 100-pin lock) and can now fail on advisories PyPI did not list. An
 advisory with no fixed release, or one that does not apply, is accepted in
 `devkit.toml` with a `[[python.audit.accepted]]` entry (package, advisory id
 or alias and a reason; the contract has the details).
-`make audit` needs a pip-audit with `--format json` and `--aliases` in the dev
-group (devkit's fixtures pin 2.10.1): a project pinning an older one that lacks
-`--aliases` fails both runs with exit status 2, and upgrades it with
-`uv lock --upgrade-package pip-audit`, then `make install`. A project whose
-every runtime dependency carries an environment marker that is false on the
-auditing machine (e.g. only `tomli ; python_version < '3.11'`, audited on 3.11
-or later) passed before and now fails: pip-audit drops those requirements and
-reports no dependency. `make audit` passes only on a machine where one of the
-markers holds.
+`make audit` needs a pip-audit with `--locked`, `--format json` and `--aliases`
+in the dev group (devkit's fixtures pin 2.10.1): a project pinning an older one
+that lacks one of them fails both runs with exit status 2, and upgrades it with
+`uv lock --upgrade-package pip-audit`, then `make install`. It also needs a uv
+whose `uv export` has `--format pylock.toml` (the fixtures pin 0.12.23): a
+project pinning an older one stops at that export with uv's own usage error,
+and upgrades it with `uv lock --upgrade-package uv`, then `make install`.
+`make audit` now
+audits every package `uv.lock` pins for the runtime dependencies, whatever its
+environment marker says about the auditing machine: an advisory against a
+dependency only another platform installs (e.g. one restricted by
+`sys_platform == "win32"`) now fails a Linux run too until it is upgraded or
+accepted, and the same `devkit.toml` passes or fails alike on every machine.
 
 `make test` in a uv project now runs every pytest session with
 `--cache-clear` and a temporary `COVERAGE_FILE`, so a stale `.pytest_cache`

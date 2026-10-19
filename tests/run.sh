@@ -166,11 +166,13 @@
 #          .python-version, COVERAGE_FLOOR unset or not a percent, no install,
 #          MODULES against the workspace or as a glob, no [python.duplication] or
 #          [tool.vulture] paths) and audit (a vulnerable dependency, one only
-#          OSV lists) to fail for that reason. Expect make format to fix a
-#          format and an unused-import break so that lint passes, and audit
-#          to pass on current runtime dependencies, one of them through a
-#          local path dependency. In the workspace, whose core is a package
-#          and app a virtual member: test ONLY=packages/app tests app alone, lint
+#          OSV lists, one only win32 installs) to fail for that reason. Expect
+#          make format to fix a format and an unused-import break so that lint
+#          passes, and audit to pass on current runtime dependencies, one of
+#          them through a local path dependency, on runtime dependencies only
+#          win32 installs, and on a name locked at two versions. In the
+#          workspace, whose core is a package and app a virtual member: test
+#          ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
 #          fails, and JUNIT_DIR=reports writes one report per member into the
 #          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
@@ -1285,6 +1287,30 @@ py_audited() {
     relocked "$dir" && make_says pass "$dir" audit "Audit completed"
 }
 
+# A dependency only win32 installs, with live advisories: audited on Linux too, so audit fails on it.
+py_marker_false() {
+  local dir=$work/py-marker-false
+  py_copy single marker-false relocked pyproject.toml \
+    "s/^dependencies = \[\]/dependencies = [\"six\", \"jinja2==3.1.4 ; sys_platform == 'win32'\"]/" &&
+    make_says fail "$dir" audit "jinja2 3.1.4: " "not accepted in devkit.toml"
+}
+
+# Every runtime dependency is one only win32 installs: audit still passes.
+py_marker_only() {
+  py_copy single marker-only relocked pyproject.toml \
+    "s/^dependencies = \[\]/dependencies = [\"six ; sys_platform == 'win32'\"]/" &&
+    make_says pass "$work/py-marker-only" audit "no advisory beyond the 0 accepted" "Audit completed"
+}
+
+# One name locked at two versions, one per platform: audit passes once both are audited.
+py_forked() {
+  local dir=$work/py-forked
+  py_copy single forked relocked pyproject.toml \
+    "s/^dependencies = \[\]/dependencies = [\"six==1.16.0 ; sys_platform == 'win32'\", \"six==1.17.0 ; sys_platform != 'win32'\"]/" &&
+    [[ $(grep -A1 '^name = "six"$' "$dir/uv.lock" | grep -c '^version = ') == 2 ]] &&
+    make_says pass "$dir" audit "no advisory beyond the 0 accepted" "Audit completed" "over the 2 pinned packages"
+}
+
 py_duplicated() { # a test module, one test longer, copied whole: a clone over 50 tokens
   local dir=$work/py-duplication
   py_copy single duplication installed tests/test_greeter.py \
@@ -1385,6 +1411,9 @@ python_negatives() {
   check "python-uv-single: a vulnerable dependency fails make audit" py_vulnerable
   check "python-uv-single: a dependency with an OSV-only advisory fails make audit" py_osv_only
   check "python-uv-single: make audit passes on current dependencies, leaving a path one out" py_audited
+  check "python-uv-single: a dependency only win32 installs is audited, failing make audit on its advisory" py_marker_false
+  check "python-uv-single: make audit passes when every runtime dependency is one only win32 installs" py_marker_only
+  check "python-uv-single: make audit passes a name locked at two versions, one per platform" py_forked
 }
 
 python_part() {
