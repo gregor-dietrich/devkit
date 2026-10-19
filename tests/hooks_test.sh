@@ -6,6 +6,9 @@
 # shell code in DURING. DEVKIT is this repository; git reads no user or system
 # config. Prints PASS/FAIL per case.
 set -euo pipefail
+# An inherited shell function could replace git or any command of the cases' own
+# calls, so it goes before the first external command.
+while IFS= read -r fn; do unset -f -- "${fn#declare -f* }" 2>/dev/null || :; done < <(declare -F)
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 # Physical: hooks.sh reports resolved paths, and macOS's TMPDIR is under the
@@ -18,7 +21,7 @@ trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2046 # one argument per variable name
 unset $(git rev-parse --local-env-vars) CI FAIL GIT_CEILING_DIRECTORIES
 # What the hooks and make gate react to: an ambient one would change the cases.
-unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS PYTEST_PLUGINS COVERAGE_RCFILE COVERAGE_FORCE_CONFIG PYTHONOPTIMIZE MAVEN_SKIP_RC \
+unset ONLY MAVEN_ARGS MAVEN_OPTS MAVEN_DEBUG_OPTS MAVEN_BASEDIR JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS OPENJ9_JAVA_OPTIONS IBM_JAVA_OPTIONS PYTEST_ADDOPTS PYTEST_PLUGINS COVERAGE_RCFILE COVERAGE_FORCE_CONFIG PYTHONOPTIMIZE MAVEN_SKIP_RC BASH_ENV \
   X Y D SEL NOPE F d p r MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL MAKEFILES
 export HOME=$work/home GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
@@ -36,7 +39,8 @@ src=$work/src
 git init -q -b main "$src"
 printf '[devkit]\nurl = "file:///nowhere"\nversion = "v9.9.9"\ncommit = "%s"\n' "$pin" >"$src/devkit.toml"
 printf '/.devkit\n' >"$src/.gitignore"
-printf '%s\n' '.PHONY: lint-repo test' 'lint-repo test:' \
+# bash, as common.mk sets: a dash /bin/sh would drop an exported function.
+printf '%s\n' 'SHELL := /bin/bash' '.PHONY: lint-repo test' 'lint-repo test:' \
   $'\t@echo "$@ index=$${GIT_INDEX_FILE-unset} dir=$${GIT_DIR-unset}" >>"$$HOOK_LOG"' \
   $'\t@[ "$${FAIL-}" != "$@" ] || { echo "INTENDED $@ FAILURE"; exit 23; }' \
   $'\t@[ "$@" != test ] || eval "$${DURING-}"' >"$src/Makefile"
@@ -67,7 +71,22 @@ say() { # say CMD...: in the clone; sets rc, out (stdout and stderr, as git show
 }
 install() { run env PROJECT_ROOT="$clone" "$root/scripts/hooks.sh" install; }
 status() { run env PROJECT_ROOT="$clone" "$root/scripts/hooks.sh" status; }
-gate() { run env PROJECT_ROOT="$clone" "$@" "$root/scripts/gate.sh"; } # gate [VAR=value...]
+# sysrc: a machine-wide mavenrc that exists, which the cases cannot move. The
+# gate records nothing while Maven would run one, so gate() skips it unless the
+# caller sets MAVEN_SKIP_RC itself (a case of the rc-file screen passes it
+# empty); the stub Makefile runs no Maven.
+sysrc() {
+  local f
+  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
+    [[ ! -e $f ]] || { echo "$f"; return 0; }
+  done
+  return 1
+}
+gate() { # gate [VAR=value...]
+  local skip=()
+  sysrc >/dev/null && [[ " $* " != *" MAVEN_SKIP_RC="* ]] && skip=(MAVEN_SKIP_RC=1)
+  run env PROJECT_ROOT="$clone" "${skip[@]}" "$@" "$root/scripts/gate.sh"
+}
 g() { git -C "$clone" "$@"; }
 logged() { [[ "$(<"$HOOK_LOG")" == "$1" ]]; }
 quiet() { [[ $rc == 0 && -z $out && -z $err ]]; }
@@ -284,7 +303,7 @@ case_pre_push() {
   install
   g commit -q --no-verify --allow-empty -m two
   say git push -q origin main
-  [[ $rc == 0 && $out != *WARNING* && $(g rev-parse origin/main) == $(g rev-parse HEAD) ]] &&
+  [[ $rc == 0 && $(g rev-parse origin/main) == $(g rev-parse HEAD) ]] && { unwarned || [[ $out != *WARNING* ]]; } &&
     logged $'lint-repo index=unset dir=unset\ntest index=unset dir=unset' || return 1
   g commit -q --no-verify --allow-empty -m three
   say env FAIL=test git push -q origin main
@@ -392,7 +411,8 @@ case_pre_push_environment() { # variables that can skip or deselect tests: warn,
     "PYTEST_PLUGINS=x|PYTEST_PLUGINS is set (it can deselect tests)." \
     "COVERAGE_RCFILE=x|COVERAGE_RCFILE is set (it can skew coverage)." \
     "COVERAGE_FORCE_CONFIG=x|COVERAGE_FORCE_CONFIG is set (it can skew coverage)." \
-    "PYTHONOPTIMIZE=1|PYTHONOPTIMIZE is set (it can strip asserts)."; do
+    "PYTHONOPTIMIZE=1|PYTHONOPTIMIZE is set (it can strip asserts)." \
+    "BASH_ENV=/dev/null|BASH_ENV is set (bash sources it in every recipe, where a function it defines can replace a command the tests run)."; do
     n=$((n + 1))
     var=${spec%%|*}
     g commit -q --no-verify --allow-empty -m "env$n"
@@ -772,7 +792,7 @@ case_pre_push_env() { # run with git's pointers set, as git runs it
   install
   run env GIT_DIR="$clone/.git" GIT_INDEX_FILE="$clone/.git/index" "$hooks/pre-push" origin \
     "$work/case/origin.git" <<<"refs/heads/main $(g rev-parse HEAD) refs/heads/main $(printf '0%.0s' {1..40})"
-  [[ $rc == 0 && -z $err && $out != *WARNING* ]] &&
+  [[ $rc == 0 && -z $err ]] && { unwarned || [[ $out != *WARNING* ]]; } &&
     logged $'lint-repo index=unset dir=unset\ntest index=unset dir=unset'
 }
 case_status_outside() { # one line, not a NOTE per hook
@@ -861,15 +881,6 @@ case_gate_only() {
   run make -s -f Makefile -f "$root/make/common.mk" gate ONLY=x
   [[ $rc != 0 && $err == *"unset ONLY"* ]] && logged "" && [[ ! -e $(rec) ]]
 }
-# sysrc: a machine-wide mavenrc that exists, which the cases cannot move; the
-# assertions that need none say so and skip when it is there.
-sysrc() {
-  local f
-  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
-    [[ ! -e $f ]] || { echo "$f"; return 0; }
-  done
-  return 1
-}
 unwarned() { # true, with a SKIP line, when a machine-wide mavenrc makes "no warning" untestable
   local f
   f=$(sysrc) || return 1
@@ -947,17 +958,12 @@ case_gate_ignored_mvn() { # .mvn/ files Maven reads, ignored by git
   echo .mvn/wrapper/maven-wrapper.jar >"$ex"
   g add -f .mvn/jvm.config
   g commit -q --no-verify -m jvmconfig
-  if ! unwarned; then
-    gate
-    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
-  fi
+  gate
+  [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
 }
 case_gate_home_files() { # settings.xml activeProfiles and a directory at extensions.xml
   fresh
-  local spec kind want ok=0 f
-  for f in /usr/local/etc/mavenrc /etc/mavenrc; do
-    [[ ! -e $f ]] || { echo "SKIP: $f exists; not asserting the home-directory files" >&2; return 0; }
-  done
+  local spec kind want ok=0
   for spec in act_none:no act_own:yes act_comment:yes act_mixed:no act_ws:yes; do
     kind=${spec%:*} want=${spec#*:}
     : >"$HOOK_LOG"
@@ -1269,27 +1275,25 @@ case_gate_ignored_pytest() { # files pytest reads, ignored by git
   g config core.excludesFile "$work/excludes"
   echo x >"$clone/pytest.ini"
   norecord "$pytest_pre pytest.ini $pytest_post" || return 1
-  if ! unwarned; then
-    # Not read, or not counted: recorded.
-    pomproj pyproject.toml '[project]'
-    ignored .venv/lib/p/conftest.py venv/conftest.py build/conftest.py dist/conftest.py node_modules/conftest.py x.egg/conftest.py \
-      _darcs/conftest.py CVS/conftest.py '{arch}/conftest.py' \
-      env/pyvenv.cfg env/lib/p/conftest.py docs/pytest.ini
-    mkdir -p "$clone/nested"
-    git init -q "$clone/nested"
-    echo x >"$clone/nested/conftest.py"
-    echo x >"$clone/nested/pytest.ini"
-    echo /nested/ >>"$clone/.git/info/exclude"
-    yesrec || return 1
-    pomproj pyproject.toml '[project]' pytest.ini x
-    yesrec || return 1
-    pomproj other.txt x
-    ignored pytest.ini tests/conftest.py
-    yesrec || return 1
-    pomproj packages/core/pyproject.toml '[project]'
-    ignored pytest.ini
-    yesrec || return 1
-  fi
+  # Not read, or not counted: recorded.
+  pomproj pyproject.toml '[project]'
+  ignored .venv/lib/p/conftest.py venv/conftest.py build/conftest.py dist/conftest.py node_modules/conftest.py x.egg/conftest.py \
+    _darcs/conftest.py CVS/conftest.py '{arch}/conftest.py' \
+    env/pyvenv.cfg env/lib/p/conftest.py docs/pytest.ini
+  mkdir -p "$clone/nested"
+  git init -q "$clone/nested"
+  echo x >"$clone/nested/conftest.py"
+  echo x >"$clone/nested/pytest.ini"
+  echo /nested/ >>"$clone/.git/info/exclude"
+  yesrec || return 1
+  pomproj pyproject.toml '[project]' pytest.ini x
+  yesrec || return 1
+  pomproj other.txt x
+  ignored pytest.ini tests/conftest.py
+  yesrec || return 1
+  pomproj packages/core/pyproject.toml '[project]'
+  ignored pytest.ini
+  yesrec || return 1
 }
 case_gate_ignored_pytest_members() { # a member's own directories, a root conftest.py, test* directories, GIT_LITERAL_PATHSPECS
   pomproj pyproject.toml '[project]'
@@ -1318,14 +1322,12 @@ case_gate_ignored_pytest_members() { # a member's own directories, a root confte
   pomproj pyproject.toml '[project]' 'q"m/pyproject.toml' '[project]'
   ignored 'q"m/pytest.ini'
   norecord "$pytest_pre q\"m/pytest.ini $pytest_post" || return 1
-  if ! unwarned; then
-    pomproj pyproject.toml '[project]'
-    ignored env/conda-meta/history env/lib/p/conftest.py
-    yesrec || return 1
-    pomproj pyproject.toml '[project]'
-    ignored tests/build/conftest.py
-    yesrec || return 1
-  fi
+  pomproj pyproject.toml '[project]'
+  ignored env/conda-meta/history env/lib/p/conftest.py
+  yesrec || return 1
+  pomproj pyproject.toml '[project]'
+  ignored tests/build/conftest.py
+  yesrec || return 1
 }
 case_gate_ignored_pytest_screen() { # conftest.py above a project directory, __pycache__, a path git quotes, directory patterns, a failing listing
   local d shim
@@ -1350,22 +1352,20 @@ case_gate_ignored_pytest_screen() { # conftest.py above a project directory, __p
   printf '#!/bin/bash\nif [[ " $* " == *" ls-files "* && " $* " == *" -z "* && " $* " != *" -s "* ]]; then exit 1; fi\nexec %q "$@"\n' "$(command -v git)" >"$shim/git"
   chmod +x "$shim/git"
   norecord "the files pytest reads could not be screened" PATH="$shim:$PATH" || return 1
-  if ! unwarned; then
-    pomproj pyproject.toml '[project]' packages/core/pyproject.toml '[project]'
-    ignored src/__pycache__/conftest.py packages/core/src/__pycache__/conftest.py
-    yesrec || return 1
-    # A path git would quote, in a virtual environment.
-    pomproj pyproject.toml '[project]'
-    ignored 'env/q"d/conftest.py' env/pyvenv.cfg
-    yesrec || return 1
-    # Ignored by a directory pattern.
-    pomproj pyproject.toml '[project]'
-    mkdir -p "$clone/.venv/lib/x"
-    echo x >"$clone/.venv/pyvenv.cfg"
-    echo x >"$clone/.venv/lib/x/conftest.py"
-    echo .venv/ >>"$clone/.git/info/exclude"
-    yesrec || return 1
-  fi
+  pomproj pyproject.toml '[project]' packages/core/pyproject.toml '[project]'
+  ignored src/__pycache__/conftest.py packages/core/src/__pycache__/conftest.py
+  yesrec || return 1
+  # A path git would quote, in a virtual environment.
+  pomproj pyproject.toml '[project]'
+  ignored 'env/q"d/conftest.py' env/pyvenv.cfg
+  yesrec || return 1
+  # Ignored by a directory pattern.
+  pomproj pyproject.toml '[project]'
+  mkdir -p "$clone/.venv/lib/x"
+  echo x >"$clone/.venv/pyvenv.cfg"
+  echo x >"$clone/.venv/lib/x/conftest.py"
+  echo .venv/ >>"$clone/.git/info/exclude"
+  yesrec || return 1
   pomproj pyproject.toml '[project]'
   mkdir -p "$clone/scratch"
   echo x >"$clone/scratch/conftest.py"
@@ -1396,20 +1396,16 @@ case_gate_ignored_pytest_files() { # venv markers and test modules, ignored by g
   pomproj pyproject.toml '[project]'
   ignored BUILD/conftest.py
   norecord "$pytest_pre BUILD/conftest.py $pytest_post" BASHOPTS=nocasematch || return 1
-  if ! unwarned; then
-    pomproj pyproject.toml '[project]'
-    ignored .venv/pyvenv.cfg env/pyvenv.cfg pyvenv.cfg .venv/lib/p/test_x.py build/test_x.py env/test_x.py
-    yesrec || return 1
-  fi
+  pomproj pyproject.toml '[project]'
+  ignored .venv/pyvenv.cfg env/pyvenv.cfg pyvenv.cfg .venv/lib/p/test_x.py build/test_x.py env/test_x.py
+  yesrec || return 1
 }
 case_gate_pathspec_switches() { # inherited GIT_*_PATHSPECS neither hide nor invent anything
   pomproj pom.xml "$(pf Foo.txt)" foo.txt x
   ignored Foo.txt
   nr "pom.xml: Foo.txt exists and git does not track it" GIT_ICASE_PATHSPECS=1 || return 1
   pomproj pom.xml "$(pf file)" # tracked
-  if ! unwarned; then
-    yesrec GIT_LITERAL_PATHSPECS=1 || return 1
-  fi
+  yesrec GIT_LITERAL_PATHSPECS=1 || return 1
 }
 case_gate_literal_pathspecs() { # an inherited GIT_LITERAL_PATHSPECS does not blind strictly_clean
   fresh
@@ -1435,6 +1431,15 @@ case_pre_push_ignored_pytest() { # the hook warns on the same files, and still g
   : >"$HOOK_LOG"
   say git push -q origin main
   [[ $rc == 0 && $out == *"WARNING: $pytest_pre pytest.ini, tests/conftest.py $pytest_post."* ]] && logged "$both"
+}
+# shellcheck disable=SC2016 # the function body is bash code for the script under test
+hide_status='() { case " $* " in *" status "*) return 0 ;; esac; command git "$@"; }' # a git that reports every tree clean
+# shellcheck disable=SC2016 # the function body is bash code for the script under test
+hide_top='() { case " $* " in *" --show-toplevel "*) return 1 ;; esac; command git "$@"; }' # a git whose top-level lookup fails
+plain() { (cd "$clone" && env "$@"); } # plain VAR=value... CMD...: in the clone, as a plain shell runs it
+unimported() { # true, with a SKIP line, when /bin/bash imports no BASH_FUNC_<name>%% (the premise of the function cases)
+  [[ $(env 'BASH_FUNC_devkit_probe%%=() { :; }' /bin/bash -c 'declare -F') != *devkit_probe* ]] || return 1
+  echo "SKIP: /bin/bash imports no BASH_FUNC_<name>%% variable; not asserting the removal of an exported function" >&2
 }
 hidden() { # the clone's status is empty although file holds an edit (the premise of the cases below)
   [[ -z $(g --no-optional-locks status --porcelain) && $(<"$clone/file") == two ]]
@@ -1644,14 +1649,107 @@ case_gate_env() { # git's local environment variables are unset, as pre-push doe
   [[ -z $(GIT_CONFIG_PARAMETERS=$params g --no-optional-locks status --porcelain) ]] || return 1
   norecord "the tree was not clean at the start" GIT_CONFIG_PARAMETERS="$params"
 }
+case_gate_functions() { # an inherited shell function replaces no command of the screens or the stages
+  local envwhy="BASH_ENV is set (bash sources it in every recipe, where a function it defines can replace a command the tests run)"
+  if ! unimported; then
+    fresh
+    echo dirt >"$clone/untracked"
+    [[ -z $(plain "BASH_FUNC_git%%=$hide_status" /bin/bash -c 'git status --porcelain') ]] || return 1
+    norecord "the tree was not clean at the start" "BASH_FUNC_git%%=$hide_status" || return 1
+    fresh
+    # shellcheck disable=SC2016 # DURING is evaluated by the stage's recipe
+    gate 'BASH_FUNC_devkit_probe%%=() { :; }' DURING='declare -F >>"$HOOK_LOG"'
+    [[ $rc == 0 && $out == "make gate: recorded"* && -e $(rec) ]] && logged "$both" || return 1
+  fi
+  # A function BASH_ENV defines is removed on every bash: its reason is BASH_ENV, not a leftover.
+  fresh
+  echo dirt >"$clone/untracked"
+  printf 'git%s\n' "$hide_status" >"$work/bash_env"
+  [[ -z $(plain BASH_ENV="$work/bash_env" /bin/bash -c 'git status --porcelain') ]] || return 1
+  norecord "the tree was not clean at the start; $envwhy" BASH_ENV="$work/bash_env" || return 1
+  fresh
+  printf '%s\n' 'f() { :; }' 'readonly -f f' >"$work/bash_env"
+  norecord "$envwhy; an inherited shell function could not be removed (it can replace a command the screens or the tests run)" BASH_ENV="$work/bash_env"
+}
+case_pre_push_functions() { # the hook removes inherited shell functions before it decides to skip, before its own top-level lookup and before its stages
+  local bash_env=$work/bash_env envwarn='WARNING: BASH_ENV is set (' leftwarn='WARNING: an inherited shell function could not be removed (it can replace a command the screens or the tests run).'
+  gated || return 1
+  if ! unimported; then
+    echo dirt >"$clone/untracked"
+    [[ -z $(plain "BASH_FUNC_git%%=$hide_status" /bin/bash -c 'git status --porcelain') ]] || return 1
+    say env "BASH_FUNC_git%%=$hide_status" git push -q origin main
+    [[ $rc == 0 && $out != *skipping* ]] && logged "$both" || return 1
+    rm "$clone/untracked"
+    g commit -q --no-verify --allow-empty -m three
+    : >"$HOOK_LOG"
+    # shellcheck disable=SC2016 # DURING is evaluated by the stage's recipe
+    say env 'BASH_FUNC_devkit_probe%%=() { :; }' DURING='declare -F >>"$HOOK_LOG"' git push -q origin main
+    [[ $rc == 0 ]] && logged "$both" || return 1
+    g commit -q --no-verify --allow-empty -m top
+    : >"$HOOK_LOG"
+    ! plain "BASH_FUNC_git%%=$hide_top" /bin/bash -c 'git rev-parse --show-toplevel' || return 1
+    say env "BASH_FUNC_git%%=$hide_top" git push -q origin main
+    [[ $rc == 0 ]] && logged "$both" || return 1 # the hook's own top-level lookup ran without it
+  fi
+  # Through BASH_ENV, which every bash sources: a function it defines is removed.
+  gated || return 1
+  echo dirt >"$clone/untracked"
+  printf 'git%s\n' "$hide_status" >"$bash_env"
+  [[ -z $(plain BASH_ENV="$bash_env" /bin/bash -c 'git status --porcelain') ]] || return 1
+  say env BASH_ENV="$bash_env" git push -q origin main
+  [[ $rc == 0 && $out != *skipping* && $out == *"$envwarn"* && $out != *"could not be removed"* ]] && logged "$both" || return 1
+  gated || return 1
+  echo dirt >"$clone/untracked" # an empty BASH_ENV still skips a clean tree (below)
+  printf 'git%s\n' "$hide_top" >"$bash_env"
+  ! plain BASH_ENV="$bash_env" /bin/bash -c 'git rev-parse --show-toplevel' || return 1
+  say env BASH_ENV="$bash_env" git push -q origin main
+  [[ $rc == 0 && $out != *skipping* ]] && logged "$both" || return 1
+  # One that stays (readonly) cannot end the hook with success: its parts fail closed on it.
+  gated || return 1
+  printf 'git%s\nreadonly -f git\n' "$hide_top" >"$bash_env"
+  ! plain BASH_ENV="$bash_env" /bin/bash -c 'git rev-parse --show-toplevel' || return 1
+  say env BASH_ENV="$bash_env" git push -q origin main
+  [[ $rc != 0 && $out != *skipping* && $(g rev-parse origin/main) != "$(g rev-parse HEAD)" ]] && logged "" || return 1
+  gated || return 1
+  echo dirt >"$clone/untracked"
+  printf 'git%s\nreadonly -f git\n' "$hide_status" >"$bash_env"
+  [[ -z $(plain BASH_ENV="$bash_env" /bin/bash -c 'git status --porcelain') ]] || return 1
+  say env BASH_ENV="$bash_env" git push -q origin main
+  [[ $rc == 0 && $out != *skipping* && $out == *"$envwarn"* && $out == *"$leftwarn"* ]] && logged "$both" || return 1
+  # The same body lets pre-commit's hook pass no more.
+  fresh
+  install
+  echo two >>"$clone/file"
+  printf 'git%s\nreadonly -f git\n' "$hide_top" >"$bash_env"
+  say env BASH_ENV="$bash_env" git commit -qam two
+  [[ $rc != 0 && $(g rev-list --count HEAD) == 1 ]] && logged "" || return 1
+  # An empty BASH_ENV file removes nothing and the record still skips.
+  gated || return 1
+  say env BASH_ENV=/dev/null git push -q origin main
+  [[ $rc == 0 && $out == *"skipping the gate" ]] && logged ""
+}
+case_hooks_script_functions() { # make hooks renders and make check-hooks compares under no inherited function
+  if ! unimported; then
+    fresh
+    [[ -z $(echo x | env 'BASH_FUNC_sed%%=() { :; }' /bin/bash -c 'sed p') ]] || return 1
+    run env 'BASH_FUNC_sed%%=() { :; }' PROJECT_ROOT="$clone" "$root/scripts/hooks.sh" install
+    [[ $rc == 0 && -z $err ]] && grep -qF "skipping the gate" "$hooks/pre-push" || return 1
+    run make -s -f "$root/make/common.mk" check-hooks
+    quiet
+  fi
+}
 case_jvm_screen_parity() { # the hook stays self-contained, so the two copies must not drift
-  local names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn ignored_pytest pytest_skips printable pathspec_git strictly_clean clean_filters identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
+  local removal names=(jvm_option strip_comments sets_properties activates_project_profile trim ignored_mvn ignored_pytest pytest_skips printable pathspec_git strictly_clean clean_filters identifier xml_texts normalize_tags note_ambient read_pom ambient_file candidate_ambient resolve_pom reactor_poms maven_config_file collect_env check_path check_activation ambient_profiles env_hits pom_scan) a b alt
   alt=$(IFS='|' && echo "${names[*]}")
-  local extract="/^(file_re|exit_re|jvm_re|help_re|dq)=/p;/^($alt)\\(\\)/,/^}/p"
+  local extract="/^while IFS= read -r fn; /p;/^(leftover|file_re|exit_re|jvm_re|help_re|dq)=/p;/^($alt)\\(\\)/,/^}/p"
   a=$(sed -En "$extract" "$root/scripts/gate.sh")
   b=$(sed -En "$extract" "$root/scripts/hooks/pre-push.sh")
+  removal=$(sed -n '/^while IFS= read -r fn; /p' "$root/scripts/gate.sh")
+  # The rendered hooks' preamble removes functions with the same line, and so
+  # does scripts/hooks.sh itself, at its top level.
+  grep -qF "'$removal'" "$root/scripts/hooks.sh" && grep -qxF "$removal" "$root/scripts/hooks.sh" || return 1
   # Every listed helper was extracted: a name changed in both files drops out.
-  [[ $(grep -c '_re=' <<<"$a") == 4 && $(grep -cE '^[a-z_]+\(\) \{' <<<"$a") == "${#names[@]}" && $a == "$b" ]]
+  [[ $(grep -c '_re=' <<<"$a") == 4 && $(grep -cE '^(while IFS= read -r fn; |leftover=)' <<<"$a") == 2 && $(grep -cE '^[a-z_]+\(\) \{' <<<"$a") == "${#names[@]}" && $a == "$b" ]]
 }
 case_gate_environment() { # variables that can skip or deselect tests
   fresh
@@ -1724,18 +1822,18 @@ case_gate_environment() { # variables that can skip or deselect tests
   : >"$HOOK_LOG"
   norecord "PYTHONOPTIMIZE is set (it can strip asserts)" PYTHONOPTIMIZE=1 || return 1
   : >"$HOOK_LOG"
+  norecord "BASH_ENV is set (bash sources it in every recipe, where a function it defines can replace a command the tests run)" BASH_ENV=/dev/null || return 1
+  : >"$HOOK_LOG"
   norecord "JAVA_TOOL_OPTIONS holds -D (it can skip tests)" 'JAVA_TOOL_OPTIONS=-Xmx1g "-Dx=a b"' || return 1
   : >"$HOOK_LOG"
-  if ! unwarned; then
-    gate MAVEN_OPTS='-Xmx1g -XX:-DisableExplicitGC' # no option starts with -D: recorded
-    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
-    rm -f "$(rec)"
-    : >"$HOOK_LOG"
-    gate MAVEN_OPTS='-Xmx1g -Xss1m -Xshare:auto -XX:AOTMode=auto --module-path=x -showversion -da -XX:-DisableExplicitGC -XX:+PrintFlagsFinal -XshowSettings:all -Xlog:gc -verbose:gc --add-opens=java.base/java.lang=ALL-UNNAMED -ea' # none ends java, reads a file or loads code
-    [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
-    rm -f "$(rec)"
-    : >"$HOOK_LOG"
-  fi
+  gate MAVEN_OPTS='-Xmx1g -XX:-DisableExplicitGC' # no option starts with -D: recorded
+  [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
+  rm -f "$(rec)"
+  : >"$HOOK_LOG"
+  gate MAVEN_OPTS='-Xmx1g -Xss1m -Xshare:auto -XX:AOTMode=auto --module-path=x -showversion -da -XX:-DisableExplicitGC -XX:+PrintFlagsFinal -XshowSettings:all -Xlog:gc -verbose:gc --add-opens=java.base/java.lang=ALL-UNNAMED -ea' # none ends java, reads a file or loads code
+  [[ $rc == 0 && $out == "make gate: recorded"* ]] || return 1
+  rm -f "$(rec)"
+  : >"$HOOK_LOG"
   # Maven runs a mavenrc file unless MAVEN_SKIP_RC is non-empty. A machine-wide
   # one cannot be moved, so it is named first in the reason, as the gate does.
   local f lead="" ok=0
@@ -1743,7 +1841,7 @@ case_gate_environment() { # variables that can skip or deselect tests
     [[ ! -e $f ]] || lead="$lead$f exists, and Maven runs it (it can skip tests); "
   done
   echo 'MAVEN_OPTS=-DskipTests' >"$HOME/.mavenrc"
-  norecord "$lead$HOME/.mavenrc exists, and Maven runs it (it can skip tests)" || ok=1
+  norecord "$lead$HOME/.mavenrc exists, and Maven runs it (it can skip tests)" MAVEN_SKIP_RC= || ok=1
   : >"$HOOK_LOG"
   gate MAVEN_SKIP_RC=1 # the launcher skips every rc file: recorded
   [[ $rc == 0 && $out == "make gate: recorded"* ]] || ok=1
@@ -1751,15 +1849,14 @@ case_gate_environment() { # variables that can skip or deselect tests
   [[ $ok == 0 ]] || return 1
   : >"$HOOK_LOG"
   settings_xml props
-  norecord "${lead}$HOME/.m2/settings.xml sets profile properties (they can skip tests)" || ok=1
+  norecord "${lead}$HOME/.m2/settings.xml sets profile properties (they can skip tests)" MAVEN_SKIP_RC= || ok=1
   rm -f "$HOME/.m2/settings.xml"
   [[ $ok == 0 ]] || return 1
   : >"$HOOK_LOG"
   settings_xml benign # a mirror, and properties only in a comment: recorded
   gate
-  [[ $rc == 0 && ( $out == "make gate: recorded"* || -n $lead ) ]] || ok=1
+  [[ $rc == 0 && $out == "make gate: recorded"* ]] || ok=1
   rm -f "$HOME/.m2/settings.xml"
-  [[ -z $lead ]] || echo "SKIP: a machine-wide mavenrc exists; not asserting the benign settings.xml is recorded" >&2
   [[ $ok == 0 ]] || return 1
   : >"$HOOK_LOG"
   mkdir -p "$HOME/.m2"
@@ -1781,7 +1878,7 @@ case_gate_nested() { # a project below the top level does not speak for it
   cp "$clone/Makefile" "$clone/sub/"
   g add sub
   g commit -q --no-verify -m sub
-  run env PROJECT_ROOT="$clone/sub" "$root/scripts/gate.sh"
+  gate PROJECT_ROOT="$clone/sub"
   [[ $rc == 0 && $out == "NOTE: make gate passed but did not record HEAD: the project is not the git top level, whose gate pre-push runs." &&
     ! -e $(rec) ]] && logged "$both"
 }
@@ -1834,7 +1931,7 @@ case_gate_worktree() { # a linked worktree's record is its own
   g worktree add -q --detach "$work/case/wt" >/dev/null 2>&1 # its post-checkout notice
   git -C "$work/case/wt" commit -q --no-verify --allow-empty -m three
   g reset -q --hard "$(git -C "$work/case/wt" rev-parse HEAD)"
-  run env PROJECT_ROOT="$work/case/wt" "$root/scripts/gate.sh"
+  gate PROJECT_ROOT="$work/case/wt"
   [[ $rc == 0 && $out == "make gate: recorded"* && -f $clone/.git/worktrees/wt/devkit-verified-head && ! -e $(rec) ]] || return 1
   : >"$HOOK_LOG"
   say git push -q origin main
@@ -1865,8 +1962,11 @@ t "pre-push ignores a deletion-only push" case_pre_push_deletion
 t "pre-push installed directly exits 0 on zero refs" case_pre_push_no_refs
 t "pre-push.devkit with zero refs runs the gate" case_pre_push_side_no_refs
 t "pre-push ignores ONLY and says so" case_pre_push_only
-t "gate.sh and pre-push define the JVM options screen, the settings.xml checks, ignored_mvn, ignored_pytest, pytest_skips, printable, pathspec_git, strictly_clean, clean_filters and the POM profile scan identically" case_jvm_screen_parity
-t "pre-push warns on variables, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
+t "gate.sh, pre-push, hooks.sh and the rendered hooks' preamble define the inherited-function removal, and gate.sh and pre-push the JVM options screen, the settings.xml checks, ignored_mvn, ignored_pytest, pytest_skips, printable, pathspec_git, strictly_clean, clean_filters and the POM profile scan identically" case_jvm_screen_parity
+t "make gate removes an inherited shell function, exported or from BASH_ENV, that hides an untracked file, and no stage sees one; it records nothing under BASH_ENV or a function that stays" case_gate_functions
+t "pre-push removes an inherited shell function, exported or from BASH_ENV, before it skips, before its own top-level lookup and before its stages, gates and warns under one that stays, fails closed (as pre-commit does) under one that stays and fails the top-level lookup, and still skips under an empty BASH_ENV" case_pre_push_functions
+t "make hooks renders complete hooks and make check-hooks compares them under an inherited sed" case_hooks_script_functions
+t "pre-push warns on variables, BASH_ENV, JVM options, a mavenrc, a settings.xml with properties, ~/.m2/extensions.xml and ignored .mvn/ files that can skip or deselect tests, and still gates" case_pre_push_environment
 t "pre-push warns on a settings.xml activeProfile it does not define and on ignored .mvn/ files, not on a directory at ~/.m2/extensions.xml" case_pre_push_home_files
 t "pre-push warns on POM profiles activated by an environment variable or an untracked file, in modules and parents too, and still gates" case_pre_push_poms
 t "pre-push warns on ignored files pytest reads, not on a venv's or a nested repository's, and still gates" case_pre_push_ignored_pytest
@@ -1905,7 +2005,7 @@ t "pre-push still gates after another commit, and on any not strictly clean tree
 t "make gate: a failing stage fails, records nothing and removes the old record" case_gate_failure
 t "make gate refuses ONLY, also on the make command line" case_gate_only
 t "make gate records nothing from a tree not strictly clean at the start" case_gate_dirty_start
-t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, PYTEST_PLUGINS, COVERAGE_RCFILE, COVERAGE_FORCE_CONFIG, PYTHONOPTIMIZE, a JVM option that skips or replaces the tests, a mavenrc, a settings.xml with properties or ~/.m2/extensions.xml" case_gate_environment
+t "make gate records nothing under MAVEN_ARGS, MAVEN_BASEDIR, PYTEST_ADDOPTS, PYTEST_PLUGINS, COVERAGE_RCFILE, COVERAGE_FORCE_CONFIG, PYTHONOPTIMIZE, BASH_ENV, a JVM option that skips or replaces the tests, a mavenrc, a settings.xml with properties or ~/.m2/extensions.xml" case_gate_environment
 t "make gate records nothing for a settings.xml activeProfile it does not define, but does for a directory at ~/.m2/extensions.xml" case_gate_home_files
 t "make gate records nothing while git ignores a .mvn/ file Maven reads, but does under .mvn/wrapper/ and for a committed one" case_gate_ignored_mvn
 t "make gate records nothing for an ignored .mvn/ file that appeared during the run" case_gate_ignored_mvn_during

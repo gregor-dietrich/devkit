@@ -24,10 +24,19 @@
 #   - no POM profile has an <activation> on an environment variable or a file,
 #     and no POM is one git ignores, that could differ from a fresh checkout of
 #     HEAD;
-#   - no environment variable, mavenrc file, user-level core extensions file or
-#     settings.xml profile property that can skip or deselect tests or skew
-#     coverage is set.
+#   - no environment variable (BASH_ENV among them), mavenrc file, user-level
+#     core extensions file or settings.xml profile property that can skip or
+#     deselect tests or skew coverage is set;
+#   - every shell function it inherited could be removed (it removes them
+#     first).
 # Recording never changes the exit status: it is the stages'. bash 3.2 (macOS).
+# Inherited shell functions go first: an exported BASH_FUNC_<name>%% or a
+# function BASH_ENV defined can replace git in the screens, and an exported one
+# any command in the stages, whose bash imports it again. What BASH_ENV did
+# besides is beyond reach, so BASH_ENV refuses the record below. Duplicated in
+# scripts/hooks/pre-push.sh and scripts/hooks.sh (its own and the hooks').
+while IFS= read -r fn; do unset -f -- "${fn#declare -f* }" 2> /dev/null; done < <(declare -F)
+leftover=$(declare -F)
 set -uo pipefail
 shopt -u nocasematch # an exported BASHOPTS can fold every case and [[ == ]] match
 
@@ -831,6 +840,10 @@ fi
 [[ -z "${COVERAGE_RCFILE-}" ]] || why "COVERAGE_RCFILE is set (it can skew coverage)"
 [[ -z "${COVERAGE_FORCE_CONFIG-}" ]] || why "COVERAGE_FORCE_CONFIG is set (it can skew coverage)"
 [[ -z "${PYTHONOPTIMIZE-}" ]] || why "PYTHONOPTIMIZE is set (it can strip asserts)"
+# bash expands and sources BASH_ENV before every recipe and stage script, and it
+# ran here too.
+[[ -z "${BASH_ENV-}" ]] || why "BASH_ENV is set (bash sources it in every recipe, where a function it defines can replace a command the tests run)"
+[[ -z "$leftover" ]] || why "an inherited shell function could not be removed (it can replace a command the screens or the tests run)"
 # Maven's launcher sources these shell files unless MAVEN_SKIP_RC is non-empty,
 # and a settings.xml profile's <properties> can set skipTests like a -D.
 if [[ -z "${MAVEN_SKIP_RC-}" ]]; then

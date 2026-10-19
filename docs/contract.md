@@ -230,7 +230,10 @@ include .devkit/make/python-uv.mk
   replaced; a project that needs another shell sets it directly after the
   includes, before any `$(shell ...)` it affects, or on the command line. A
   sub-make whose `Makefile` does not include `common.mk` keeps `/bin/sh`.
-  `.SHELLFLAGS` stays make's default.
+  `.SHELLFLAGS` stays make's default. `make gate` and every installed git
+  hook remove every shell function they inherit before they run anything, so
+  an exported one reaches none of the recipes they run (see
+  [Git hooks](#git-hooks)).
 - Targets: `common.mk` owns `help`, `check`, `check-devkit`, `check-hooks`,
   `hooks`, `gate`, `lint-repo`, `lint-devkitw`, `lint-pins`, `lint-decisions`,
   `lint-secrets`, `lint-md`, `format-md`, `branch`, `rebase`, `tag`,
@@ -565,8 +568,8 @@ one is missing or stale. A hook it did not write is never overwritten.
   parent's gate configurations are read from), `MAVEN_DEBUG_OPTS` (any
   value counts: it is for mvnDebug's debugger, and the launcher hands it
   to java), `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`,
-  `COVERAGE_RCFILE`, `COVERAGE_FORCE_CONFIG`, a JVM option that can skip
-  tests (see below) in `MAVEN_OPTS`,
+  `COVERAGE_RCFILE`, `COVERAGE_FORCE_CONFIG`, `BASH_ENV`, a JVM option that
+  can skip tests (see below) in `MAVEN_OPTS`,
   `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`,
   `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs
   (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`, unless
@@ -704,6 +707,22 @@ one is missing or stale. A hook it did not write is never overwritten.
   `GIT_*_PATHSPECS` variables for the git calls that rely on pathspec magic, and
   an exported `BASHOPTS=nocasematch` does not fold their matches.
 
+- `make gate` and every installed hook remove every shell function they
+  inherit before they run anything: one exported into the environment
+  (`export -f`, which bash passes on as a `BASH_FUNC_<name>%%` variable that
+  every bash it starts imports) and one `$BASH_ENV` defined. No function then
+  replaces git or another command in their screens, nor, since none is
+  exported any more, a command in a recipe they run: a recipe that calls an
+  exported function fails under `make gate`, `pre-commit` and `pre-push` where
+  a plain `make` finds it. Every installed hook asks git for the top level
+  past any function (`command git`), so no function can let `pre-push` pass
+  without a gate. `$BASH_ENV` itself still applies to every recipe, and it ran before
+  the removal, so `make gate` records nothing while it is set (any value
+  counts: bash expands it before sourcing it) and `pre-push` warns on it when
+  it runs its gate; a function that cannot be removed (a `readonly -f` one)
+  counts the same way, and `pre-push` then runs its gate on a recorded HEAD
+  too.
+
 - `make gate` runs the push gate, `make lint-repo test` with `MAKEFLAGS`,
   `MFLAGS`, `GNUMAKEFLAGS`, `MAKELEVEL` and `MAKEFILES` cleared, so an outer
   `make -i`, `-k`, `-n` or `-o` cannot reach a stage (a command-line
@@ -745,7 +764,7 @@ one is missing or stale. A hook it did not write is never overwritten.
   ref backend is not reftable, and none of `MAVEN_ARGS`, `MAVEN_BASEDIR`,
   `MAVEN_DEBUG_OPTS` (any value counts), `PYTEST_ADDOPTS`,
   `PYTEST_PLUGINS`, `PYTHONOPTIMIZE`, `COVERAGE_RCFILE`,
-  `COVERAGE_FORCE_CONFIG`, a JVM option `pre-push` warns on above in
+  `COVERAGE_FORCE_CONFIG`, `BASH_ENV`, a JVM option `pre-push` warns on above in
   `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`,
   `OPENJ9_JAVA_OPTIONS` or `IBM_JAVA_OPTIONS`, a mavenrc file Maven runs
   (`/usr/local/etc/mavenrc`, `/etc/mavenrc` or `~/.mavenrc`, unless
@@ -753,12 +772,13 @@ one is missing or stale. A hook it did not write is never overwritten.
   properties or activates a profile it does not define, or a regular file
   `~/.m2/extensions.xml`, is present, git ignores none of `.mvn/maven.config`,
   `.mvn/extensions.xml` and `.mvn/jvm.config`, none of the pytest files above is
-  one git ignores, and no POM in scope depends on ambient state, as above (all
+  one git ignores, no POM in scope depends on ambient state, as above (all
   three checked at the start and again at the end of the run, as the tree state
-  is). Recording never changes the exit status, and a passing run that records
-  nothing says why. `pre-push` skips its gate only while HEAD equals the record,
-  the tree is still strictly clean (read as above) and no clean filter or
-  `ident` attribute applies to a tracked file.
+  is), and it removed every shell function it inherited. Recording never
+  changes the exit status, and a passing run that records nothing says why.
+  `pre-push` skips its gate only while HEAD equals the record, it removed
+  every shell function it inherited, the tree is still strictly clean (read as
+  above) and no clean filter or `ident` attribute applies to a tracked file.
 - `check-hooks` never fails and is silent with `CI=true`. Every worktree of
   a clone shares one hooks directory, so worktrees pinned to different
   devkit versions report each other's copies as stale.

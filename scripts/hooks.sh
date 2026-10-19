@@ -25,6 +25,9 @@
 #
 # A hook devkit did not write (no stamp line) is never overwritten.
 
+# Inherited shell functions go first, as in scripts/gate.sh: a broken sed or cat
+# would render a wrong hook, and status would compare under the same one.
+while IFS= read -r fn; do unset -f -- "${fn#declare -f* }" 2> /dev/null; done < <(declare -F)
 set -euo pipefail
 
 cd "$PROJECT_ROOT"
@@ -51,10 +54,15 @@ parts() {
 render() {
     local part text tail=' || true'
     [[ $1 != pre-commit && $1 != pre-push ]] || tail=' || exit $?'
+    # The function removal comes first, as in scripts/gate.sh: an inherited git
+    # could end the hook below without a gate. The lookup uses `command git`, so
+    # a function the removal could not remove (a readonly one) cannot end the
+    # hook either; the part then fails closed on it.
     # shellcheck disable=SC2016 # the hook expands these, not this script
     printf '%s\n' '#!/bin/bash' "$stamp" \
         "# Self-contained copy written by 'make hooks'; 'make check' says when it is stale." \
-        'root="$(git rev-parse --show-toplevel 2> /dev/null)" || exit 0' \
+        'while IFS= read -r fn; do unset -f -- "${fn#declare -f* }" 2> /dev/null; done < <(declare -F)' \
+        'root="$(command git rev-parse --show-toplevel 2> /dev/null)" || exit 0' \
         '[[ -f "$root/devkit.toml" && -f "$root/Makefile" ]] || exit 0'
     for part in $(parts "$1"); do
         text=$(sed '1{/^#!/d;}' "$DEVKIT/scripts/hooks/$part") || return 1

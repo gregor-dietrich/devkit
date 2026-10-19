@@ -406,6 +406,18 @@ included: a `safe.directory` supplied only that way is lost to them, and a
 stage such as `lint-secrets` can fail on dubious ownership under `make gate`
 where `make lint-repo` passes. Set it in the global or system git config.
 
+`make gate` and every git hook now remove every shell function they inherit
+before they run anything, so an exported function (`export -f`, or a
+distribution's profile script) no longer replaces git in their screens or a
+command in a recipe they run. A recipe that calls an exported function fails
+under `make gate`, `pre-commit` and `pre-push` where `make test` still finds
+it: source the file that defines it in the recipe, or put a command on `PATH`.
+`make gate` also no longer records HEAD while `BASH_ENV` is set, since bash
+sources it in every recipe: `env -u BASH_ENV make gate` records. Once
+`make hooks` (above) has run, the hooks remove the functions too, and
+`pre-push` warns on `BASH_ENV` and runs its gate under a function it could not
+remove.
+
 The parent now manages `com.github.spotbugs:spotbugs-annotations` at the
 SpotBugs version it runs (`spotbugs.version`), in scope `provided`. A
 consumer that depends on it drops the `<version>` (and any property behind

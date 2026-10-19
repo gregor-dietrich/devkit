@@ -7,21 +7,29 @@
 # It gates the work tree at HEAD, not the commits git names on stdin: it says
 # so when a pushed commit is not HEAD, or when the tree is dirty. It skips the
 # gate for a HEAD that `make gate` passed (scripts/gate.sh recorded it) while
-# the tree is still strictly clean and no clean filter applies to a tracked
-# file.
+# the tree is still strictly clean, no clean filter applies to a tracked file
+# and every shell function it inherited was removed.
 #
-# It never narrows the gate: it unsets ONLY and clears the outer make's flags,
-# as `make gate` does. It warns, but does not refuse, on the variables and files
-# (an ignored .mvn/ file Maven reads or file pytest reads, a POM profile
-# activated by an environment variable or a file and an ignored POM among them)
-# `make gate` will not record under, since those are often set on purpose. That
-# list is duplicated in scripts/gate.sh.
+# It never narrows the gate: it removes every shell function it inherits, unsets
+# ONLY and clears the outer make's flags, as `make gate` does. It warns, but
+# does not refuse, on the variables, files and functions (BASH_ENV, a function
+# it could not remove, an ignored .mvn/ file Maven reads or file pytest reads, a
+# POM profile activated by an environment variable or a file and an ignored POM
+# among them) `make gate` will not record under, since those are often set on
+# purpose. That list is duplicated in scripts/gate.sh.
 #
 # git sends the ref lines on one stdin, which an up-to-date push leaves empty.
 # Installed as `pre-push` itself, zero lines therefore means nothing to push.
 # Under any other name (pre-push.devkit called from someone else's hook, or
 # pre-push.legacy/.old run by a hook manager) that hook may have read stdin
 # first, so zero lines runs the gate. bash 3.2 (macOS): no mapfile.
+
+# Inherited shell functions go first, as in scripts/gate.sh (which says why).
+# The rendered preamble has already removed them, so in a hook this loop finds
+# only the ones that stay and leftover lists them; it is kept identical to
+# gate.sh's.
+while IFS= read -r fn; do unset -f -- "${fn#declare -f* }" 2> /dev/null; done < <(declare -F)
+leftover=$(declare -F)
 
 shopt -u nocasematch # an exported BASHOPTS can fold every case and [[ == ]] match
 
@@ -756,7 +764,8 @@ fi
 verified="$(git rev-parse --git-path devkit-verified-head)"
 recorded=""
 [[ ! -f "$verified" ]] || read -r recorded < "$verified" || true
-if [[ -n "$head" && "$recorded" == "$head" ]] && clean_filters && [[ -z "$clean_filtered" ]] && strictly_clean; then
+# A function the removal left can steer the screens, so it never skips.
+if [[ -z "$leftover" && -n "$head" && "$recorded" == "$head" ]] && clean_filters && [[ -z "$clean_filtered" ]] && strictly_clean; then
     echo "pre-push: HEAD ${head:0:12} passed 'make gate' on this clean tree; skipping the gate"
     exit 0
 fi
@@ -805,6 +814,9 @@ fi
 [[ -z "${COVERAGE_RCFILE-}" ]] || echo "WARNING: COVERAGE_RCFILE is set (it can skew coverage)."
 [[ -z "${COVERAGE_FORCE_CONFIG-}" ]] || echo "WARNING: COVERAGE_FORCE_CONFIG is set (it can skew coverage)."
 [[ -z "${PYTHONOPTIMIZE-}" ]] || echo "WARNING: PYTHONOPTIMIZE is set (it can strip asserts)."
+# As in gate.sh.
+[[ -z "${BASH_ENV-}" ]] || echo "WARNING: BASH_ENV is set (bash sources it in every recipe, where a function it defines can replace a command the tests run)."
+[[ -z "$leftover" ]] || echo "WARNING: an inherited shell function could not be removed (it can replace a command the screens or the tests run)."
 # Maven sources these unless MAVEN_SKIP_RC is non-empty; as in gate.sh.
 if [[ -z "${MAVEN_SKIP_RC-}" ]]; then
     for rcfile in /usr/local/etc/mavenrc /etc/mavenrc "${HOME-}/.mavenrc"; do
