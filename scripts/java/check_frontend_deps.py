@@ -30,8 +30,9 @@ FRONTEND_DIR: Path = REPO_ROOT / (sys.argv[1] if len(sys.argv) > 1 else ".")
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+")
 
 # Minimums accept stable releases only: a prerelease such as "3.4.16-rc.1" sorts below its release
-# and may lack the fix, but parse_version() would rank it at or above the minimum.
-STABLE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+# and may lack the fix, but parse_version() would rank it at or above the minimum. A validator:
+# .fullmatch, as a $ anchor also matches before a trailing newline.
+STABLE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 # Location of the core versions manifest inside vaadin-core-internal, newest layout first:
 # Vaadin 25.3 moved it from the jar root into META-INF/VAADIN/versions/.
@@ -97,7 +98,7 @@ def load_min_pins(toml_path: Path) -> Dict[str, str]:
         # An unquoted dotted name (chart.js = "1.2.3") parses as a TOML dotted key: a nested table.
         if isinstance(minimum, dict):
             raise ValueError(f'{pkg}.* in {table} is a table: quote package names that contain ".", "@" or "/".')
-        if not isinstance(minimum, str) or not STABLE.match(minimum):
+        if not isinstance(minimum, str) or not STABLE.fullmatch(minimum):
             raise ValueError(f"{pkg} = {json.dumps(minimum, default=str)} in {table} is not a stable x.y.z version.")
     return cast(Dict[str, str], pins_map)
 
@@ -127,7 +128,7 @@ def read_vaadin_version() -> str:
     """Return the frontend module's effective vaadin.version as Maven reports it."""
     pom = FRONTEND_DIR / "pom.xml"
     version = maven_evaluate("vaadin.version", "-f", str(pom))
-    if not STABLE.match(version):
+    if not STABLE.fullmatch(version):
         raise ValueError(f'Maven reports vaadin.version as "{version}" for {pom}, not an x.y.z version.')
     return version
 
@@ -294,7 +295,7 @@ def check_min_pins(
         if not json_versions:
             errors.append(f"{pkg} missing version in package.json (require >= {minimum}).")
         for found in sorted(json_versions):
-            if not STABLE.match(found) or parse_version(found) < parse_version(minimum):
+            if not STABLE.fullmatch(found) or parse_version(found) < parse_version(minimum):
                 errors.append(f"{pkg} is {found} in package.json (require stable >= {minimum}).")
 
         if pkg_lock is not None:
@@ -302,7 +303,7 @@ def check_min_pins(
             if not lock_versions:
                 errors.append(f"{pkg} missing version in package-lock.json (require >= {minimum}).")
             for found in sorted(lock_versions):
-                if not STABLE.match(found) or parse_version(found) < parse_version(minimum):
+                if not STABLE.fullmatch(found) or parse_version(found) < parse_version(minimum):
                     errors.append(f"{pkg} is {found} in package-lock.json (require stable >= {minimum}).")
     return errors
 

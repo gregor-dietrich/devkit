@@ -96,6 +96,10 @@ expect "an artifact to look up is sent to Central, which the refused proxy fails
   "Checking 1 version properties (1 artifacts)" "Error: org.example:lib" "Could not check (1):" "  lib.version (1.0)" \
   "could not check org.example:lib" "!Up to date: 1"
 
+project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example lib $'\n  ${lib.version}\n')</dependencies>"
+expect "a placeholder between line breaks is still the property's pin, not a hardcoded version" 0 \
+  "  lib.version (1.0)" "!org.example:lib (1.0)"
+
 project "$own<dependencies>$(dep org.example lib 1.0)</dependencies>"
 expect "a hardcoded version is its own edit site, named by its coordinate" 0 \
   "Could not check (1):" "  org.example:lib (1.0)"

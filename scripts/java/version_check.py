@@ -38,7 +38,6 @@ MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
 REQUEST_TIMEOUT = 15
 
 PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
-SINGLE_PLACEHOLDER = re.compile(r"^\$\{([^}]+)\}$")
 
 # Guard against a property cycle (${a} -> ${b} -> ${a}) while resolving placeholders.
 MAX_RESOLVE_DEPTH = 10
@@ -191,7 +190,7 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
                 notes.append(f"{raw_group}:{raw_artifact}:{raw_version}: unresolved property, skipped")
                 continue
 
-            match = SINGLE_PLACEHOLDER.match(raw_version)
+            match = PLACEHOLDER.fullmatch(raw_version)
             # A hardcoded version has no property to bump, so the coordinate itself is the edit site.
             name = match.group(1) if match else str(coordinate)
 

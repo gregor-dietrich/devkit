@@ -138,6 +138,12 @@ expect "package.json below the minimum fails" 1 "somepkg is 1.2.2 in package.jso
 project 1.2.3 1.2.2 "$pins"
 expect "package-lock.json below the minimum fails" 1 "somepkg is 1.2.2 in package-lock.json" \
   core_jar dev_jar
+project '1.2.3\n' 1.2.3 "$pins"
+expect "a package.json version with a trailing newline fails" 1 \
+  $'somepkg is 1.2.3\n in package.json' core_jar dev_jar
+project 1.2.3 '1.2.3\n' "$pins"
+expect "a package-lock.json version with a trailing newline fails" 1 \
+  $'somepkg is 1.2.3\n in package-lock.json' core_jar dev_jar
 project "" 1.2.3 "$pins"
 expect "a pinned package missing from package.json fails" 1 "somepkg missing version in package.json" \
   core_jar dev_jar
@@ -159,6 +165,8 @@ project 1.2.3 1.2.3 $'[frontend.min-pins]\nsomepkg = '
 expect "invalid TOML fails" 1 "is not valid TOML" core_jar dev_jar
 project 1.2.3 1.2.3 $'[frontend.min-pins]\nsomepkg = "1.2.3-rc.1"'
 expect "a minimum that is not x.y.z fails" 1 "is not a stable x.y.z" core_jar dev_jar
+project 1.2.3 1.2.3 $'[frontend.min-pins]\nsomepkg = "1.2.3\\n"'
+expect "a minimum with a trailing newline fails" 1 'somepkg = "1.2.3\n" in' core_jar dev_jar
 project 1.2.3 1.2.3 $'[frontend.min-pins]\nsomepkg = 1'
 expect "a minimum that is not a string fails" 1 "somepkg = 1 in [frontend.min-pins]" \
   core_jar dev_jar
