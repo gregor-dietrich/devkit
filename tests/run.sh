@@ -95,9 +95,12 @@
 #          break copies of the monolith
 #          (format, a shared and a project checkstyle rule, the project
 #          rule's suppression, coverage, an image digest, Markdown, a secret
-#          committed, staged or unstaged, a missing git object, a devkitw
-#          without its revision line) and expect lint or test to fail for
-#          that reason, and make format to
+#          committed, staged or unstaged, behind a -diff attribute, in a
+#          conflict resolution, a change a clean merge adds or behind a
+#          textconv driver, a missing git object, a devkitw without its
+#          revision line) and expect lint or test to fail for that reason
+#          (and the conflict resolution's fingerprint in .gitleaksignore to
+#          pass lint), and make format to
 #          fix the format break so that lint passes; expect check to fail
 #          without checkstyle-project.xml, on a FRONTEND_DIR that is neither
 #          one of MODULES nor . in a monolith (and to pass on . there,
@@ -129,9 +132,9 @@
 #          exclusions on the SpotBugs analyzer to equal the plugin pom's own.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
-#          JDK 25, python3, git >= 2.34 and ssh-keygen
-#          (OpenSSH 8.1 or later), to sign and verify the tag, curl, tar,
-#          sha256sum or shasum, node with npm and the network (Maven
+#          JDK 25, python3, git >= 2.36 (SSH signing; lint-secrets' remerge)
+#          and ssh-keygen (OpenSSH 8.1 or later), to sign and verify the tag,
+#          curl, tar, sha256sum or shasum, node with npm and the network (Maven
 #          Central, Eclipse P2, github.com, the npm registry);
 #          ~/.m2 is used as is, and never installed into; tampered_plugin
 #          copies the compiler plugin's jar from ~/.m2/repository, and the
@@ -175,12 +178,13 @@
 #          ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
 #          fails, and JUNIT_DIR=reports writes one report per member into the
-#          project. Needs git >= 2.34, make, ssh-keygen (OpenSSH 8.1 or
-#          later), python3 >= 3.11 with venv and pip, curl, tar, sha256sum or
-#          shasum and the network (PyPI, its advisory API, api.osv.dev,
-#          github.com, and uv's Python downloads when no CPython of the pin
-#          is installed), and node with npm for the copy-paste gate, which
-#          installs jscpd from the npm registry; the fixtures hold no
+#          project. Needs git >= 2.36 (SSH signing; lint-secrets' remerge),
+#          make, ssh-keygen (OpenSSH 8.1 or later), python3 >= 3.11 with venv
+#          and pip, curl, tar, sha256sum or shasum and the network (PyPI, its
+#          advisory API, api.osv.dev, github.com, and uv's Python downloads
+#          when no CPython of the pin is installed), and node with npm for
+#          the copy-paste gate, which installs jscpd from the npm registry;
+#          the fixtures hold no
 #          Markdown, so lint-md does not run markdownlint.
 set -euo pipefail
 if ((BASH_VERSINFO[0] < 4)); then
@@ -828,10 +832,18 @@ launcher_inputs() {
   done
 }
 
+conflicted() { # conflicted DIR BRANCH: merging BRANCH fails and leaves a merge to resolve
+  if git -C "$1" merge -q --no-edit "$2" >/dev/null || ! git -C "$1" rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    echo "merging $2 did not stop on a conflict"
+    return 1
+  fi
+}
+
 secret_negatives() { # each scan of the real gitleaks reads what it should
-  local leak append proj blob
+  local leak older append proj blob sha old
   # Built here, so this file holds no token; edited() leaves the change unstaged.
   leak="gh""p_$(printf '%s' {z..a} {9..0})"
+  older="gh""p_$(printf '%s' {Z..A} {9..0})" # another value, so another fingerprint (gitleaks skips {9..0}{a..z})
   append="\$s/\$/\\n# $leak/" # a last line holding it: s, since BSD sed has no one-line a
   negative secret lint "leaks found: 1" Makefile "$append"
   proj=$work/negative-secret-committed
@@ -845,6 +857,80 @@ secret_negatives() { # each scan of the real gitleaks reads what it should
   git -C "$proj" add Makefile
   check "java-monolith: a staged secret fails make lint" \
     make_says fail "$proj" lint "leaks found: 1" "Fingerprint: Makefile:github-pat:"
+  # A secret the history scan reads only through its log options (--text,
+  # --diff-merges=remerge, --no-textconv); each is in no commit's plain diff.
+  proj=$work/negative-secret-diff-attribute
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  printf 'token = %s\n' "$leak" >"$proj/secret.cfg"
+  git -C "$proj" add secret.cfg
+  git -C "$proj" commit -q -m leak
+  sha=$(git -C "$proj" rev-parse HEAD)
+  printf 'secret.cfg -diff\n' >"$proj/.gitattributes"
+  git -C "$proj" add .gitattributes
+  git -C "$proj" commit -q -m hide
+  check "java-monolith: a secret behind a -diff attribute fails make lint, found in history" \
+    make_says fail "$proj" lint "leaks found: 1" "Fingerprint: $sha:secret.cfg:github-pat:"
+  proj=$work/negative-secret-merge
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  # A secret older than the merge and its branch point: a scan that stopped at the merge's entry would miss it.
+  printf 'token = %s\n' "$older" >"$proj/old.cfg"
+  git -C "$proj" add old.cfg
+  git -C "$proj" commit -q -m older
+  old=$(git -C "$proj" rev-parse HEAD)
+  printf 'key = base\n' >"$proj/merge.cfg"
+  git -C "$proj" add merge.cfg
+  git -C "$proj" commit -q -m base
+  git -C "$proj" checkout -q -b side
+  printf 'key = side\n' >"$proj/merge.cfg"
+  git -C "$proj" commit -q -am side
+  git -C "$proj" checkout -q main # setup inits it
+  printf 'key = main\n' >"$proj/merge.cfg"
+  git -C "$proj" commit -q -am main
+  check "java-monolith: the merge conflicts, as meant" conflicted "$proj" side
+  printf 'key = %s\n' "$leak" >"$proj/merge.cfg"
+  git -C "$proj" add merge.cfg
+  git -C "$proj" commit -q --no-edit
+  sha=$(git -C "$proj" rev-parse HEAD)
+  # gitleaks' parser reads remerge's conflict header as the path b/merge.cfg.
+  check "java-monolith: a secret in a conflict resolution fails make lint, found in the merge and in the older commit" \
+    make_says fail "$proj" lint "leaks found: 2" \
+    "Fingerprint: $sha:b/merge.cfg:github-pat:" "Fingerprint: $old:old.cfg:github-pat:"
+  printf '%s:b/merge.cfg:github-pat:1\n' "$sha" >"$proj/.gitleaksignore"
+  git -C "$proj" add .gitleaksignore
+  git -C "$proj" commit -q -m ignore
+  check "java-monolith: ignoring only the conflict resolution's fingerprint still fails make lint on the older commit" \
+    make_says fail "$proj" lint "leaks found: 1" "Fingerprint: $old:old.cfg:github-pat:"
+  printf '%s:old.cfg:github-pat:1\n' "$old" >>"$proj/.gitleaksignore"
+  git -C "$proj" commit -q -am ignore-older
+  check "java-monolith: both printed fingerprints in .gitleaksignore pass make lint" \
+    make_says pass "$proj" lint
+  proj=$work/negative-secret-clean-merge
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  git -C "$proj" checkout -q -b side
+  printf 'key = side\n' >"$proj/side.cfg"
+  git -C "$proj" add side.cfg
+  git -C "$proj" commit -q -m side
+  git -C "$proj" checkout -q main
+  printf 'key = main\n' >"$proj/main.cfg"
+  git -C "$proj" add main.cfg
+  git -C "$proj" commit -q -m main
+  git -C "$proj" merge -q --no-commit --no-ff side >/dev/null
+  printf 'token = %s\n' "$leak" >>"$proj/side.cfg"
+  git -C "$proj" add side.cfg
+  git -C "$proj" commit -q --no-edit
+  check "java-monolith: a change a clean merge adds fails make lint, found in the merge" \
+    make_says fail "$proj" lint "leaks found: 1" \
+    "Fingerprint: $(git -C "$proj" rev-parse HEAD):side.cfg:github-pat:"
+  proj=$work/negative-secret-textconv
+  setup "$root/tests/fixtures/java-monolith" "$proj"
+  git -C "$proj" config diff.hide.textconv 'sed d' # this copy only
+  printf 'secret.cfg diff=hide\n' >"$proj/.gitattributes"
+  printf 'token = %s\n' "$leak" >"$proj/secret.cfg"
+  git -C "$proj" add .gitattributes secret.cfg
+  git -C "$proj" commit -q -m leak
+  check "java-monolith: a secret behind a textconv driver fails make lint, found in history" \
+    make_says fail "$proj" lint "leaks found: 1" \
+    "Fingerprint: $(git -C "$proj" rev-parse HEAD):secret.cfg:github-pat:"
   # gitleaks itself passes a history scan whose git log fails.
   proj=$work/negative-missing-object
   setup "$root/tests/fixtures/java-monolith" "$proj"
@@ -859,7 +945,9 @@ prepare() { # once per run: the temp dir and a clean environment
   work=$(mktemp -d) tag=v$(parent_version "$root") bare=$work/devkit.git
   trap 'uncache "$work"' EXIT
   clean_env
-  export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1
+  # No system or user git attributes either (a machine-wide merge=union would resolve the conflict test's merge).
+  mkdir "$work/xdg-config"
+  export XDG_CACHE_HOME=$work/cache GIT_CONFIG_NOSYSTEM=1 GIT_ATTR_NOSYSTEM=1 XDG_CONFIG_HOME=$work/xdg-config
   export GIT_AUTHOR_NAME=devkit GIT_AUTHOR_EMAIL=devkit@example.invalid
   export GIT_COMMITTER_NAME=devkit GIT_COMMITTER_EMAIL=devkit@example.invalid
 }

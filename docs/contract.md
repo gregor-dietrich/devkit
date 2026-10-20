@@ -456,42 +456,80 @@ changes instead.
   files. A shallow clone fails: CI checks out with full history. gitleaks
   reads the project's `.gitleaks.toml` and `.gitleaksignore`.
   - All three scans run, and the gate fails at the end if any failed. A
-    scan also fails when git fails or warns under it: gitleaks logs that
-    at level `ERR` with `[git]`, then exits 0 having scanned only part of
-    it, or none. A line-ending warning (`LF will be replaced by CRLF`) is
-    one: normalize the file's line endings, or commit it.
+    scan also fails when gitleaks logs git's stderr at level `ERR` with
+    `[git]`, then exits 0 having scanned part of it, or none; the few git
+    warnings it logs through its own warning path without `[git]` (rename
+    limit, automatic packing; from a reading of v8.30.1's sources) do not fail
+    it. A git that ends without writing to stderr, killed by a signal for one,
+    is not detected (#186), and the scan passes over the part it read. A
+    line-ending warning (`LF will be replaced by CRLF`) is one: normalize the
+    file's line endings, or commit it.
   - It stops with one `ERROR` line, before any scan, when `$PROJECT_ROOT`
     is not a git work tree, on a shallow clone, on a platform devkit pins
     no gitleaks build for (Linux and macOS, x86-64 and arm64 are pinned),
     when the download fails and when its sha256 differs from the pin.
     Before the first commit it skips the history scan.
-  - `GITLEAKS_CONFIG` and `GITLEAKS_CONFIG_TOML` are ignored. git runs
-    with `log.showRoot=true`, `color.ui=never`, `color.diff=never`,
-    `diff.noprefix=false` and `core.quotePath=true` over the user's and
-    the repository's configuration, which could otherwise hide the root
-    commit or every line from gitleaks; git before 2.31 ignores these
-    overrides. The rest of the configuration, `safe.directory` included,
-    applies.
+  - `GITLEAKS_CONFIG` and `GITLEAKS_CONFIG_TOML` are ignored. git runs with
+    `log.showRoot=true`, `color.ui=never`, `color.diff=never`,
+    `diff.noprefix=false` and `core.quotePath=true` over the user's and the
+    repository's configuration, which could otherwise hide the root commit or
+    every line from gitleaks; git before 2.31 ignores these overrides, which
+    matters only before the first commit. The rest of the configuration,
+    `safe.directory` included, applies.
   - It needs curl (7.52 or later, which added `--retry-connrefused`), tar,
-    and `sha256sum` or `shasum`; a failed download is
-    retried up to three times, none starting after 300 seconds (with curl
-    before 7.71 only a timeout, a refused connect or a transient HTTP
-    error, not a dropped connection); the binary lands, read-only, in
+    `sha256sum` or `shasum`, and git 2.36 or later for the history scan; a
+    failed download is retried up to three times, none starting after 300
+    seconds (with curl before 7.71 only a timeout, a refused connect or a
+    transient HTTP error, not a dropped connection); the binary lands,
+    read-only, in
     `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-<version>-<platform>/`.
-  - Limits: every scan reads git's diffs (`git log -p`, `git diff`), so
-    lines that only a merge commit introduces (a conflict resolution) are
-    not scanned, nor is any file git treats as binary, including one
-    `.gitattributes` marks `-diff` or `binary`. Untracked files are not
-    scanned until they are staged.
+  - The history scan runs `git log` with `--text` (a file `.gitattributes` marks
+    `-diff` or `binary` is read as text), `--diff-merges=remerge` (it reads what
+    a merge commit changes against git's own re-merge of its parents: a conflict
+    resolution, or a change a clean merge adds) and `--no-textconv` (a textconv
+    driver in any configuration does not rewrite what it reads); it needs git
+    2.36 or later, and older git fails it, as does a read-only
+    `.git/objects` once the history holds a merge (git writes the re-merge's
+    objects to a temporary directory there; a merge-free history needs no write
+    access). With gitleaks' default configuration a path its default allowlist
+    names is skipped whatever its content, binary-marked or not (8.30.1 skips
+    `*.png`, `*.pdf` and a path through `gitleaks.toml`, though not `*.zip`).
+    Limits: staged and unstaged changes are read as `git diff` shows them, so
+    a change to a file git treats as binary, or one a textconv driver
+    rewrites, is scanned only once committed; gitleaks may still skip content
+    it detects as binary (a NUL byte alone does not make it); untracked files
+    are not scanned until they are staged; an octopus merge's (three or more parents)
+    own lines are not read, as git skips it with a warning on stdout that the
+    gate does not see; commit messages are not scanned, only the changes (#187).
   - A finding is either a secret, which is removed and rotated, or a false
     positive. History keeps a committed secret: once it is rotated, or for a
-    false positive, copy the finding's `Fingerprint` from the gate's output
-    into `.gitleaksignore`, one per line. A history finding's is
-    `<commit>:<path>:<rule>:<line>`; a staged or unstaged one's has no
-    commit, `<path>:<rule>:<line>`. A fingerprint matches that one finding
-    only, and a rewritten commit no longer matches it, so the finding comes
-    back for triage. Prefer it to a path allowlist in `.gitleaks.toml`,
-    which applies to every commit in history as well.
+    false positive, copy the finding's `Fingerprint` from the gate's output into
+    `.gitleaksignore`, one per line. A history finding's is
+    `<commit>:<path>:<rule>:<line>`, except that the finding of a file that
+    conflicted in a merge carries `b/` before its path,
+    `<merge>:b/<path>:<rule>:<line>`, while any other change in a merge has the
+    usual form, with one exception (#189): once a line of the merge's re-merge
+    output contains the text `commit` (a conflicted path such as `commit.cfg`,
+    or a parent subject a modify/delete conflict message quotes), gitleaks
+    drops the commit from that finding and every later one in that merge's
+    diff, which print `b/<path>:<rule>:<line>`, or `<path>:<rule>:<line>` for a
+    file the merge adds after it; earlier findings keep the merge's form.
+    Record either exactly as printed. gitleaks matches path rules and
+    allowlist paths (`[allowlist]` and `[[allowlists]]` alike) in
+    `.gitleaks.toml` against that same `b/<path>`, so anchor a path pattern
+    with `^(b/)?`, e.g. `^(b/)?fixtures/`, not `^`; it also admits a real
+    top-level `b/fixtures/`, and `(^|/)` would widen it to any depth
+    (`(^|/)fixtures/` also suppresses `src/deep/fixtures/x`). A pattern that
+    needs a directory before the name (`.+/fixtures/`) also matches a
+    top-level conflicted file, and a real top-level `b/` directory makes the
+    prefix ambiguous: a conflicted `f` and a change to `b/f` in one merge print
+    the same fingerprint. A staged or unstaged finding's has no commit,
+    `<path>:<rule>:<line>`. A fingerprint with a commit matches that one
+    finding only, and a rewritten commit no longer matches it, so the finding
+    comes back for triage; one without a commit (the staged and unstaged form,
+    and #189's) matches that path, rule and line in every commit of history,
+    later ones included. Prefer a fingerprint with a commit to a path allowlist
+    in `.gitleaks.toml`, which applies to every commit in history as well.
 - `lint-md` checks every listed `*.md` file that is not a symlink with
   markdownlint, from the closure `markdown/package-lock.json` pins (that of
   markdownlint-cli, which brings the library), installed with

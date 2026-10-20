@@ -26,13 +26,14 @@ version=$(sed -n 's/^version=//p' "$root/scripts/secrets.sh")
 installed=$tools/gitleaks-$version-linux_x64
 
 # The release asset stand-in: a tarball with a gitleaks that logs its argv
+# (one bracketed field per argument, so a split or merged one shows)
 # and the config variables it sees, logs the git configuration values it would
 # run git with, prints $FAKE_GL_LOG to stderr when argv
 # holds $FAKE_GL_LOG_ON, and fails when argv holds $FAKE_GL_FAIL.
 mkdir "$work/asset"
 # shellcheck disable=SC2016 # expands when the fake runs
 printf '%s\n' '#!/bin/sh' \
-  'echo "gitleaks $* config=${GITLEAKS_CONFIG-unset} toml=${GITLEAKS_CONFIG_TOML-unset}" >>"$LOG"' \
+  'echo "gitleaks$(printf " [%s]" "$@") config=${GITLEAKS_CONFIG-unset} toml=${GITLEAKS_CONFIG_TOML-unset}" >>"$LOG"' \
   'c() { git config --get "$1" || echo unset; }' \
   'echo "gitcfg $(c log.showRoot) $(c color.ui) $(c color.diff) $(c diff.noprefix) $(c core.quotePath) $(c user.name)" >>"$LOG"' \
   'case " $* " in *" ${FAKE_GL_LOG_ON:-none} "*) printf "%s\n" "$FAKE_GL_LOG" >&2 ;; esac' \
@@ -110,10 +111,10 @@ t() { # t NAME COMMAND...: report whether COMMAND succeeds
 logged() { grep -q "^$1" "$LOG"; } # logged PREFIX: a log line starts with PREFIX
 nothing_cached() { ! compgen -G "$tools/gitleaks-*" >/dev/null && ! compgen -G "$tools/.tmp.*" >/dev/null; }
 one_error() { [[ $rc == 1 && $err == "ERROR: lint-secrets: "*"$1"* && $err != *$'\n'* ]]; }
-scans=("git . --log-opts=HEAD" "git . --staged" "git . --pre-commit")
+scans=("git . --log-opts=HEAD --text --diff-merges=remerge --no-textconv" "git . --staged" "git . --pre-commit")
 scanned() { # scanned SCAN...: the fake gitleaks ran exactly these, in order
   local want=() scan
-  for scan in "$@"; do want+=("gitleaks $scan --redact --no-banner --verbose config=unset toml=unset"); done
+  for scan in "$@"; do want+=("gitleaks [git] [.] [${scan#git . }] [--redact] [--no-banner] [--verbose] config=unset toml=unset"); done
   [[ $(grep '^gitleaks ' "$LOG" || :) == "$(printf '%s\n' "${want[@]}")" ]]
 }
 
@@ -174,13 +175,13 @@ case_unsupported() {
 }
 case_three_scans() {
   run
-  [[ $rc == 0 && -z $err ]] && scanned "${scans[@]}" && ! grep -q '^gitleaks dir' "$LOG"
+  [[ $rc == 0 && -z $err ]] && scanned "${scans[@]}" && ! grep -q '^gitleaks \[dir\]' "$LOG"
 }
 # gl_log LEVEL MESSAGE: a gitleaks log line, coloured as gitleaks 8.30.1 writes it
 gl_log() { printf '\e[90m11:57PM\e[0m \e[31m%s\e[0m \e[1m%s\e[0m' "$1" "$2"; }
 case_git_error() { # gitleaks exits 0 when git fails under it; the gate does not
   local scan
-  for scan in --log-opts=HEAD --staged --pre-commit; do
+  for scan in "${scans[@]#git . }"; do
     FAKE_GL_LOG_ON=$scan FAKE_GL_LOG=$(gl_log ERR '[git] fatal: unable to read 0123abcd') run
     [[ $rc == 1 && $out == *"[git] fatal: unable to read 0123abcd"* ]] &&
       [[ $err == "ERROR: lint-secrets: git failed under gitleaks git $scan "*$'\n'"ERROR: lint-secrets: gitleaks failed"* ]] &&
@@ -205,7 +206,7 @@ case_git_config() { # the overrides beat the repository's config; the caller's s
 }
 case_scan_fails() { # the other two still run, and the gate fails at the end
   local scan
-  for scan in --log-opts=HEAD --staged --pre-commit; do
+  for scan in "${scans[@]#git . }"; do
     FAKE_GL_FAIL=$scan run
     one_error "rotate it; history keeps a committed one" && [[ $err == *.gitleaksignore* ]] &&
       scanned "${scans[@]}" || return 1

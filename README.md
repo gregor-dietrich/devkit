@@ -104,12 +104,12 @@ checks (`make lint`, not `make check`, fails on a committed `devkitw` older
 than the pin's); every target that runs Maven fails while the root pom does
 not inherit the parent as the contract requires. `make lint` runs the
 [repository gates](docs/contract.md#repository-gates) first, over the
-whole repository, then the language gates. Requirements: git, GNU make,
-ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3 (3.11 or
-later); fetching a devkit release on a cache miss also needs the running UID to
-have a passwd entry, which ssh-keygen requires (a container run with an
-arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or later
-in `.python-version`, needs `sha256sum` or `shasum`, and, for the first
+whole repository, then the language gates. Requirements: git (2.36 or later),
+GNU make, ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3
+(3.11 or later); fetching a devkit release on a cache miss also needs the
+running UID to have a passwd entry, which ssh-keygen requires (a container run
+with an arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or
+later in `.python-version`, needs `sha256sum` or `shasum`, and, for the first
 `make install` of each uv `uv.lock` pins, python3's venv and pip and the
 index pip is configured for (PyPI by default). `make lint` also needs node
 (22.22.2 or later) with npm, for markdownlint and a uv project's copy-paste
@@ -475,6 +475,25 @@ fails the build loudly. The parent's system property outranks
 `application.properties`, so a project that relies on quarkus-jacoco's own
 report sets `quarkus.jacoco.report` to `true` in its own
 `<systemPropertyVariables>`.
+
+`lint-secrets` now reads the whole history of files `.gitattributes` marks
+`-diff` or `binary` (their text content; a path gitleaks' default allowlist
+names, such as `*.png`, is still skipped, and gitleaks may still skip content
+it detects as binary) and what merge commits change against git's re-merge
+(not octopus merges), ignores textconv drivers in that history scan, and
+needs git 2.36 or later. Developer machines (the `pre-commit` and `pre-push`
+hooks run `lint-secrets` through `make lint-repo`) and CI images (Ubuntu 22.04
+ships git 2.34.1) with an older git fail it with
+`ERR [git] fatal: unknown value for --diff-merges: remerge`. Once the history
+holds a merge, the scan also needs write access to `.git/objects`: git writes
+the re-merge's objects there, and a read-only object store fails the gate with
+`ERR [git]`. Run [`make lint-secrets`](docs/contract.md#repository-gates)
+after the bump and triage new findings as before, recording the fingerprint
+exactly as printed: a file that conflicted in a merge carries `b/` before its
+path, which a path pattern in `.gitleaks.toml` also sees, and some merge
+findings print no commit (the contract lists when, #189). Re-anchor existing
+`^`-anchored path patterns there, allowlist `paths` and rule `path`s alike, to
+`^(b/)?`.
 
 ### Upgrading from v0.6.x
 
