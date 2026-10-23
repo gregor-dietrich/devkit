@@ -8,7 +8,7 @@ dependencies = []
 package = false
 
 [dependency-groups]
-dev = ["ruff", "pytest", "pytest-cov", "vulture", "pip-audit", "uv"]
+dev = ["ruff", "pytest", "pytest-cov", "vulture", "pip-audit", "uv==0.12.23"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

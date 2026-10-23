@@ -13,7 +13,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 . "$root/scripts/lib/sha256.sh"
 work=$(mktemp -d)
 trap 'uncache "$work"' EXIT
-proj=$work/proj pin=0.12.10+devkit.test
+proj=$work/proj pin=0.12.23+devkit.test
 mkdir "$proj"
 hash=$(printf '1%.0s' {1..64}) other_hash=$(printf '2%.0s' {1..64})
 lock() { # lock [HASH]: proj/uv.lock, whose uv wheel lists HASH (none when empty)
@@ -226,7 +226,8 @@ case_abi_keys_copy() { # machines differing only in libc or pointer width keep a
   local first=$rc
   run "$work/python" -- UV_BOOTSTRAP=true FAKE_ABI=musl64
   [[ $first == 0 && $rc == 0 && $out == *$'\n'"$(cached_uv "$hash" musl64)" ]] &&
-    [[ $(find "$(tools_of)" -mindepth 1 -maxdepth 1 | wc -l) == 2 && -x $(cached_uv "$hash" glibc64) && -x $(cached_uv "$hash" musl64) ]]
+    (($(find "$(tools_of)" -mindepth 1 -maxdepth 1 | wc -l) == 2)) && # arithmetic: BSD wc pads the count
+    [[ -x $(cached_uv "$hash" glibc64) && -x $(cached_uv "$hash" musl64) ]]
 }
 case_abi_unusable() {
   run "$work/python" -- UV_BOOTSTRAP=true FAKE_ABI=../x
@@ -269,6 +270,13 @@ case_lock_without_hash() {
   lock "$hash"
   failed_saying "no sha256 hash" && [[ ! -e $work/pc/ran ]]
 }
+case_lock_below_floor() { # fails before pip is ever run
+  rm -f "$work/pip-args"
+  pin=0.12.22 lock "$hash"
+  run "$work/python" -- UV_BOOTSTRAP=true
+  pin=0.12.23+devkit.test lock "$hash"
+  failed_saying "uv.lock pins uv 0.12.22, below devkit's minimum 0.12.23" && [[ ! -e $work/pip-args && ! -e $(tools_of) ]]
+}
 
 t "1 the cached uv at the pin is chosen" case_cache_hit
 t "2 a cached uv reporting build info after the pin is chosen" case_cache_hit_build_info
@@ -295,5 +303,6 @@ t "22 a failed copy of the installed uv fails and caches nothing" case_bootstrap
 t "23 a staged uv that is not the pin is never sealed" case_bootstrap_stage_not_pin
 t "24 python3s differing in libc or pointer width keep their own copies" case_abi_keys_copy
 t "25 an unusable platform part fails before anything is installed" case_abi_unusable
+t "26 a lock whose uv is below the minimum fails before pip runs" case_lock_below_floor
 
 [[ $fails == 0 ]]

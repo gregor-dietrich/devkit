@@ -14,7 +14,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "uv" },
+    { name = "uv", specifier = "==0.12.23" },
     { name = "vulture" },
 ]
 

@@ -63,7 +63,8 @@ file='file = "src/flagged.py"'
 fn='function = "plain"'
 why='reason = "the caller strips the newline"'
 version=$(python3 -c 'import platform; print(platform.python_version())')
-exe=$(python3 -c 'import sys; print(sys.executable)')
+# The driver's flags: -S moves sys.executable on some builds (Homebrew's, to bin/python3).
+exe=$(python3 -I -S -c 'import sys; print(sys.executable)')
 excl='[[python.anchored-match.excluded]]'
 remedy="fix the file so that the Python .python-version pins parses it, or exclude it with an $excl entry in devkit.toml (file and a reason)"
 

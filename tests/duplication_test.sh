@@ -46,7 +46,8 @@ chmod +x "$work/silent" "$work/broken" "$work/reports" "$work/hangs"
 config() { printf '%s\n' "$@" >"$proj/devkit.toml"; } # config LINE...: devkit.toml holds the LINEs
 
 # expect LABEL WANT-STATUS ARG... -- WANT-TEXT...: $driver ARGs end with
-# WANT-STATUS, saying every WANT-TEXT, and no Python traceback.
+# WANT-STATUS, saying every WANT-TEXT (one starting with ! must be absent), and
+# no Python traceback.
 driver=(python3 "$root/scripts/python/duplication.py")
 expect() {
   local label=$1 want=$2 args=() out rc=0 text ok=true
@@ -54,7 +55,9 @@ expect() {
   while [[ $1 != -- ]]; do args+=("$1") && shift; done
   shift
   out=$(cd "$work" && "${driver[@]}" "${args[@]}" 2>&1) || rc=$?
-  for text in "$@"; do [[ $out == *"$text"* ]] || ok=false; done
+  for text in "$@"; do
+    if [[ $text == '!'* ]]; then [[ $out != *"${text:1}"* ]] || ok=false; else [[ $out == *"$text"* ]] || ok=false; fi
+  done
   if [[ $rc == "$want" && $ok == true && $out != *Traceback* ]]; then
     echo "PASS $label"
   else
@@ -68,6 +71,7 @@ table='[python.duplication]'
 paths='paths = ["src"]'
 entry='[[python.duplication.accepted]]'
 ab='files = ["src/b.py", "src/a.py"]'
+cap='max-tokens = 100' # the configuration cases never measure
 
 # Configuration.
 config '[devkit]' 'version = "v0.0.0"'
@@ -93,7 +97,7 @@ config "$table" "$paths" 'ignore = ["**/{a,b}.py"]'
 expect "an ignore glob with a comma fails" 1 check-config -- "holds a comma, which jscpd splits on"
 config "$table" "$paths" 'min_tokens = 10'
 expect "an unknown key fails" 1 check-config -- "sets unknown key(s) min_tokens"
-config "$table" "$paths" "$entry" 'files = ["src/a.py"]' 'reason = "deliberate"'
+config "$table" "$paths" "$entry" 'files = ["src/a.py"]' "$cap" 'reason = "deliberate"'
 expect "an accepted entry with one file fails" 1 check-config -- \
   "[[python.duplication.accepted]] in devkit.toml entry 1 needs files"
 config "$table" "$paths" "$entry" "$ab"
@@ -103,10 +107,22 @@ config "$table" "$paths" "$entry" "$ab" 'reason = " "'
 expect "an accepted entry with a blank reason fails" 1 check-config -- "entry 1 (src/a.py  ~  src/b.py) needs a reason"
 config "$table" "$paths" "$entry" "$ab" 'reason = "one"' "$entry" 'files = ["src/a.py", "src/b.py"]' 'reason = "two"'
 expect "a pair accepted twice, in either order, fails" 1 check-config -- "accepts src/a.py  ~  src/b.py twice"
-config "$table" "$paths" "$entry" "$ab" 'reason = "deliberate"' 'reasons = "typo"'
+config "$table" "$paths" "$entry" "$ab" "$cap" 'reason = "deliberate"' 'reasons = "typo"'
 expect "an unknown key in an accepted entry fails" 1 check-config -- \
-  "entry 1 sets unknown key(s) reasons; it reads only files and reason."
-config "$table" 'paths = ["src", "src/c.py"]' "$entry" "$ab" 'reason = "deliberate"'
+  "entry 1 sets unknown key(s) reasons; it reads only files, max-tokens and reason."
+for bad in 0 -1 1.5 '"100"' true; do
+  config "$table" "$paths" "$entry" "$ab" "max-tokens = $bad" 'reason = "deliberate"'
+  expect "max-tokens $bad fails" 1 check-config -- \
+    "entry 1 (src/a.py  ~  src/b.py): max-tokens must be a positive integer, not"
+done
+config "$table" "$paths" "$entry" "$ab" "$cap" 'reason = "deliberate"' "$entry" 'files = ["src/a.py", "src/c.py"]' 'reason = "deliberate"'
+expect "a later entry without max-tokens is numbered, the valid one not named" 1 check-config -- \
+  "entry 2 (src/a.py  ~  src/c.py) sets no max-tokens" "!entry 1"
+config "$table" "$paths" "$entry" "$ab" 'reason = "deliberate"'
+expect "an accepted entry without max-tokens fails check-config" 1 check-config -- \
+  "ERROR: [[python.duplication.accepted]] in devkit.toml entry 1 (src/a.py  ~  src/b.py) sets no max-tokens;" \
+  "To fix: add max-tokens = <that figure>"
+config "$table" 'paths = ["src", "src/c.py"]' "$entry" "$ab" "$cap" 'reason = "deliberate"'
 expect "a valid table passes check-config" 0 check-config -- \
   "[python.duplication]: jscpd scans the 3 Python file(s) git lists under src, src/c.py."
 PYTHONSAFEPATH=1 expect "check-config finds project_files under PYTHONSAFEPATH=1" 0 check-config -- \
@@ -131,18 +147,44 @@ config "$table" "$paths"
 expect "a clone fails naming its pair and lines" 1 run "$jscpd" -- \
   "ERROR: duplicated code not accepted in devkit.toml: src/a.py  ~  src/b.py" "    src/a.py:" \
   "To fix: extract the shared code, or accept the pair"
+# The figure jscpd measures for the control pair, read off the failure of a ceiling of 1.
+config "$table" "$paths" "$entry" "$ab" 'max-tokens = 1' 'reason = "deliberate"'
+rc=0
+out=$(cd "$work" && "${driver[@]}" run "$jscpd" 2>&1) || rc=$?
+tokens=$(sed -n 's/.*grew past max-tokens.* measures \([0-9][0-9]*\) tokens.*/\1/p' <<<"$out")
+if [[ $rc != 1 || ! $tokens =~ ^[0-9]+$ || $tokens -lt 50 ]]; then # jscpd reports no clone below its default min-tokens
+  echo "FAIL measuring the control pair: exit $rc, got '$tokens' in:"
+  printf '%s\n' "$out"
+  exit 1
+fi
+fit="max-tokens = $tokens"
+config "$table" "$paths" "$entry" "$ab" "$fit" 'reason = "deliberate"'
+expect "the clone accepted at its max-tokens passes, with no note" 0 run "$jscpd" -- \
+  "jscpd: no duplicated code beyond the 1 accepted file pair(s)." "!NOTE:"
+config "$table" "$paths" "$entry" "$ab" "max-tokens = $((tokens - 1))" 'reason = "deliberate"'
+expect "a pair over its max-tokens fails naming the figure" 1 run "$jscpd" -- \
+  "ERROR: duplicated code grew past max-tokens in devkit.toml: src/a.py  ~  src/b.py measures $tokens tokens, over its max-tokens of $((tokens - 1))" \
+  "    src/a.py:" "To fix: extract the grown duplication, or raise max-tokens and revise the reason"
+config "$table" "$paths" "$entry" "$ab" "max-tokens = $((tokens + 1))" 'reason = "deliberate"'
+expect "a pair below its max-tokens passes with a note" 0 run "$jscpd" -- \
+  "NOTE: src/a.py  ~  src/b.py measures $tokens tokens, below its max-tokens of $((tokens + 1)); lower max-tokens to $tokens." \
+  "jscpd: no duplicated code beyond the 1 accepted file pair(s)."
 config "$table" "$paths" "$entry" "$ab" 'reason = "deliberate"'
-expect "the clone accepted passes" 0 run "$jscpd" -- "jscpd: no duplicated code beyond the 1 accepted file pair(s)."
-config "$table" "$paths" "$entry" "$ab" 'reason = "deliberate"' "$entry" 'files = ["src/c.py", "src/a.py"]' 'reason = "gone"'
+expect "an accepted pair without max-tokens fails naming the figure" 1 run "$jscpd" -- \
+  "ERROR: [[python.duplication.accepted]] entry for src/a.py  ~  src/b.py sets no max-tokens; jscpd measures $tokens tokens" \
+  "To fix: add max-tokens = the pair's total tokens"
+config "$table" "$paths"
+expect "a new pair's error names its tokens" 1 run "$jscpd" -- "src/a.py  ~  src/b.py ($tokens tokens)" "max-tokens = the pair's total tokens"
+config "$table" "$paths" "$entry" "$ab" "$fit" 'reason = "deliberate"' "$entry" 'files = ["src/c.py", "src/a.py"]' 'reason = "gone"'
 expect "a stale accepted entry fails" 1 run "$jscpd" -- \
   "ERROR: stale [[python.duplication.accepted]] entry, no longer duplicated: src/a.py  ~  src/c.py" \
   "To fix: remove the stale entries from devkit.toml."
 # src/d.py, a third copy, accepted with src/a.py: ignoring src/b.py must keep it scanned.
 cp "$proj/src/a.py" "$proj/src/d.py"
 ad='files = ["src/a.py", "src/d.py"]'
-config "$table" "$paths" 'ignore = ["**/b.py"]' "$entry" "$ad" 'reason = "deliberate"'
+config "$table" "$paths" 'ignore = ["**/b.py"]' "$entry" "$ad" 'max-tokens = 1000' 'reason = "deliberate"'
 expect "an ignore glob excludes a file" 0 run "$jscpd" -- "jscpd: no duplicated code beyond the 1 accepted"
-config "$table" "$paths" 'ignore = ["src/b.py"]' "$entry" "$ad" 'reason = "deliberate"'
+config "$table" "$paths" 'ignore = ["src/b.py"]' "$entry" "$ad" 'max-tokens = 1000' 'reason = "deliberate"'
 expect "a project-relative ignore glob excludes a file" 0 run "$jscpd" -- "jscpd: no duplicated code beyond the 1 accepted"
 rm "$proj/src/d.py"
 config "$table" "$paths" 'ignore = ["-x"]'
@@ -150,7 +192,7 @@ expect "an ignore glob that starts with a dash is a glob, not an option" 1 run "
   "ERROR: duplicated code not accepted in devkit.toml: src/a.py  ~  src/b.py"
 config "$table" "$paths" 'min-tokens = 500'
 expect "min-tokens above the clone passes" 0 run "$jscpd" -- "jscpd: no duplicated code"
-config "$table" 'paths = ["src", "src/a.py"]' "$entry" "$ab" 'reason = "deliberate"'
+config "$table" 'paths = ["src", "src/a.py"]' "$entry" "$ab" "$fit" 'reason = "deliberate"'
 expect "overlapping paths scan each file once" 0 run "$jscpd" -- "jscpd: no duplicated code beyond the 1 accepted"
 
 # What jscpd scans: the files git lists, whatever jscpd's own walker would skip.
@@ -177,7 +219,7 @@ git -C "$proj" add -f src/b.py
 expect "a tracked file .gitignore matches is scanned" 1 run "$jscpd" -- "$clone"
 echo d.py >>"$proj/.gitignore"
 cp "$proj/src/a.py" "$proj/src/d.py"
-config "$table" "$paths" "$entry" "$ab" 'reason = "deliberate"'
+config "$table" "$paths" "$entry" "$ab" "$fit" 'reason = "deliberate"'
 expect "an untracked file .gitignore matches is not scanned" 0 run "$jscpd" -- "beyond the 1 accepted"
 git -C "$proj" rm -q --cached src/b.py
 rm "$proj/.gitignore" "$proj/src/d.py"
@@ -203,6 +245,16 @@ expect "a jscpd that writes no report fails" 1 run "$work/silent" -- "ERROR: jsc
 REPORT='not json' expect "an unreadable report fails" 1 run "$work/reports" -- "ERROR: cannot read jscpd's report:"
 REPORT='{"clones": []}' expect "a report without a list of duplicates fails" 1 run "$work/reports" -- \
   "ERROR: jscpd's report holds no list of duplicates"
+for bad in '"x": 1' '"tokens": "60"' '"tokens": true' '"tokens": -1' '"tokens": 0'; do
+  REPORT="{\"duplicates\": [$(clone duplicate_a.py duplicate_b.py | sed "s/\"tokens\": 60/$bad/")]}" \
+    expect "a clone whose tokens are {$bad} fails as a format change" 1 run "$work/reports" -- \
+    "ERROR: jscpd's report has a clone without its tokens"
+done
+REPORT="{\"duplicates\": [$(clone duplicate_a.py duplicate_b.py | sed 's/"name": "[^"]*duplicate_a.py"/"name": ""/')]}" \
+  expect "a clone with an empty file name fails as a format change" 1 run "$work/reports" -- \
+  "ERROR: jscpd's report has a clone without its files"
+REPORT="{\"duplicates\": [$(clone duplicate_a.py duplicate_b.py), $(clone duplicate_a.py duplicate_b.py | sed 's/"tokens": 60/"tokens": 40/')]}" \
+  expect "a pair's clones are summed" 1 run "$work/reports" -- "(100 tokens)"
 REPORT='{"duplicates": [{"firstFile": {}}]}' expect "a report with a clone without its files fails" 1 run "$work/reports" -- \
   "ERROR: jscpd's report has a clone without its files"
 driver=(python3 -I -B -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); import duplication; duplication.TIMEOUT = 1; duplication.main()'

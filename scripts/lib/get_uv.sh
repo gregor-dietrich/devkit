@@ -35,7 +35,8 @@ python3_floor || exit 1
 # shellcheck source=SCRIPTDIR/sha256.sh
 . "$DEVKIT/scripts/lib/sha256.sh"
 # One read of the lock: the pin is the requirement's first line ("uv==<version> \"), so a relock cannot
-# give the directory name one version and the key another. uv_project.py validated it as a path part.
+# give the directory name one version and the key another. uv_project.py validated it as a path part
+# and checked it against devkit's minimum uv.
 uv_reqs=$(python3 -I "$DEVKIT/scripts/python/uv_project.py" uv-requirements) || exit
 UV_PIN=${uv_reqs#uv==}
 UV_PIN=${UV_PIN%% *}

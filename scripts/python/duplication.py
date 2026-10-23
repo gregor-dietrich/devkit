@@ -6,8 +6,10 @@ Usage: duplication.py COMMAND, for the project at $PROJECT_ROOT (else the workin
                 git lists (tracked, plus untracked ones not ignored) under its paths
   run JSCPD     validate it, run JSCPD (the jscpd of devkit's closure) on devkit's detector
                 controls, then on those files; fail on every file pair jscpd reports a clone
-                of that no [[python.duplication.accepted]] entry accepts, and on every
-                accepted pair it no longer reports
+                of that no [[python.duplication.accepted]] entry accepts, on every
+                accepted pair it no longer reports, and on every accepted pair whose
+                clone tokens, summed, exceed the entry's max-tokens; hint, on stdout,
+                at every pair measuring below its max-tokens
 Every failure is one ERROR line on stderr (a clone adds the lines jscpd reported); exit 1.
 """
 
@@ -32,7 +34,7 @@ TABLE = "[python.duplication] in devkit.toml"
 ENTRY = "[[python.duplication.accepted]]"
 ACCEPTED = f"{ENTRY} in devkit.toml"
 KEYS = {"paths", "min-tokens", "ignore", "accepted"}
-ENTRY_KEYS = {"files", "reason"}
+ENTRY_KEYS = {"files", "reason", "max-tokens"}
 DEFAULT_MIN_TOKENS = 50
 # Upper bound for one jscpd run.
 TIMEOUT = 600
@@ -45,7 +47,7 @@ class Config(NamedTuple):
     files: list[Path]
     min_tokens: int
     ignore: list[str]
-    accepted: set[Pair]
+    accepted: dict[Pair, int | None]
 
 
 def pair(first: str, second: str) -> Pair:
@@ -73,13 +75,14 @@ def project_path(name: str) -> Path:
     return path
 
 
-def accepted_pairs(entries: Any) -> set[Pair]:
+def accepted_pairs(entries: Any) -> dict[Pair, int | None]:
+    """Each accepted pair with its max-tokens ceiling, None where the entry sets none."""
     if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
-        raise Failure(f"{ACCEPTED} must be an array of tables, each with files and a reason.")
-    found: set[Pair] = set()
+        raise Failure(f"{ACCEPTED} must be an array of tables, each with files, max-tokens and a reason.")
+    found: dict[Pair, int | None] = {}
     for number, entry in enumerate(entries, 1):
         if stray := sorted(set(entry) - ENTRY_KEYS):
-            raise Failure(f"{ACCEPTED} entry {number} sets unknown key(s) {', '.join(stray)}; it reads only files and reason.")
+            raise Failure(f"{ACCEPTED} entry {number} sets unknown key(s) {', '.join(stray)}; it reads only files, max-tokens and reason.")
         files = entry.get("files")
         if not is_strings(files) or len(files) != 2:
             raise Failure(
@@ -92,7 +95,10 @@ def accepted_pairs(entries: Any) -> set[Pair]:
             raise Failure(f"{ACCEPTED} entry {number} ({show(key)}) needs a reason saying why the duplication is deliberate.")
         if key in found:
             raise Failure(f"{ACCEPTED} accepts {show(key)} twice; remove one entry.")
-        found.add(key)
+        ceiling = entry.get("max-tokens")
+        if "max-tokens" in entry and (isinstance(ceiling, bool) or not isinstance(ceiling, int) or ceiling < 1):
+            raise Failure(f"{ACCEPTED} entry {number} ({show(key)}): max-tokens must be a positive integer, not {ceiling!r}.")
+        found[key] = ceiling
     return found
 
 
@@ -181,17 +187,23 @@ def run_jscpd(command: list[str], cwd: Path, env: dict[str, str]) -> None:
         raise Failure(f"jscpd failed (exit {process.returncode}). It reported:\n    {said}")
 
 
-def by_pair(clones: list[dict[str, Any]], root: Path) -> dict[Pair, list[str]]:
-    """Each file pair jscpd reports a clone of, relative to root, with one line per clone."""
-    found: dict[Pair, list[str]] = {}
+def by_pair(clones: list[dict[str, Any]], root: Path) -> dict[Pair, tuple[int, list[str]]]:
+    """Each file pair jscpd reports a clone of, relative to root, with the sum of its clones' tokens
+    and one line per clone."""
+    found: dict[Pair, tuple[int, list[str]]] = {}
     for clone in clones:
         try:
             first, second = clone["firstFile"], clone["secondFile"]
             key = pair(os.path.relpath(first["name"], root), os.path.relpath(second["name"], root))
             where = [f"{os.path.relpath(f['name'], root)}:{f['start']}-{f['end']}" for f in (first, second)]
-        except (KeyError, TypeError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:  # ValueError: os.path.relpath of an empty name
             raise Failure(f"jscpd's report has a clone without its files ({exc!r}); its format changed under devkit.") from exc
-        found.setdefault(key, []).append(f"    {where[0]} and {where[1]} ({clone.get('tokens')} tokens)")
+        tokens = clone.get("tokens")
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1:
+            raise Failure(f"jscpd's report has a clone without its tokens ({tokens!r}); its format changed under devkit.")
+        total, lines = found.get(key, (0, []))
+        lines.append(f"    {where[0]} and {where[1]} ({tokens} tokens)")
+        found[key] = (total + tokens, lines)
     return found
 
 
@@ -205,6 +217,12 @@ def control(jscpd: str) -> None:
 
 def check_config() -> str:
     settings = config()
+    if unset := [(number, key) for number, (key, ceiling) in enumerate(settings.accepted.items(), 1) if ceiling is None]:
+        for number, key in unset:
+            said = f"ERROR: {ACCEPTED} entry {number} ({show(key)}) sets no max-tokens;"
+            print(f"{said} make lint reports the figure jscpd measures for the pair.", file=sys.stderr)
+        print("To fix: add max-tokens = <that figure>, a positive integer, to each entry.", file=sys.stderr)
+        sys.exit(1)
     paths = ", ".join(str(path.relative_to(ROOT)) for path in settings.paths)
     return f"[python.duplication]: jscpd scans the {len(settings.files)} Python file(s) git lists under {paths}."
 
@@ -213,16 +231,37 @@ def run(jscpd: str) -> str:
     settings = config()
     control(jscpd)
     found = by_pair(scan(jscpd, settings.files, settings.min_tokens, settings.ignore), ROOT)
-    new = sorted(set(found) - settings.accepted)
-    stale = sorted(settings.accepted - set(found))
-    errors = [f"ERROR: duplicated code not accepted in devkit.toml: {show(key)}\n" + "\n".join(found[key]) for key in new]
+    new = sorted(set(found) - set(settings.accepted))
+    stale = sorted(set(settings.accepted) - set(found))
+    grown = [key for key in sorted(found) if (ceiling := settings.accepted.get(key)) and found[key][0] > ceiling]
+    unset = [key for key in sorted(found) if key in settings.accepted and settings.accepted[key] is None]
+    errors = [
+        f"ERROR: duplicated code not accepted in devkit.toml: {show(key)} ({found[key][0]} tokens)\n" + "\n".join(found[key][1])
+        for key in new
+    ]
+    errors += [
+        f"ERROR: duplicated code grew past max-tokens in devkit.toml: {show(key)} measures {found[key][0]} tokens, "
+        f"over its max-tokens of {settings.accepted[key]}\n" + "\n".join(found[key][1])
+        for key in grown
+    ]
+    errors += [f"ERROR: {ENTRY} entry for {show(key)} sets no max-tokens; jscpd measures {found[key][0]} tokens" for key in unset]
     errors += [f"ERROR: stale {ENTRY} entry, no longer duplicated: {show(key)}" for key in stale]
     if errors:
-        accept = f"extract the shared code, or accept the pair with an {ENTRY} entry in devkit.toml (files and a reason)"
-        remedies = ([accept] if new else []) + (["remove the stale entries from devkit.toml"] if stale else [])
+        accept = (
+            f"extract the shared code, or accept the pair with an {ENTRY} entry in devkit.toml "
+            "(files, a reason and max-tokens = the pair's total tokens)"
+        )
+        grow = "extract the grown duplication, or raise max-tokens and revise the reason when the growth is deliberate"
+        remedies = ([accept] if new else []) + ([grow] if grown else [])
+        remedies += ["add max-tokens = the pair's total tokens to the entries without one"] if unset else []
+        remedies += ["remove the stale entries from devkit.toml"] if stale else []
         print("\n".join(errors), file=sys.stderr)
         print(f"To fix: {'; '.join(remedies)}.", file=sys.stderr)
         sys.exit(1)
+    for key in sorted(found):
+        if (ceiling := settings.accepted[key]) and found[key][0] < ceiling:
+            total = found[key][0]
+            print(f"NOTE: {show(key)} measures {total} tokens, below its max-tokens of {ceiling}; lower max-tokens to {total}.")
     return f"jscpd: no duplicated code beyond the {len(settings.accepted)} accepted file pair(s)."
 
 

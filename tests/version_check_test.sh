@@ -11,7 +11,10 @@
 set -euo pipefail
 
 script=$(cd "$(dirname "$0")/.." && pwd)/scripts/java/version_check.py
+# Physical: the script reports resolved paths, and macOS's TMPDIR is under the
+# /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
+work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
 fails=0

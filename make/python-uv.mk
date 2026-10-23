@@ -8,11 +8,12 @@
 #                   empty = a single package at the root
 #   COVERAGE_FLOOR  percent (0-100) of combined statement and branch coverage (--cov-branch)
 #                   each package's tests must reach; required
-# The CPython version comes from .python-version, the uv version from the uv package in uv.lock.
+# The CPython version comes from .python-version, the uv version (0.12.23 or later) from the uv
+# package in uv.lock.
 #
 # Copy-paste gate: lint runs jscpd over devkit.toml's [python.duplication] paths, failing on a
-# duplicated file pair not accepted there and on an accepted pair no longer duplicated; it
-# needs node and npm.
+# duplicated file pair not accepted there, on an accepted pair no longer duplicated and on one
+# whose clones grew past its max-tokens; it needs node and npm.
 #
 # Anchored-match gate: lint fails on every re.match, and re.search anchored at both ends, whose
 # pattern holds a $ (it also matches before a trailing newline), in a function devkit.toml's

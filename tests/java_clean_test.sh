@@ -17,7 +17,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
 . "$root/scripts/lib/tree.sh"
 work=$(mktemp -d)
-trap 'chmod -R u+w -- "${work:?}" 2>/dev/null; rm -rf -- "${work:?}"' EXIT # the pinned Maven's cache is read-only
+# No -- for chmod: macOS's rejects it; || : keeps set -e from ending the trap before rm.
+trap 'chmod -R u+w "${work:?}" 2>/dev/null || :; rm -rf -- "${work:?}"' EXIT # the pinned Maven's cache is read-only
 version=$(parent_version "$root")
 fails=0
 

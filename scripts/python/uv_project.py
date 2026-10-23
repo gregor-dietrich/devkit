@@ -25,10 +25,14 @@ from typing import Any
 
 ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 # The pin names a cache directory and a requirements line, so it may hold neither "/" nor
-# whitespace; PEP 440 versions need no more than these characters.
-VERSION = re.compile(r"[0-9][0-9A-Za-z.+!-]*")
+# whitespace, and 64 characters bound it; PEP 440 versions need no more. Groups: epoch, release.
+VERSION = re.compile(r"(?!.{65})(?:([0-9]+)!)?([0-9]+(?:\.[0-9]+)*)[0-9A-Za-z.+!-]*")
 HASH = re.compile(r"sha256:[0-9a-f]{64}")
 RELOCK = "add uv to the dev dependency group, then uv lock"
+# The oldest uv devkit's flags are tested with, the one the fixtures' dev groups pin exactly, so a
+# relock keeps it; docs/contract.md ("Pins and drift") states it.
+UV_FLOOR = (0, 12, 23)
+PRERELEASE = re.compile(r"[._-]?(a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE)
 
 
 class Failure(Exception):
@@ -53,8 +57,18 @@ def packages(lock: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def below_floor(version: str, match: re.Match[str]) -> bool:
+    """Whether a VERSION, matched, is older than UV_FLOOR: a pre-release of the floor is, a post-release or local one is not."""
+    if int(match[1] or 0) > 0:  # any epoch outranks the floor's (PEP 440)
+        return False
+    numbers = tuple(int(number) for number in match[2].split("."))
+    width = max(len(numbers), len(UV_FLOOR))
+    padded, floor = (n + (0,) * (width - len(n)) for n in (numbers, UV_FLOOR))
+    return padded < floor or (padded == floor and PRERELEASE.match(version, match.end(2)) is not None)
+
+
 def uv_package(lock: dict[str, Any]) -> dict[str, Any]:
-    """The one [[package]] entry named uv, with a version safe to use as a path and pin."""
+    """The one [[package]] entry named uv, with a version safe to use as a path and pin, and at least devkit's minimum."""
     found = [package for package in packages(lock) if package.get("name") == "uv"]
     if not found:
         raise Failure(f"uv.lock pins no uv package; {RELOCK}.")
@@ -62,8 +76,15 @@ def uv_package(lock: dict[str, Any]) -> dict[str, Any]:
         versions = ", ".join(str(package.get("version")) for package in found)
         raise Failure(f"uv.lock pins uv more than once ({versions}); constrain it to one version, then uv lock.")
     version = found[0].get("version")
-    if not isinstance(version, str) or not VERSION.fullmatch(version):
+    match = VERSION.fullmatch(version) if isinstance(version, str) else None
+    if not match:
         raise Failure(f"uv.lock's uv package has no usable version ({version!r}); {RELOCK}.")
+    if below_floor(version, match):
+        floor = ".".join(map(str, UV_FLOOR))
+        raise Failure(
+            f"uv.lock pins uv {version}, below devkit's minimum {floor}; require uv>={floor} in the dev group, "
+            "then uv lock and make install."
+        )
     return found[0]
 
 

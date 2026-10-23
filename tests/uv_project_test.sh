@@ -27,7 +27,7 @@ package() { printf '[[package]]\nname = "%s"\nversion = "0.1.0"\nsource = { %s }
 # uv HASH...: the uv entry, one wheel per HASH; "none" is a wheel without one
 uv() {
   local hash field
-  printf '[[package]]\nname = "uv"\nversion = "0.12.10"\nsource = { registry = "https://pypi.org/simple" }\nwheels = [\n'
+  printf '[[package]]\nname = "uv"\nversion = "0.12.23"\nsource = { registry = "https://pypi.org/simple" }\nwheels = [\n'
   for hash; do
     field=", hash = \"sha256:$hash\""
     [[ $hash != none ]] || field=
@@ -59,16 +59,28 @@ single=$(package app 'virtual = "."')
 
 # uv-version
 lock "$single" "$(uv "$h1")"
-expect "uv-version prints the locked uv's version" 0 "0.12.10" uv-version
-lock "$single" $'[[package]]\nversion = "0.12.10"\nname = "uv"\nsource = { registry = "https://pypi.org/simple" }' \
+expect "uv-version prints the locked uv's version" 0 "0.12.23" uv-version
+lock "$single" $'[[package]]\nversion = "0.12.23"\nname = "uv"\nsource = { registry = "https://pypi.org/simple" }' \
   "$(package zzz 'registry = "https://pypi.org/simple"')"
-expect "uv-version reads a uv entry whose version precedes its name" 0 "0.12.10" uv-version
+expect "uv-version reads a uv entry whose version precedes its name" 0 "0.12.23" uv-version
 lock "$single" "$(package uvicorn 'registry = "https://pypi.org/simple"')"
 expect "a lock without a uv entry fails" 1 "uv.lock pins no uv package" uv-version
-lock "$single" "$(uv "$h1")" "$(uv "$h2" | sed 's/0\.12\.10/0.13.0/')"
-expect "two uv entries fail" 1 "uv.lock pins uv more than once (0.12.10, 0.13.0)" uv-version
+lock "$single" "$(uv "$h1")" "$(uv "$h2" | sed 's/0\.12\.23/0.13.1/')"
+expect "two uv entries fail" 1 "uv.lock pins uv more than once (0.12.23, 0.13.1)" uv-version
 lock "$single" "$(uv "$h1" | sed 's|^version = .*|version = "../0.1"|')"
 expect "a uv version unfit for a path fails" 1 "no usable version" uv-version
+for below in 0!0.12.22 0.12.22 0.12.23rc1 0.12.23.dev1 0.12.9 0.9; do
+  lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$below\"|")"
+  expect "uv $below is below the minimum" 1 "uv.lock pins uv $below, below devkit's minimum 0.12.23; require uv>=0.12.23" uv-version
+done
+for ok in 0.12.23+local 0.12.23.post1 0.13.0 1.0 0!0.13.0 0!1.0 1!0.1; do
+  lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$ok\"|")"
+  expect "uv $ok meets the minimum" 0 "$ok" uv-version
+done
+for long in "0.12.$(printf '9%.0s' {1..4301})" "0.13.0+$(printf 'a%.0s' {1..60})"; do
+  lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$long\"|")"
+  expect "a uv version over 64 characters fails" 1 "no usable version" uv-version
+done
 rm "$proj/uv.lock"
 expect "a missing uv.lock fails" 1 "no uv.lock in $proj" uv-version
 echo '[[package]' >"$proj/uv.lock"
@@ -77,11 +89,11 @@ expect "a malformed uv.lock fails" 1 "cannot read uv.lock" uv-version
 # uv-requirements
 lock "$single" "$(uv "$h1" "$h2")"
 expect "uv-requirements pins uv by every wheel hash" 0 \
-  "uv==0.12.10 \\"$'\n'"    --hash=sha256:$h1 \\"$'\n'"    --hash=sha256:$h2" uv-requirements
+  "uv==0.12.23 \\"$'\n'"    --hash=sha256:$h1 \\"$'\n'"    --hash=sha256:$h2" uv-requirements
 lock "$single" "$(uv "$h1" none)"
-expect "a wheel without a hash fails" 1 "no sha256 hash for every uv 0.12.10 wheel" uv-requirements
+expect "a wheel without a hash fails" 1 "no sha256 hash for every uv 0.12.23 wheel" uv-requirements
 lock "$single" "$(uv)"
-expect "a uv without wheels fails" 1 "no sha256 hash for every uv 0.12.10 wheel" uv-requirements
+expect "a uv without wheels fails" 1 "no sha256 hash for every uv 0.12.23 wheel" uv-requirements
 
 # members
 lock "$single" "$(uv "$h1")"

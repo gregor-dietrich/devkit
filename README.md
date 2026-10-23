@@ -74,7 +74,8 @@ written against it. In short, a project:
    `[frontend.min-pins]`, which a project with a frontend requires (an
    empty table when it has no minimums); a uv project, what its copy-paste
    gate scans in `[python.duplication] paths`, the duplicated file pairs it
-   accepts, the anchored regex matches it accepts in
+   accepts, each with its `max-tokens` ceiling, the anchored regex matches it
+   accepts in
    `[[python.anchored-match.accepted]]` entries and the files that gate skips
    in `[[python.anchored-match.excluded]]` entries; and, optionally, the image
    namespaces it publishes itself in `[pins] first-party` and further YAML
@@ -109,7 +110,8 @@ GNU make, ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3
 (3.11 or later); fetching a devkit release on a cache miss also needs the
 running UID to have a passwd entry, which ssh-keygen requires (a container run
 with an arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or
-later in `.python-version`, needs `sha256sum` or `shasum`, and, for the first
+later in `.python-version` and uv 0.12.23 or later in `uv.lock`, needs
+`sha256sum` or `shasum`, and, for the first
 `make install` of each uv `uv.lock` pins, python3's venv and pip and the
 index pip is configured for (PyPI by default). `make lint` also needs node
 (22.22.2 or later) with npm, for markdownlint and a uv project's copy-paste
@@ -197,8 +199,16 @@ deleted and regenerated with
 nothing. A fixture's `uv.lock` is regenerated with `uv lock --upgrade
 --exclude-newer <cutoff>`, then a plain `uv lock`, which keeps the versions
 and drops the cutoff the first one records (`uv sync --locked` fails while it
-is there). Either way the transitive versions are as old. `version_check.py`
+is there). Either way the transitive versions are as old. uv itself stays
+at devkit's minimum: the fixtures' dev groups pin it exactly (`uv==0.12.23`),
+so a relock keeps it, and raising the minimum (`UV_FLOOR` in
+`scripts/python/uv_project.py`) raises both pins with it. `version_check.py`
 reports a newer release whatever its age; a younger one waits.
+
+A bump of the `jscpd/` closure can change the tokens jscpd counts for a
+clone, and so push a consumer's accepted pair past its `max-tokens` without
+a code change: the release that ships it says so in its upgrade steps, so
+consumers re-measure their ceilings with the bump.
 
 ## Releasing
 
@@ -336,6 +346,20 @@ fails `make lint`: fix it, or exclude it with a
 Python is: raise it with `requires-python`, then `uv lock` and `make
 install`.
 
+devkit now requires uv 0.12.23 or later, the version its fixtures prove:
+`make check`, `make install`, `make test` and `make audit` fail, naming that
+minimum, on a `uv.lock` pinning an older uv or a pre-release of it. Require
+`uv>=0.12.23` in the dev group, then `uv lock` and `make install`.
+
+Every `[[python.duplication.accepted]]` entry now needs `max-tokens`, a
+ceiling on the tokens jscpd reports for the pair's clones, so duplication
+that grows between an accepted pair fails `make lint` instead of passing
+under the old entry ([uv projects](docs/contract.md#uv-projects)). `make
+check` fails on an entry without it; `make lint`, once its earlier gates
+pass, names each pair's total: copy it in, and check that the entry's
+`reason` still describes what that figure covers. A pair later measuring
+below its ceiling passes with a note to lower it.
+
 `make audit` in a uv project now also queries OSV (api.osv.dev), which a
 network allowing only PyPI must open. It takes longer (about half a minute
 on a 100-pin lock) and can now fail on advisories PyPI did not list. An
@@ -346,9 +370,7 @@ or alias and a reason; the contract has the details).
 in the dev group (devkit's fixtures pin 2.10.1): a project pinning an older one
 that lacks one of them fails both runs with exit status 2, and upgrades it with
 `uv lock --upgrade-package pip-audit`, then `make install`. It also needs a uv
-whose `uv export` has `--format pylock.toml` (the fixtures pin 0.12.23): a
-project pinning an older one stops at that export with uv's own usage error,
-and upgrades it with `uv lock --upgrade-package uv`, then `make install`.
+whose `uv export` has `--format pylock.toml`, as the minimum above does.
 `make audit` now
 audits every package `uv.lock` pins for the runtime dependencies, whatever its
 environment marker says about the auditing machine: an advisory against a

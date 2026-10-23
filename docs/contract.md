@@ -61,6 +61,7 @@ paths = ["src", "tests"]          # the Python files git lists under these
 # Optional, one per duplicated file pair the project accepts.
 [[python.duplication.accepted]]
 files = ["src/a.py", "src/b.py"]   # the same file twice for a clone within one file
+max-tokens = 120                   # ceiling on the pair's clone tokens (make lint)
 reason = "why this duplication is deliberate"
 
 # Optional, one per function the project accepts an anchored regex match in.
@@ -1249,8 +1250,10 @@ run the tools from `.venv`.
   records, when the root `pyproject.toml` sets no `[tool.vulture] paths`,
   when `uv.lock` pins no single usable uv version, lists a uv wheel
   without a sha256 hash, or records no wheel for uv at all (an sdist, git
-  or path source), when devkit's copy of the uv `uv.lock` pins is not
-  installed, when `.venv` is
+  or path source), when that uv is older than devkit's minimum, 0.12.23
+  (a pre-release of it counts as older; it is the oldest uv devkit tests
+  its `uv sync` and `uv export` flags with), when devkit's copy of the uv
+  `uv.lock` pins is not installed, when `.venv` is
   missing, when its Python's version differs from the pin (`major.minor`,
   or the patch too when the pin names one), when `uv sync --check --frozen
   --offline` cannot confirm `.venv` matches `uv.lock` (drift: run `make
@@ -1270,7 +1273,9 @@ run the tools from `.venv`.
   `shasum`), so projects
   that lock the same uv by the same hashes share one copy and a lock with
   other hashes gets its own. devkit never runs a `uv` on `PATH`, nor the
-  one inside `.venv`. Only `make install` creates the copy, read-only, when
+  one inside `.venv`. Every target that sources it (`check`, `install`,
+  `test`, `audit`) fails first on a uv older than devkit's minimum (see
+  `make check`). Only `make install` creates the copy, read-only, when
   it is missing, and
   `check`, `test` and `audit` fail until then: pip, in a throwaway venv of
   `python3`, installs the machine's uv wheel from the index pip's own
@@ -1386,11 +1391,10 @@ run the tools from `.venv`.
   `--locked`, `--format json` and `--aliases`; a project pinning one
   without one of them fails both runs with exit status 2 and upgrades it
   (the fixtures pin 2.10.1), and a uv whose `uv export` has
-  `--format pylock.toml` (the fixtures pin 0.12.23). An entry has no
-  expiry, and
-  keeps passing when a fixed release appears: a passing run lists each
-  accepted finding with its fix versions and reason, so a fix does not go
-  unseen.
+  `--format pylock.toml`, as devkit's minimum uv, 0.12.23, does. An entry
+  has no expiry, and keeps passing when a fixed release appears: a passing
+  run lists each accepted finding with its fix versions and reason, so a
+  fix does not go unseen.
 - `make clean` removes `__pycache__`, `.pytest_cache`, `.ruff_cache`,
   `*.egg-info`, `dist`, `.coverage` and `.coverage.*` below the project
   root, skipping the root's `.git` and `.devkit`, every `.venv` and
@@ -1462,9 +1466,16 @@ run the tools from `.venv`.
   directory with an empty `HOME` and every setting on its command line, so
   no `.jscpd.json` applies. The accepted duplication is a ratchet: each
   `[[python.duplication.accepted]]` entry names a file pair (`files`, in
-  any order) and a non-empty `reason`, and the gate fails, naming the pair
-  and the lines jscpd reported, on every pair it finds a clone of that no
-  entry accepts, and on every accepted pair it no longer finds. It first
+  any order), a non-empty `reason` and a `max-tokens` ceiling, the sum of
+  the `tokens` jscpd reports for every clone of the pair, and the gate
+  fails, naming the pair and the lines jscpd reported, on every pair it
+  finds a clone of that no entry accepts, on every accepted pair it no
+  longer finds, and on every accepted pair whose clones sum to more than
+  its `max-tokens` (extract the duplication, or raise the ceiling and
+  revise the reason). A pair below its ceiling passes, with a hint naming
+  the lower figure; an entry without `max-tokens` fails, naming the
+  figure to copy in. The figures are jscpd's own count, so a devkit release
+  that bumps its jscpd can move them; its upgrade steps say so. It first
   runs jscpd, with the default `min-tokens` and no `ignore`, on devkit's
   `jscpd/controls/`, and fails unless exactly the one duplicated pair there
   is found, and fails when jscpd writes no report. `make check` fails, one
@@ -1472,5 +1483,6 @@ run the tools from `.venv`.
   a path is absolute, leaves the project root or does not exist, git lists
   no Python file under `paths`, `min-tokens` is not a positive integer,
   `ignore` is not a list of strings without commas (jscpd splits on them),
-  an entry has not exactly two `files` or no `reason`, a pair is accepted
+  an entry has not exactly two `files`, no `reason` or no `max-tokens`
+  (a positive integer; `make lint` names the figure), a pair is accepted
   twice, or the table or an entry holds another key.
