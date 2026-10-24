@@ -905,22 +905,24 @@ inherit it, and Maven reads it through the link:
   download and in `make check`'s report, so it must hold no secret anywhere, a
   path token included. `make check`'s report of outdated version pins
   (`scripts/java/version_check.py`) reads each artifact's `maven-metadata.xml`
-  from the mirror too, and validates the value at least as strictly (it also
-  refuses Unicode whitespace). There is no fallback to Central: the mirror
-  must serve `maven-metadata.xml` for the report, or every pin lands under
-  "Could not check". A mirror that caches metadata can delay an outdated line,
-  or print a false "ahead" line, by its cache lifetime. Authenticated
-  mirrors and air-gapped seeding are unsupported (#134). A download is capped
-  at 100M. The pin and the cache path stay. A cache entry without a launcher
-  fails with the command that removes it, for a retry. A project's `mvnw` is
-  optional, of any distribution type, for an IDE or a bare build.
-  `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs on
-  (`$JAVA_HOME/bin/java`, else `java` on `PATH`; the probe follows the caller's
-  `JAVA_HOME`, so one set in `/etc/mavenrc` or `~/.mavenrc` is not seen), then
-  runs `python3_floor`, which exits 13 below python3 3.11, then
+  from the mirror too, and validates the value at least as strictly (its `\s`
+  also covers non-ASCII whitespace and U+001C to U+001F). There is no
+  fallback to Central: the mirror must serve `maven-metadata.xml` for the
+  report, or every pin lands under "Could not check". A mirror that caches
+  metadata can delay an outdated line, or print a false "ahead" line, by its
+  cache lifetime. Each lookup gives up after 60 seconds of wall clock, or once
+  its metadata passes 1 MiB, and that pin lands under "Could not check".
+  Authenticated mirrors and air-gapped seeding are unsupported (#134). The
+  pinned-Maven download is capped at 100M. The pin and the cache path stay. A
+  cache entry without a launcher fails with the command that removes it, for a
+  retry. A project's `mvnw` is optional, of any distribution type, for an IDE or
+  a bare build. `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs
+  on (`$JAVA_HOME/bin/java`, else `java` on `PATH`; the probe follows the
+  caller's `JAVA_HOME`, so one set in `/etc/mavenrc` or `~/.mavenrc` is not
+  seen), then runs `python3_floor`, which exits 13 below python3 3.11, then
   `scripts/java/parent_check.py`, and only then the download, so a bad python3
-  or parent fails offline. That fails, with one `ERROR` line and exit status
-  14, when
+  or parent fails offline. That fails, with one `ERROR` line and exit status 14,
+  when
   - the root pom's `<parent>` is not devkit's;
   - the `<relativePath>` of the root pom, or of any module pom
     (`<modules>`, recursively, profiles included) whose `<parent>` is

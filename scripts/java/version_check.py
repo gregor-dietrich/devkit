@@ -14,12 +14,13 @@ skipped (they are not published).
 import http.client
 import os
 import re
+import signal
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import xml.parsers.expat
 from pathlib import Path
 from typing import NamedTuple
 
@@ -43,8 +44,10 @@ MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
 # https://HOST[/PATH], no @ anywhere, no query, fragment or whitespace.
 MIRROR_URL = re.compile(r"https://[^/@?#\s]+(/[^?#\s]*)?")
 REQUEST_TIMEOUT = 15  # per socket operation
-LOOKUP_DEADLINE = 60  # seconds for one whole metadata lookup, a trickling server included
-MAX_METADATA_BYTES = 16 * 1024 * 1024  # maven-metadata.xml is kilobytes
+# Seconds of wall clock for one whole metadata lookup (connect, TLS, headers, redirects, body), a
+# trickling server included; a DNS lookup that ignores signals is bounded only by the resolver.
+LOOKUP_DEADLINE = 60
+MAX_METADATA_BYTES = 1024 * 1024  # 1 MiB: maven-metadata.xml is kilobytes (the largest on Central is about 65 KB)
 
 PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
 
@@ -256,12 +259,39 @@ def repository() -> str:
 class HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
     """Follow a redirect only to https, as the pinned-Maven download does."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req, fp, code, msg, headers, newurl) -> urllib.request.Request | None:
         if urllib.parse.urlsplit(newurl).scheme != "https":
             return None  # urllib then raises the 3xx as an HTTPError
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        if fp is not None:
+            fp.close()  # the base class then reads b"", not the redirect's whole (unbounded) body
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None:
+            # ProxyHandler re-adds it for a proxied host; a host in no_proxy must not get it.
+            new.headers.pop("Proxy-authorization", None)
+        return new
 
 
+def refuse_doctype(content: bytes) -> None:
+    """Raise ET.ParseError on a DOCTYPE (ElementTree expands internal entities), ExpatError on a malformed body."""
+
+    def refuse(*_):
+        raise ET.ParseError("DOCTYPE declared")
+
+    parser = xml.parsers.expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = refuse
+    parser.Parse(content, True)
+
+
+class LookupTimeout(Exception):
+    """The lookup's wall-clock deadline passed; not an OSError, which socket.create_connection would swallow."""
+
+
+def lookup_timed_out(signum: int, frame: object) -> None:
+    """SIGALRM handler: abandon the lookup in progress."""
+    raise LookupTimeout(f"lookup timed out after {LOOKUP_DEADLINE}s")
+
+
+signal.signal(signal.SIGALRM, lookup_timed_out)
 OPENER = urllib.request.build_opener(HttpsOnlyRedirects)
 
 
@@ -275,27 +305,32 @@ def get_latest_version(base: str, group: str, artifact: str) -> str | None:
     """
     url = f"{base}/{group.replace('.', '/')}/{artifact}/maven-metadata.xml"
     try:
-        deadline = time.monotonic() + LOOKUP_DEADLINE
-        body = bytearray()
-        with OPENER.open(url, timeout=REQUEST_TIMEOUT) as response:
-            while chunk := response.read1(65536):  # read() would wait for all 64K, past the deadline
-                body += chunk
-                if len(body) > MAX_METADATA_BYTES or time.monotonic() > deadline:
-                    print(f"Error: {group}:{artifact} — metadata over {MAX_METADATA_BYTES} bytes or "
-                          f"{LOOKUP_DEADLINE}s, given up", file=sys.stderr)
-                    return None
+        signal.setitimer(signal.ITIMER_REAL, LOOKUP_DEADLINE)
+        try:
+            body = bytearray()
+            with OPENER.open(url, timeout=REQUEST_TIMEOUT) as response:
+                while chunk := response.read1(65536):  # chunks, so the size cap is checked as they arrive
+                    body += chunk
+                    if len(body) > MAX_METADATA_BYTES:
+                        print(f"Error: {group}:{artifact} — metadata over {MAX_METADATA_BYTES} bytes, given up",
+                              file=sys.stderr)
+                        return None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
         content = bytes(body)
     except urllib.error.HTTPError as exc:
         print(f"Error: status {exc.code} for {group}:{artifact}", file=sys.stderr)
         return None
-    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
-        print(f"Error: {group}:{artifact} — {exc}", file=sys.stderr)
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError, LookupTimeout) as exc:
+        print(f"Error: {group}:{artifact} — {str(exc)!r}", file=sys.stderr)
         return None
 
     try:
+        refuse_doctype(content)
         versioning = ET.fromstring(content).find("versioning")
-    except ET.ParseError as exc:
-        print(f"Error: {group}:{artifact} — malformed metadata ({exc})", file=sys.stderr)
+    # LookupError, ValueError: an unknown or multi-byte encoding declaration
+    except (ET.ParseError, xml.parsers.expat.ExpatError, LookupError, ValueError) as exc:
+        print(f"Error: {group}:{artifact} — malformed metadata ({str(exc)!r})", file=sys.stderr)
         return None
     if versioning is None:
         print(f"Error: {group}:{artifact} — metadata without <versioning>", file=sys.stderr)
@@ -312,8 +347,8 @@ def get_latest_version(base: str, group: str, artifact: str) -> str | None:
 
         for marker in ("release", "latest"):
             element = versioning.find(marker)
-            if element is not None and element.text and element.text.strip():
-                latest = element.text.strip()
+            latest = element.text.strip() if element is not None and element.text else ""
+            if latest and latest.isascii() and latest.isprintable():
                 if is_stable(latest):
                     parse_version(latest)  # callers compare it numerically
                 return latest
@@ -354,7 +389,7 @@ def get_bump_target(pin: Pin, base: str) -> tuple[str | None, list[str]]:
 
 
 def compare(current: str, latest: str) -> str:
-    """Classify a pinned version against the latest stable release."""
+    """Classify a pinned version against the latest release (newest stable, else a <release>/<latest> marker's)."""
     if current == latest:
         return "current"
     if not is_stable(latest):

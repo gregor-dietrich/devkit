@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Tests for scripts/java/version_check.py, run as scripts/java/check.sh runs it
-# (python3 -I, PROJECT_ROOT the project): per case, a fresh temp project and
-# the pom parse's output. No network: a pom with an artifact to look up makes
-# the helper query Maven Central or DEVKIT_MAVEN_MIRROR, so every case either
-# holds none (no property, an unresolved one, a managed artifact, the project's
-# own modules) or sends the query to a proxy of this host, which urllib honours
+# (python3 -I, PROJECT_ROOT the project): per case, a fresh temp project and the
+# pom parse's output; the unit cases import the script and stub the opener,
+# main() runs included. No network: a pom with an artifact to look up makes the
+# helper query Maven Central or DEVKIT_MAVEN_MIRROR, so every case either holds
+# none (no property, an unresolved one, a managed artifact, the project's own
+# modules) or sends the query to a proxy of this host, which urllib honours
 # before it resolves the host, so no packet leaves it: a closed port that
 # refuses connections, or a recording proxy that keeps each request's first
-# line (CONNECT <host>:443, so which repository was asked) and hangs up. What
-# a Central answer is made into (outdated, current, ahead) is not tested: it
-# needs Central. Prints PASS/FAIL per case.
+# line (CONNECT <host>:<port>, so which repository was asked) and hangs up.
+# What a Central answer is made into (outdated, current, ahead) is tested only
+# through the unit cases' stubs. Prints PASS/FAIL per case.
 set -euo pipefail
 
 script=$(cd "$(dirname "$0")/.." && pwd)/scripts/java/version_check.py
@@ -163,10 +164,9 @@ fi
 # whose every request line must then contain WANT, or which must see no request at all for an empty
 # WANT; one PASS or FAIL line
 sent() {
-  local want=$1 got line bad=''
+  local want=$1 got line out bad=''
   shift
   : >"$requests"
-  local out
   out=$(https_proxy=$recording HTTPS_PROXY=$recording expect "$@") || :
   got=$(tr -d '\r' <"$requests")
   if [[ -z $want ]]; then
@@ -180,8 +180,9 @@ sent() {
   elif [[ -n $bad ]]; then
     out+=$'\n'"  and the proxy received '$got', not '${want:-nothing}'"
   fi
+  [[ $out == PASS* || $out == FAIL* ]] || out="FAIL $1: expect printed '$out'"
   printf '%s\n' "$out"
-  [[ $out != FAIL* ]] || fails=$((fails + 1))
+  [[ $out == PASS* ]] || fails=$((fails + 1))
 }
 
 project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example lib "$(ref lib.version)")</dependencies>"
@@ -206,38 +207,97 @@ for pair in "https://|DEVKIT_MAVEN_MIRROR=" "https://h |https://h" "https://h/p?
     "!$leak" "!Checking"
 done
 
-project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example lib "$(ref lib.version)")</dependencies>"
 DEVKIT_MAVEN_MIRROR=https://mirror.example:8443/m2 sent "CONNECT mirror.example:8443" "a mirror with a port is accepted, and the lookup goes to it" 0 \
   "against https://mirror.example:8443/m2..." "Could not check (1):" "!repo1.maven.org"
 # Accepted by the rule, but no usable URL: a failed lookup, not a traceback.
-for pair in "port|https://h:abc/m2" "zero-width space|https://h.invalid/p"$'\xe2\x80\x8b'"q"; do
+for pair in "non-numeric port|https://h:abc/m2" "zero-width space|https://h.invalid/p"$'\xe2\x80\x8b'"q"; do
   DEVKIT_MAVEN_MIRROR=${pair#*|} sent "" "a mirror with a ${pair%%|*} that is no usable URL fails the lookup, not the report" 0 \
     "Could not check (1):" "Error: org.example:lib"
 done
 
-# unit LABEL CODE: CODE, run with the script imported as v, must print PASS (these need TLS to reach otherwise)
+# unit LABEL CODE: CODE, run with the script imported as v and OPENER stubbable, must print PASS. The
+# prelude: Stub(BODY, DELAY) serves BODY without TLS after DELAY seconds; meta/versions build metadata;
+# lookup(BODY, NAME=VALUE...) runs one lookup with module globals patched; redirect(URL, FP, OLD) asks
+# the redirect handler about a redirect to URL; report(BODY) is the stdout of main() on BODY
 unit() {
   local out
-  out=$(python3 -I -c 'import importlib.util, sys
-spec = importlib.util.spec_from_file_location("v", sys.argv[1])
-v = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(v)
+  out=$(python3 -I -B -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); import version_check as v
+import contextlib, io, signal, time
+class Stub:
+    def __init__(self, body=b"", delay=0): self.body, self.delay = body, delay
+    def open(self, url, timeout=None):
+        time.sleep(self.delay)
+        return io.BufferedReader(io.BytesIO(self.body))
+def meta(inner): return ("<metadata><versioning>" + inner + "</versioning></metadata>").encode()
+def versions(*vs): return meta("<versions>" + "".join(f"<version>{x}</version>" for x in vs) + "</versions>")
+def lookup(body, **patch):
+    v.OPENER = Stub(body)
+    for name, value in patch.items(): setattr(v, name, value)
+    return v.get_latest_version("https://a", "g", "a")
+def redirect(url, fp=None, old=None):
+    return v.HttpsOnlyRedirects().redirect_request(old or v.urllib.request.Request("https://a/m"), fp, 302, "", {}, url)
+def report(body):
+    v.OPENER, out = Stub(body), io.StringIO()
+    with contextlib.redirect_stdout(out): v.main()
+    return out.getvalue()
 '"$2"'
-print("PASS")' "$script" 2>&1) || :
+print("PASS")' "${script%/*}" 2>"$work/err") || :
   if [[ $out == PASS ]]; then
     echo "PASS $1"
   else
     echo "FAIL $1: got:"
-    printf '%s\n' "$out"
+    printf '%s\n' "$out" "$(<"$work/err")"
     fails=$((fails + 1))
   fi
 }
-unit "a redirect to http is refused" \
-  'assert v.HttpsOnlyRedirects().redirect_request(v.urllib.request.Request("https://a/m"), None, 302, "", {}, "http://a/m") is None'
-unit "a redirect to https is followed" \
-  'assert v.HttpsOnlyRedirects().redirect_request(v.urllib.request.Request("https://a/m"), None, 302, "", {}, "https://b/m").full_url == "https://b/m"'
+for scheme in http ftp; do
+  unit "a redirect to $scheme is refused" 'assert redirect("'$scheme'://a/m") is None'
+done
+unit "a redirect to https is followed" 'assert redirect("https://b/m").full_url == "https://b/m"'
+unit "a followed redirect closes the old body and drops Proxy-authorization" '
+old, fp = v.urllib.request.Request("https://a/m"), io.BytesIO()
+old.add_header("Proxy-authorization", "Basic x")
+new = redirect("https://b/m", fp, old)
+assert fp.closed and "Proxy-authorization" not in new.headers and "Proxy-authorization" in old.headers'
+unit "the opener's only redirect handler is the https-only one" \
+  'hs = [h for h in v.OPENER.handlers if isinstance(h, v.urllib.request.HTTPRedirectHandler)]; assert [type(h) for h in hs] == [v.HttpsOnlyRedirects]'
+unit "the lookup goes through the opener, the timer disarmed" '
+assert lookup(versions("1.0", "2.0")) == "2.0" and signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)'
+unit "metadata over the size cap is given up, the timer disarmed" '
+assert lookup(versions("1.0", "2.0"), MAX_METADATA_BYTES=10) is None and signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)'
+unit "a lookup is cut off by the wall clock, the timer disarmed" '
+v.OPENER, v.LOOKUP_DEADLINE, start = Stub(versions("1.0"), delay=2), 0.2, time.monotonic()
+assert v.get_latest_version("https://a", "g", "a") is None and time.monotonic() - start < 1
+assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)'
+unit "a lookup is cut off though the connect loop catches OSError, the timer disarmed" '
+class Swallow(Stub):
+    def open(self, url, timeout=None):
+        try: time.sleep(3)
+        except OSError: time.sleep(3)
+        return super().open(url, timeout)
+v.OPENER, v.LOOKUP_DEADLINE, start = Swallow(versions("1.0")), 0.2, time.monotonic()
+assert v.get_latest_version("https://a", "g", "a") is None and time.monotonic() - start < 1
+assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)'
+unit "metadata with a DOCTYPE and an entity is refused" \
+  'assert lookup(b"<!DOCTYPE m [<!ENTITY e \"1.0\">]><metadata><versioning><versions><version>&e;</version></versions></versioning></metadata>") is None'
+for encoding in xxx shift_jis; do
+  unit "an encoding declaration of $encoding is malformed metadata, not a traceback" \
+    'assert lookup(b"<?xml version=\"1.0\" encoding=\"'$encoding'\"?><metadata/>") is None'
+done
 unit "a version of non-ASCII digits is not stable" 'assert not v.is_stable("\u00b2")'
+unit "a non-ASCII-digit version is skipped for the stable one" 'assert lookup(versions("1.0", "\u00b2")) == "1.0"'
+unit "a version of 5000 digits is unusable, not a traceback" 'assert lookup(versions("9" * 5000)) is None'
+unit "a marker with a control character is no version, a plain one is" '
+assert lookup(meta("<release>4.0&#x9b;31m</release>")) is None
+assert lookup(meta("<release>4.0.0-beta-4</release>")) == "4.0.0-beta-4"'
 unit "a latest that is no number is classified, not parsed" \
   'assert v.compare("1.0", "4.0.0-beta-4") == v.compare("1.0-rc1", "4.0.0-beta-4") == "unordered"'
+project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example lib "$(ref lib.version)")</dependencies>"
+PROJECT_ROOT=$proj unit "a release marker that is no number is printed as not compared" \
+  'assert "is not numeric, not compared" in report(meta("<release>4.0.0-beta-4</release>"))'
+for pair in "2.0|Outdated (1):" "1.0|Up to date: 1" "0.9|newer than the latest release"; do
+  PROJECT_ROOT=$proj unit "a latest of ${pair%%|*} for the 1.0 pin prints '${pair#*|}'" \
+    'assert "'"${pair#*|}"'" in report(versions("'"${pair%%|*}"'"))'
+done
 
 [[ $fails == 0 ]]
