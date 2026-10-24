@@ -898,15 +898,22 @@ inherit it, and Maven reads it through the link:
   read-only, in
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/maven-<version>/`; later runs
   need no network for it. `DEVKIT_MAVEN_MIRROR`, an environment variable,
-  replaces Central's base URL; empty means Central. Every Java target validates
-  it, not only a download: `https://`, a non-empty host and an optional path,
-  with no `@`, `?`, `#` or whitespace anywhere, and it is refused otherwise
-  without being printed. devkit prints the URL on a download, so it must hold no
-  secret anywhere, a path token included. Authenticated mirrors and air-gapped
-  seeding are unsupported (#134). A download is capped at 100M. The pin and the
-  cache path stay. A cache entry without a launcher fails with the command that
-  removes it, for a retry. A project's `mvnw` is optional, of any distribution
-  type, for an IDE or a bare build.
+  replaces Central's base URL; empty means Central. Every Java target
+  validates it, not only a download: `https://`, a non-empty host and an
+  optional path, with no `@`, `?`, `#` or whitespace anywhere, and it is
+  refused otherwise without being printed. devkit prints the URL on a
+  download and in `make check`'s report, so it must hold no secret anywhere, a
+  path token included. `make check`'s report of outdated version pins
+  (`scripts/java/version_check.py`) reads each artifact's `maven-metadata.xml`
+  from the mirror too, and validates the value at least as strictly (it also
+  refuses Unicode whitespace). There is no fallback to Central: the mirror
+  must serve `maven-metadata.xml` for the report, or every pin lands under
+  "Could not check". A mirror that caches metadata can delay an outdated line,
+  or print a false "ahead" line, by its cache lifetime. Authenticated
+  mirrors and air-gapped seeding are unsupported (#134). A download is capped
+  at 100M. The pin and the cache path stay. A cache entry without a launcher
+  fails with the command that removes it, for a retry. A project's `mvnw` is
+  optional, of any distribution type, for an IDE or a bare build.
   `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs on
   (`$JAVA_HOME/bin/java`, else `java` on `PATH`; the probe follows the caller's
   `JAVA_HOME`, so one set in `/etc/mavenrc` or `~/.mavenrc` is not seen), then

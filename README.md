@@ -226,7 +226,8 @@ under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
 Before tagging, review the parent's pins against Maven
-Central (advisory, needs the network):
+Central, or against `DEVKIT_MAVEN_MIRROR` when that is set (advisory, needs the
+network):
 
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py

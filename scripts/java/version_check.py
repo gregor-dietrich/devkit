@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Report pom.xml version properties whose artifacts have a newer release on Maven Central.
+"""Report pom.xml version properties whose artifacts have a newer release on Maven Central or
+DEVKIT_MAVEN_MIRROR.
 
 A version property is the unit of work: it is what you edit to bump, and one property can
 pin several artifacts (${vaadin.version} covers three). The artifacts behind each property
-are resolved from the pom so Maven Central can be queried by real groupId:artifactId.
+are resolved from the pom so the repository can be queried by real groupId:artifactId.
 
 Multi-module projects are scanned as the root pom plus every <modules> pom; module poms
 inherit the root pom's properties, and dependencies between the project's own modules are
-skipped (they are not published to Maven Central).
+skipped (they are not published).
 """
 
+import http.client
 import os
 import re
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -35,7 +39,12 @@ COORDINATE_TAGS = ("dependency", "plugin", "path", "extension")
 DEFAULT_PLUGIN_GROUP = "org.apache.maven.plugins"
 
 MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
-REQUEST_TIMEOUT = 15
+# The rule every Java target holds DEVKIT_MAVEN_MIRROR to (docs/contract.md, Parent POM):
+# https://HOST[/PATH], no @ anywhere, no query, fragment or whitespace.
+MIRROR_URL = re.compile(r"https://[^/@?#\s]+(/[^?#\s]*)?")
+REQUEST_TIMEOUT = 15  # per socket operation
+LOOKUP_DEADLINE = 60  # seconds for one whole metadata lookup, a trickling server included
+MAX_METADATA_BYTES = 16 * 1024 * 1024  # maven-metadata.xml is kilobytes
 
 PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
 
@@ -139,8 +148,8 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
     roots = [ET.parse(path).getroot() for path in pom_paths]
     # Module poms inherit the root pom's properties; a module's own definition wins.
     base_properties = get_properties(roots[0])
-    # The reactor's own modules are not published to Maven Central; dependencies between
-    # them are skipped rather than looked up.
+    # The reactor's own modules are not published; dependencies between them are skipped
+    # rather than looked up.
     reactor = {c for c in (project_coordinate(root) for root in roots) if c is not None}
 
     pins: dict[str, Pin] = {}
@@ -216,8 +225,8 @@ def get_version_pins(pom_paths: list[Path]) -> PomScan:
 
 
 def is_stable(version: str) -> bool:
-    """True for purely numeric versions; rejects 4.0.0-beta-4, 3.38.0.CR1, 26.0.alpha1, ..."""
-    return all(chunk.isdigit() for chunk in version.split("."))
+    """True for purely numeric versions (ASCII digits); rejects 4.0.0-beta-4, 3.38.0.CR1, 26.0.alpha1, ..."""
+    return all(chunk.isascii() and chunk.isdigit() for chunk in version.split("."))
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -225,22 +234,61 @@ def parse_version(version: str) -> tuple[int, ...]:
     return tuple(int(chunk) for chunk in version.split("."))
 
 
-def get_latest_version(group: str, artifact: str) -> str | None:
-    """Return the newest stable version of an artifact on Maven Central, or None on failure.
+def repository() -> str:
+    """The base URL to query: DEVKIT_MAVEN_MIRROR, validated as every Java target does, else Central."""
+    mirror = os.environ.get("DEVKIT_MAVEN_MIRROR", "")
+    if not mirror:
+        return MAVEN_CENTRAL
+    # Never printed: the checks keep a secret out of the URL that the header prints.
+    if "@" in mirror:
+        sys.exit(
+            "ERROR: DEVKIT_MAVEN_MIRROR names a user or password (user@ or user:password@), "
+            "which devkit would print; use a mirror that needs none"
+        )
+    if not MIRROR_URL.fullmatch(mirror):
+        sys.exit(
+            "ERROR: DEVKIT_MAVEN_MIRROR must be an https:// base URL with a host and no query, "
+            "fragment or whitespace"
+        )
+    return mirror.removesuffix("/")
+
+
+class HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to https, as the pinned-Maven download does."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme != "https":
+            return None  # urllib then raises the 3xx as an HTTPError
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(HttpsOnlyRedirects)
+
+
+def get_latest_version(base: str, group: str, artifact: str) -> str | None:
+    """Return the newest stable version of an artifact in the repository at base, or None on failure.
 
     Central's <latest>/<release> markers routinely point at pre-releases (maven-compiler-plugin
     advertises 4.0.0-beta-4, quarkus-bom 3.38.0.CR1), which would report false upgrades, so the
     stable entries of <versions> decide. The markers are only a fallback for artifacts that
     publish no purely numeric version at all.
     """
-    url = f"{MAVEN_CENTRAL}/{group.replace('.', '/')}/{artifact}/maven-metadata.xml"
+    url = f"{base}/{group.replace('.', '/')}/{artifact}/maven-metadata.xml"
     try:
-        with urllib.request.urlopen(url, timeout=REQUEST_TIMEOUT) as response:
-            content = response.read()
+        deadline = time.monotonic() + LOOKUP_DEADLINE
+        body = bytearray()
+        with OPENER.open(url, timeout=REQUEST_TIMEOUT) as response:
+            while chunk := response.read1(65536):  # read() would wait for all 64K, past the deadline
+                body += chunk
+                if len(body) > MAX_METADATA_BYTES or time.monotonic() > deadline:
+                    print(f"Error: {group}:{artifact} — metadata over {MAX_METADATA_BYTES} bytes or "
+                          f"{LOOKUP_DEADLINE}s, given up", file=sys.stderr)
+                    return None
+        content = bytes(body)
     except urllib.error.HTTPError as exc:
         print(f"Error: status {exc.code} for {group}:{artifact}", file=sys.stderr)
         return None
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
         print(f"Error: {group}:{artifact} — {exc}", file=sys.stderr)
         return None
 
@@ -258,19 +306,26 @@ def get_latest_version(group: str, artifact: str) -> str | None:
         for candidate in versioning.iterfind("versions/version")
         if is_stable((candidate.text or "").strip())
     ]
-    if stable:
-        return max(stable, key=parse_version)
+    try:
+        if stable:
+            return max(stable, key=parse_version)
 
-    for marker in ("release", "latest"):
-        element = versioning.find(marker)
-        if element is not None and element.text and element.text.strip():
-            return element.text.strip()
+        for marker in ("release", "latest"):
+            element = versioning.find(marker)
+            if element is not None and element.text and element.text.strip():
+                latest = element.text.strip()
+                if is_stable(latest):
+                    parse_version(latest)  # callers compare it numerically
+                return latest
+    except ValueError as exc:  # e.g. a version of over 4300 digits
+        print(f"Error: {group}:{artifact} — unusable version in metadata ({exc})", file=sys.stderr)
+        return None
 
     print(f"Error: {group}:{artifact} — no version found in metadata", file=sys.stderr)
     return None
 
 
-def get_bump_target(pin: Pin) -> tuple[str | None, list[str]]:
+def get_bump_target(pin: Pin, base: str) -> tuple[str | None, list[str]]:
     """Find the newest version publishable for every artifact a pin covers, plus any notes.
 
     One property bumped to a version that not all of its artifacts have released would break
@@ -279,7 +334,7 @@ def get_bump_target(pin: Pin) -> tuple[str | None, list[str]]:
     notes: list[str] = []
     latest_per_artifact: dict[Coordinate, str] = {}
     for coordinate in pin.coordinates:
-        latest = get_latest_version(coordinate.group, coordinate.artifact)
+        latest = get_latest_version(base, coordinate.group, coordinate.artifact)
         if latest is None:
             notes.append(f"could not check {coordinate}")
             continue
@@ -302,6 +357,8 @@ def compare(current: str, latest: str) -> str:
     """Classify a pinned version against the latest stable release."""
     if current == latest:
         return "current"
+    if not is_stable(latest):
+        return "unordered"  # a <release>/<latest> marker is no number to compare with
     if not is_stable(current):
         return "prerelease"  # pinned pre-release; numeric comparison would be misleading
     return "outdated" if parse_version(latest) > parse_version(current) else "ahead"
@@ -321,11 +378,12 @@ def main() -> None:
     if not POM_PATH.is_file():
         print(f"ERROR: {POM_PATH} not found.", file=sys.stderr)
         sys.exit(1)
+    base = repository()
 
     scan = get_version_pins(find_pom_paths(POM_PATH))
     print(
         f"Checking {len(scan.pins)} version properties "
-        f"({scan.artifact_count} artifacts) against Maven Central...\n"
+        f"({scan.artifact_count} artifacts) against {'Maven Central' if base == MAVEN_CENTRAL else base}...\n"
     )
 
     results: list[tuple[Pin, str, str]] = []  # pin, latest, status
@@ -333,7 +391,7 @@ def main() -> None:
     notes = list(scan.notes)
 
     for pin in scan.pins:
-        target, pin_notes = get_bump_target(pin)
+        target, pin_notes = get_bump_target(pin, base)
         notes.extend(pin_notes)
         if target is None:
             unchecked.append(pin)
@@ -352,7 +410,9 @@ def main() -> None:
     print(f"Up to date: {sum(1 for entry in results if entry[2] == 'current')}")
     for pin, target, status in results:
         if status == "ahead":
-            print(f"  {pin.name} pinned at {pin.version}, newer than Central's {target}")
+            print(f"  {pin.name} pinned at {pin.version}, newer than the latest release {target}")
+        elif status == "unordered":
+            print(f"  {pin.name} pinned at {pin.version}, latest release {target} is not numeric, not compared")
         elif status == "prerelease":
             print(f"  {pin.name} pinned at pre-release {pin.version} (latest stable {target})")
 

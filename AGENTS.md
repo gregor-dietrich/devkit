@@ -57,6 +57,9 @@ break a gate silently.
   `scripts/lib/get_maven.sh`, `scripts/lib/mvn_checked.sh` and
   `scripts/java/check_frontend_deps.py`, whose constants name plugins the
   file must hold);
+  `scripts/java/version_check.py`, whose own copy of the
+  `DEVKIT_MAVEN_MIRROR` rule decides where its requests go and keeps a
+  credential out of what it prints;
   the git hooks and the record that lets `pre-push` skip
   (`scripts/hooks/`, `scripts/hooks.sh`, `scripts/gate.sh`); and
   `.gitea/workflows/`.

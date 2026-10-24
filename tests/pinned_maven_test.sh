@@ -138,6 +138,7 @@ case_mirror_http() {
   DEVKIT_MAVEN_MIRROR=http://mirror.example/m2 run
   one_error "must be an https:// base URL" && ! logged curl
 }
+# tests/version_check_test.sh refuses the same values with its own copy of the rule: a value added to either list belongs in both
 case_mirror_credentials() { # refused without printing them, http or not, wherever the @ stands
   local value
   for value in https://user:s3cret@mirror.example/m2 http://s3cret@mirror.example/m2 https:///u:s3cret@h \
