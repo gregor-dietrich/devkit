@@ -237,20 +237,26 @@ its closures to every consumer that bumps to it, so a failing advisory is
 fixed or justified in the closure's `audit-ignore`, in a pull request of its
 own, first.
 
-Then tag, from `main`'s tip, with this snippet rather than `make tag`. It
+Then tag with this snippet rather than `make tag`, from the clone's root. It
 needs git 2.35 or later, ssh-keygen (OpenSSH 8.1 or later), and the release
-key loaded in ssh-agent: it signs with the key of `devkitw`'s
-allowed-signers line, whatever `user.signingKey` says, so a tag can only be
-signed by the key the wrapper trusts:
+key's private key file (`SHA256:YJ2Fd7DJs457P73/i3q0Q5uHKM9z6X2wcz/pbj14+/8`)
+at `~/.ssh/id_devkit`, or at the path `DEVKIT_RELEASE_KEY` names; no
+ssh-agent is involved. It switches to `main`, fast-forwards it to the
+remote's, refuses when the two still differ, and signs with that file only
+when its public key is the one on `devkitw`'s allowed-signers line, so a tag
+can only be signed by the key the wrapper trusts:
 
 ```sh
-git fetch -q origin main && git merge-base --is-ancestor HEAD FETCH_HEAD &&
+git switch -q main && git pull -q --ff-only origin main &&
+  { [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] ||
+    { echo "main differs from origin's main" >&2; false; }; } &&
 key=$(sed -n "s/^signers='devkit-release namespaces=\"git\" \(.*\)'$/\1/p" devkitw) &&
   : "${key:?devkitw carries no one-line allowed-signers value}" &&
-tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET
-version = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version")
-print((version or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
-  git -c gpg.format=ssh -c user.signingKey="key::$key" tag -a -s "$tag" -m "devkit $tag" &&
+file=${DEVKIT_RELEASE_KEY:-$HOME/.ssh/id_devkit} &&
+  { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$key" ] ||
+    { echo "$file is not the release key devkitw trusts" >&2; false; }; } &&
+tag=v$(python3 -c 'import sys, xml.etree.ElementTree as ET; v = ET.parse("java/parent/pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version"); print((v or "").strip() or sys.exit("java/parent/pom.xml declares no <version>"))') &&
+  git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "devkit $tag" &&
   git push origin "$tag"
 ```
 
@@ -272,8 +278,8 @@ tag=$(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/v*' | sed 
 
 Tags are never moved to another commit, and never reused. Were one moved,
 the wrapper would refuse the fetched commit rather than build with it.
-v0.1.0 through v0.6.0 were re-signed once with the SSH release key, at their
-same commits, so that the current wrapper fetches every release.
+Every release tag is signed with the release key; v0.1.0 through v0.7.0 were
+re-signed with it at their same commits.
 
 On devkit's forge, and on any mirror a consumer pins, only the maintainer may
 create, move or delete `v*` tags. A signature does not stop anyone deleting a
@@ -304,6 +310,15 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
 
 ### Upgrading from v0.7.x
+
+`devkitw` (revision 3) carries devkit's release key,
+`SHA256:YJ2Fd7DJs457P73/i3q0Q5uHKM9z6X2wcz/pbj14+/8`, which signs every
+release tag; v0.1.0 through v0.7.0 were re-signed with it at their same
+commits. Copy `devkitw` with the bump: a wrapper of revision 2 refuses
+every tag on a cache miss, whichever version it pins, so a project that stays
+on an older release copies it too; a checkout already in the cache keeps
+working. A remote that mirrors devkit re-syncs its `v*` tags with force (`git
+fetch --force --tags` or equivalent).
 
 In a uv project, devkit now runs only its own copy of the uv `uv.lock`
 pins, never a `uv` on `PATH`, and keeps a copy per platform and set of
