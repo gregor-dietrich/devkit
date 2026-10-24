@@ -20,7 +20,7 @@
 
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-parent</artifactId>
-  <version>0.7.0</version>
+  <version>0.8.0</version>
   <packaging>pom</packaging>
 
   <properties>
@@ -34,12 +34,12 @@
     <dependency-check-plugin.version>13.0.0</dependency-check-plugin.version>
     <eclipse-formatter.version>4.41</eclipse-formatter.version>
     <enforcer-plugin.version>3.6.3</enforcer-plugin.version>
-    <error-prone.version>2.50.0</error-prone.version>
+    <error-prone.version>2.51.0</error-prone.version>
     <flatten-plugin.version>1.8.0</flatten-plugin.version>
     <!-- Also drives the org.jacoco artifacts quarkus-jacoco uses. See dependencyManagement. -->
     <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
     <license-plugin.version>2.7.1</license-plugin.version>
-    <nullaway.version>0.14.2</nullaway.version>
+    <nullaway.version>0.14.3</nullaway.version>
     <pmd-plugin.version>3.28.0</pmd-plugin.version>
     <resources-plugin.version>3.5.0</resources-plugin.version>
     <spotbugs-plugin.version>4.10.5.0</spotbugs-plugin.version>

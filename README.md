@@ -517,6 +517,11 @@ findings print no commit (the contract lists when, #189). Re-anchor existing
 `^`-anchored path patterns there, allowlist `paths` and rule `path`s alike, to
 `^(b/)?`.
 
+The parent now runs Error Prone 2.51.0 rather than 2.50.0, and NullAway
+0.14.3 rather than 0.14.2. Under `-Werror`, a check either release adds or
+tightens fails the build on code that passed before: a new finding is fixed
+with the bump, or suppressed where the contract allows it.
+
 ### Upgrading from v0.6.x
 
 After the bump, copy the wrapper the old one has just fetched and verified,
