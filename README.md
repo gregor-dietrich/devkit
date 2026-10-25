@@ -330,33 +330,76 @@ SpotBugs now also runs find-sec-bugs 1.14.0 (`findsecbugs.version`), whose
 security detectors report XML parsers open to external entities, path traversal,
 server-side request forgery, weak cryptography and predictable randomness,
 command and SQL injection, unsafe deserialization and log injection, at
-SpotBugs' threshold (Low). `make lint`, `make test` and `make install` can fail
-on code that passed before. Each new finding is fixed, or excluded as narrowly
-as it stands: in the module's `spotbugs-exclude.xml` by pattern and class or
-method, or with `@SuppressFBWarnings` and a `justification`. An exclusion of a
-whole pattern turns that check off for the module, and one of the `SECURITY`
-category all of them. devkit's baseline excludes `JAXRS_ENDPOINT`, which marks
-every JAX-RS method annotated `@Path` for review rather than reporting a defect;
-a project that sets `excludeFilterFile` itself adds `JAXRS_ENDPOINT` to its own
-filter. Expect `CRLF_INJECTION_LOGS` on a call on `org.jboss.logging.Logger`,
-`org.jboss.logging.BasicLogger` or Quarkus' `io.quarkus.logging.Log` that logs a
-value the analysis cannot trace to a constant (devkit adds their methods as
-sinks), and `IMPROPER_UNICODE` on `equalsIgnoreCase` and case conversions
-without a locale. The taint analysis takes more heap and time: a project that
-hits the plugin's limits raises `<maxHeap>` (512 MB by default) or `<timeout>`.
-A project that added find-sec-bugs to its own SpotBugs configuration removes
-that declaration and any `findsecbugs.version` property, which every Java target
-now refuses as a partial migration; one that declares another detector in
-SpotBugs' `<plugins>` adds `combine.children="append"` to that list; one that
-sets find-sec-bugs' sink property
-`findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector` itself keeps
-the parent's value in it, joined with `:`. The parent check refuses each
-otherwise, and says what to keep. It also refuses `combine.self="override"` on
-the compiler's `<compilerArgs>` and `<annotationProcessorPaths>` and on
+SpotBugs' threshold (Low). `make lint`, `make test`, `make coverage` and `make
+install` can fail on code that passed before. Each new finding is fixed, or
+excluded as narrowly as it stands: in the module's `spotbugs-exclude.xml` by
+pattern and class or method, or with `@SuppressFBWarnings` and a
+`justification`. An exclusion of a whole pattern turns that check off for the
+module, and one of the `SECURITY` category all of them. devkit's baseline
+excludes `JAXRS_ENDPOINT`, which marks every JAX-RS method annotated `@Path` for
+review rather than reporting a defect; a project that sets `excludeFilterFile`
+itself adds `JAXRS_ENDPOINT` to its own filter. Expect `CRLF_INJECTION_LOGS` on
+a call on `org.jboss.logging.Logger`, `org.jboss.logging.BasicLogger` or
+Quarkus' `io.quarkus.logging.Log` that logs a value the analysis cannot trace to
+a constant (devkit adds their methods as sinks), and `IMPROPER_UNICODE` on
+`equalsIgnoreCase` and case conversions without a locale. The taint analysis
+takes more heap and time: a project that hits the plugin's limits raises
+`<maxHeap>` (512 MB by default) or `<timeout>`. A project that added
+find-sec-bugs to its own SpotBugs configuration removes that declaration and any
+`findsecbugs.version` property, which every Java target now refuses as a partial
+migration; one that declares another detector in SpotBugs' `<plugins>` adds
+`combine.children="append"` to that list; one that sets find-sec-bugs' sink
+property `findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector`
+itself keeps the parent's value in it, joined with `:`. The parent check refuses
+each otherwise, and says what to keep. It also refuses `combine.self="override"`
+on the compiler's `<compilerArgs>` and `<annotationProcessorPaths>` and on
 SpotBugs' `<plugins>` and `<configuration>`, which drops the parent's gates
 whatever `combine.children` says, and a project path containing `:`, where
 find-sec-bugs would silently not load: such a project drops the override, or
 moves its checkout.
+
+javac now also reports its `serial` and `this-escape` lint, which `-Werror`
+turns into failures of the targets that compile (`make lint`, `make test`,
+`make coverage` and `make install`, and an IDE build or a bare `mvn`): a
+`Serializable` class without a `serialVersionUID` (an exception class included)
+or with a non-transient field of a non-serializable type such as `List`, and a
+constructor of a class open to subclasses that calls an overridable method or
+hands `this` out. What newly fails:
+
+- Test sources: SpotBugs does not analyse them and PMD's twin rules are
+  excluded. A package-private class gets no `this-escape`, which spares most
+  JUnit classes.
+- Code that passes only because SpotBugs is told to skip it: a
+  `spotbugs-exclude.xml` entry or `@SuppressFBWarnings` for
+  `SE_NO_SERIALVERSIONID`, `SE_BAD_FIELD` or
+  `MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR`.
+- A constructor that hands `this` to other code (`registry.add(this)`), which
+  SpotBugs does not report.
+
+Each is fixed, or suppressed at the site with `@SuppressWarnings("serial")` or
+`@SuppressWarnings("this-escape")`, which devkit's Checkstyle allows. Only where
+the construct is pervasive, as in a framework such as Vaadin (components are
+`Serializable` by inheritance, and their constructors build the UI), or the code
+cannot be annotated (generated sources: javac has no path exclusion), does the
+module turn the lint off in its maven-compiler-plugin `<configuration>`, for the
+lint it needs and no other. A module that already excludes those SpotBugs
+patterns, as a Vaadin module does, keeps them:
+
+```xml
+<compilerArgs combine.children="append">
+  <arg>-Xlint:-serial</arg>
+  <arg>-Xlint:-this-escape</arg>
+</compilerArgs>
+```
+
+Under `-Werror`, javac reports `serial` before `this-escape`: a class with both
+fails on `serial` alone, and `this-escape` shows once that is clean, so expect
+another round. The compiler does not recompile up-to-date classes for a changed
+argument, so a `make lint` on an existing `target/` passes until `make clean`
+runs once after the bump. The targets run Maven with `-q`, which hides the
+warning itself: the failure says only that warnings were found with `-Werror`
+set. An IDE build, or `mvn test-compile` without `-q` (`compile` alone misses
+test sources), names it.
 
 ### Upgrading from v0.7.x
 

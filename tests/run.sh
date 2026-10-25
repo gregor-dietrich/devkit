@@ -137,7 +137,13 @@
 #          exclusions on the SpotBugs analyzer to equal the plugin pom's own,
 #          and find-sec-bugs to run: an XML parser open to external entities
 #          and a JBoss Logging call of an untrusted value to fail lint, the
-#          JAX-RS endpoint marker excluded, with no analysis error.
+#          JAX-RS endpoint marker excluded, with no analysis error. Expect
+#          javac's serial and this-escape lint to fail lint under -Werror;
+#          once the module appends -Xlint:-serial or -Xlint:-this-escape,
+#          SpotBugs' matching pattern to fail it where SpotBugs reports the
+#          construct, and lint to pass once that pattern is excluded, or at
+#          once for a constructor handing this out, which SpotBugs does not
+#          report.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.36 (SSH signing; lint-secrets' remerge)
@@ -879,8 +885,33 @@ nullaway_in_tests() {
   grep -qF '@SuppressWarnings("NullAway")' "$1/$2" && make_says pass "$1" lint "Lint checks completed."
 }
 
+# javac_lint LINT SED PATTERN [NAME]: SED's break of Greeter in a monolith copy fails make lint on
+# javac's LINT under -Werror, the only part of javac's message -q keeps. Once the copy appends
+# -Xlint:-LINT to its compilerArgs, as a module whose framework needs that does, javac is silent: a
+# non-empty PATTERN makes lint fail on SpotBugs' PATTERN for the same construct, and it passes once
+# the class excludes PATTERN; an empty one is a construct only javac reports, which then passes.
+# NAME (default LINT) keeps the copies of one LINT's cases apart.
+javac_lint() {
+  local dir=$work/javac-${4:-$1}
+  edited "$dir" src/main/java/devkit/fixture/Greeter.java "$2" && make_says fail "$dir" lint "-Werror" || return
+  sed_into "$dir/pom.xml" "s|^</project>|  <build>\\n    <plugins>\\n      <plugin>\\n        <artifactId>maven-compiler-plugin</artifactId>\\n        <configuration>\\n          <compilerArgs combine.children=\"append\">\\n            <arg>-Xlint:-$1</arg>\\n          </compilerArgs>\\n        </configuration>\\n      </plugin>\\n    </plugins>\\n  </build>\\n&|" || return
+  [[ -z $3 ]] || {
+    make_says fail "$dir" lint "$3" &&
+      sed_into "$dir/spotbugs-exclude.xml" "s|\" />\$|\">\\n  <Match>\\n    <Class name=\"devkit.fixture.Greeter\" />\\n    <Bug pattern=\"$3\" />\\n  </Match>\\n</FindBugsFilter>|"
+  } && make_says pass "$dir" lint "Lint checks completed."
+}
+
 negatives() {
   assert_helper_checks
+  check "java-monolith: a Serializable class without a serialVersionUID fails make lint, until the module appends -Xlint:-serial and excludes SpotBugs' SE_NO_SERIALVERSIONID" \
+    javac_lint serial 's/^import edu/import java.io.Serializable;\n\nimport edu/; s/^public final class Greeter {/public final class Greeter implements Serializable {/' \
+    SE_NO_SERIALVERSIONID
+  check "java-monolith: a constructor calling an overridable method fails make lint, until the module appends -Xlint:-this-escape and excludes SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR" \
+    javac_lint this-escape 's/^public final class Greeter {/public class Greeter {\n\n    \/** Greets once on construction. *\/\n    public Greeter() {\n        greet("x");\n    }/' \
+    MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR
+  check "java-monolith: a constructor handing this out to a static list fails make lint, which SpotBugs does not report, until the module appends -Xlint:-this-escape" \
+    javac_lint this-escape 's/^import edu/import java.util.ArrayList;\nimport java.util.List;\n\nimport edu/; s/^public final class Greeter {/public class Greeter {\n\n    private static final List<Object> SEEN = new ArrayList<>();\n\n    \/** Registers itself on construction. *\/\n    public Greeter() {\n        SEEN.add(this);\n    }/' \
+    "" this-escape-handed
   check "java-monolith: checkstyle-xpath-suppressions.xml suppresses a violation make lint reports" \
     xpath_suppression
   check "java-monolith: find-sec-bugs runs: an XML parser open to external entities and a JBoss Logging or Quarkus Log call of an untrusted value fail make lint, also as the format of a long overload and not under a constant format with a long, the JAX-RS endpoint marker excluded, with no analysis error" \

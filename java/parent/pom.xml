@@ -168,18 +168,18 @@
             <compilerArgs>
               <!--
                 -Werror: any compiler warning (javac lint or Error Prone) fails the build.
-                -Xlint:all with three deliberate exclusions:
-                  -serial: Vaadin components are Serializable by inheritance; a
-                           serialVersionUID in every view and component is boilerplate
-                  -this-escape: flags the standard Vaadin constructor-builds-UI idiom,
-                           not actual bugs
+                -Xlint:all with one exclusion:
                   -classfile: noise from third-party jars referencing optional annotations
                            (e.g. OSGi metadata in microprofile-config); not fixable here
+                A module whose framework needs serial or this-escape off (Vaadin: components
+                are Serializable by inheritance, and their constructors build the UI) appends
+                -Xlint:-serial or -Xlint:-this-escape to its compilerArgs with
+                combine.children="append".
                 Error Prone needs the jdk.compiler exports and opens in the consumer's
                 .mvn/jvm.config.
               -->
               <arg>-Werror</arg>
-              <arg>-Xlint:all,-serial,-this-escape,-classfile</arg>
+              <arg>-Xlint:all,-classfile</arg>
               <arg>-XDcompilePolicy=simple</arg>
               <arg>-Xplugin:ErrorProne -Xep:NullAway:ERROR
                 -XepOpt:NullAway:AnnotatedPackages=${nullaway.annotated.packages}

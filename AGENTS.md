@@ -29,6 +29,10 @@ break a gate silently.
   commits, runs or may override updates the contract in the same change;
   one that makes a consumer act also adds upgrade steps to the README for
   the next release (`### Upgrading from vX.Y.x`).
+- A change to the parent's compiler arguments tells consumers in its
+  upgrade note to run `make clean` once after the bump:
+  maven-compiler-plugin does not recompile up-to-date classes for a changed
+  argument, so a stale `target/` passes what a clean build fails.
 - Name no consumer repository or person in shipped files; describe a
   consumer by its shape (a Maven monolith, a uv workspace).
 - A dependency pin bump takes only a release published at least 24 hours

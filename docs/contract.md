@@ -1070,8 +1070,12 @@ inherit it, and Maven reads it through the link:
   jacoco-maven-plugin writes the coverage report, and quarkus-jacoco's own
   would show 0%. A project that wants it back sets the property to `true` in
   its own `<systemPropertyVariables>`.
-- It configures the compiler (`-Werror`, `-Xlint:all` minus `serial`,
-  `this-escape` and `classfile`, Error Prone with NullAway), surefire and
+- It configures the compiler (`-Werror`, `-Xlint:all` minus `classfile`,
+  Error Prone with NullAway; `@SuppressWarnings("serial")` or
+  `("this-escape")` silences one site, and a module where the construct is
+  pervasive (a framework such as Vaadin) or cannot be annotated (generated
+  sources) appends `-Xlint:-serial` or `-Xlint:-this-escape` to its
+  `<compilerArgs combine.children="append">`), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
   PMD (with CPD), Checkstyle (the shared config and the execution
   `project`), JaCoCo (agent, report and coverage check) and Spotless, whose
