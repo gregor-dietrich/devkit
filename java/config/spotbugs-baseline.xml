@@ -3,9 +3,14 @@
      copies each filter into target/ under its own file name, so the two names must differ).
      THROWS_METHOD_THROWS_RUNTIMEEXCEPTION reports every throw of an expression typed exactly
      RuntimeException, so also the rethrow of a caught one. PMD's AvoidThrowingRawExceptionTypes
-     already rejects a throw new RuntimeException(...). -->
+     already rejects a throw new RuntimeException(...).
+     find-sec-bugs' JAXRS_ENDPOINT marks every JAX-RS method annotated @Path for a security review:
+     it reports an endpoint, not a defect, and nothing but removing the endpoint clears it.
+     find-sec-bugs' other patterns are fixed, or excluded in the module's own file: this file admits a
+     find-sec-bugs pattern only if it reports a construct rather than a defect and fires at threshold
+     Low on a construct the stack assumes (measured on a probe before it is added). -->
 <FindBugsFilter xmlns="http://findbugs.sourceforge.net/filter/3.0.0">
   <Match>
-    <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION" />
+    <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION,JAXRS_ENDPOINT" />
   </Match>
 </FindBugsFilter>

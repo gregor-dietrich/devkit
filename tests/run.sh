@@ -38,12 +38,17 @@
 #          checks rejects a copy of the parent that breaks it (a plugin
 #          bumped alone, a log4j exclusion of another groupId, no report
 #          encoding),
+#          and that java/config/findsecbugs-crlf-jboss-logging.txt passes
+#          scripts/java/jboss_logging_sinks.py --check and that the check
+#          rejects a copy whose long-argument line lists the argument's
+#          slots instead of the format's,
 #          and that java/checksums/checksums.sha256 lists the jar of every
-#          plugin, plugin dependency and annotation processor the parent
-#          pins and of the plugins check_frontend_deps.py runs, and that a
-#          file without one is rejected, naming it and make
-#          maven-checksums, that the enforcer's jar and the pinned Maven
-#          distribution's own line are among them (the latter needs the
+#          plugin (find-sec-bugs' detector included), plugin dependency and
+#          annotation processor the parent pins and of the plugins
+#          check_frontend_deps.py runs, and that a file without one is
+#          rejected, naming it and make maven-checksums, that the
+#          enforcer's jar, find-sec-bugs' jar and the pinned Maven
+#          distribution's own line are among them (the last needs the
 #          line of the pin in scripts/lib/pinned_maven.sh, so a Maven
 #          bump without make maven-checksums fails here), and that
 #          MVN_LAUNCHER and pinned_maven.sh are used only where they may be;
@@ -129,7 +134,10 @@
 #          fail lint in main sources, also in a checkout below a src/test
 #          directory, and pass in tests, make test with the integration tests
 #          on (MAVEN_ARGS=-DskipITs=false) to pass, and the parent's
-#          exclusions on the SpotBugs analyzer to equal the plugin pom's own.
+#          exclusions on the SpotBugs analyzer to equal the plugin pom's own,
+#          and find-sec-bugs to run: an XML parser open to external entities
+#          and a JBoss Logging call of an untrusted value to fail lint, the
+#          JAX-RS endpoint marker excluded, with no analysis error.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.36 (SSH signing; lint-secrets' remerge)
@@ -281,6 +289,10 @@ shell_part() {
     lists_reject '/<exclusion>/,/<\/exclusion>/s|<groupId>org.apache.logging.log4j<|<groupId>org.example<|' "does not exclude log4j-core" spotbugs_log4j_excluded
   check "parent: the encoding check rejects a parent without the report encoding" \
     lists_reject '/<project.reporting.outputEncoding>/d' "" parent_encodings
+  check "parent: java/config/findsecbugs-crlf-jboss-logging.txt lists exactly the sink slots of its owners' log methods" \
+    sink_file_valid "$root/java/config/findsecbugs-crlf-jboss-logging.txt"
+  check "parent: the sink file check rejects a long overload whose indices are the long's slots, naming the line" \
+    sink_file_reject 's|^\(org/jboss/logging/Logger.tracef(Ljava/lang/String;J)V:\).*|\10,1|' "Logger.tracef(Ljava/lang/String;J)V:0,1"
   check "parent: docs/contract.md lists the parent's version properties and execution ids, no more and no fewer" \
     contract_lists_match "$root/java/parent/pom.xml" "$root/docs/contract.md"
   check "parent: the contract lists check rejects a version property the contract does not list" \
@@ -321,6 +333,8 @@ shell_part() {
     checksums_reject '/\/apache-maven-[0-9.]*-bin\.tar\.gz$/d' "apache-maven-" "make maven-checksums"
   check "parent: the checksums check rejects a file without the enforcer plugin's jar" \
     checksums_reject '/\/maven-enforcer-plugin\/.*\.jar$/d' "maven-enforcer-plugin-" "make maven-checksums"
+  check "parent: the checksums check rejects a file without find-sec-bugs' jar" \
+    checksums_reject '/\/findsecbugs-plugin\/.*\.jar$/d' "com/h3xstream/findsecbugs/findsecbugs-plugin/" "make maven-checksums"
   check "scripts: MVN_LAUNCHER, which skips the checksums check, is used only by get_maven.sh, mvn_checked.sh and maven_checksums.sh" \
     launcher_uses scripts/lib/get_maven.sh scripts/lib/mvn_checked.sh scripts/maven_checksums.sh
   check "parent: the checksums check rejects a file without the plugins check_frontend_deps.py runs" \
@@ -329,8 +343,9 @@ shell_part() {
 }
 
 # checksums_cover POM FILE FRONTEND DIST: FILE, a trusted checksums file (scripts/lib/mvn_checked.sh),
-# lists the jar of every plugin POM declares with a version, of the dependencies of those plugins,
-# of the annotationProcessorPaths and of the plugins FRONTEND (frontend_plugins of
+# lists the jar of every plugin POM declares with a version (a SpotBugs detector under the plugin's
+# configuration/plugins included), of the dependencies of those plugins, of the
+# annotationProcessorPaths and of the plugins FRONTEND (frontend_plugins of
 # scripts/lib/tree.sh: groupId:artifactId:version, one per line) names, at the path the local
 # repository gives it, and holds the line DIST (maven_pin of tree.sh: the pinned Maven, whose
 # default lifecycle plugins the file records). Only top-level jars are checked, not their transitive
@@ -421,6 +436,22 @@ lists_reject() { # lists_reject SED TEXT [CHECK]: CHECK (default license_lists_w
   local copy err
   copy=$(mktemp) && sed "$1" "$root/java/parent/pom.xml" >"$copy" && ! cmp -s "$copy" "$root/java/parent/pom.xml" &&
     ! err=$("${3:-license_lists_whole}" "$copy" 2>&1) && [[ $err == *"$2"* ]]
+  local status=$?
+  rm -f "$copy"
+  return $status
+}
+
+# sink_file_valid FILE: scripts/java/jboss_logging_sinks.py accepts the SpotBugs sink file FILE.
+sink_file_valid() {
+  python3 -I "$root/scripts/java/jboss_logging_sinks.py" --check "$1"
+}
+
+# sink_file_reject SED TEXT: the sink check fails on a copy of the shipped file run through SED (which
+# must change it), saying TEXT.
+sink_file_reject() {
+  local file=$root/java/config/findsecbugs-crlf-jboss-logging.txt copy err
+  copy=$(mktemp) && sed "$1" "$file" >"$copy" && ! cmp -s "$copy" "$file" &&
+    ! err=$(sink_file_valid "$copy" 2>&1) && [[ $err == *"$2"* ]]
   local status=$?
   rm -f "$copy"
   return $status
@@ -668,6 +699,171 @@ XML
     (cd "$work" && "$mvn" -B -q -f "$dir/pom.xml" -Dmaven.multiModuleProjectDirectory="$other" checkstyle:check)
 }
 
+# find_sec_bugs: a monolith copy with an XML parser open to external entities and logging calls of an
+# untrusted value, in a JAX-RS endpoint (Path, JBoss Logging's Logger and Quarkus' Log are stubbed, as
+# the fixture stubs Quarkus' test annotations), fails make lint with exactly those two finding types:
+# not JAXRS_ENDPOINT, which the baseline excludes, and no analysis error. The calls are to Logger's
+# infof, to its overload with a long argument, whose format is checked at its own stack slot (a
+# constant format with a long is no finding), and to Log's static infof. The stubs carry no logic: the
+# detectors match by class and descriptor.
+find_sec_bugs() {
+  local dir=$work/find-sec-bugs src
+  setup "$root/tests/fixtures/java-monolith" "$dir" || return
+  src=$dir/src/main/java
+  mkdir -p "$src/jakarta/ws/rs" "$src/org/jboss/logging" || return
+  cat >"$src/jakarta/ws/rs/Path.java" <<'JAVA'
+package jakarta.ws.rs;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+/** A stub of the JAX-RS annotation. */
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Path {
+
+    /**
+     * The path.
+     *
+     * @return the path
+     */
+    String value();
+}
+JAVA
+  cat >"$src/org/jboss/logging/Logger.java" <<'JAVA'
+package org.jboss.logging;
+
+/** A stub of JBoss Logging's logger. */
+public final class Logger {
+
+    private static final Logger LOG = new Logger();
+
+    private Logger() {
+    }
+
+    /**
+     * Gets the logger.
+     *
+     * @param type the logging class
+     * @return the logger
+     */
+    public static Logger getLogger(Class<?> type) {
+        return LOG;
+    }
+
+    /**
+     * Logs, formatted.
+     *
+     * @param format the format
+     * @param param1 its argument
+     */
+    public void infof(String format, Object param1) {
+        // Nothing to log in a stub.
+    }
+
+    /**
+     * Logs, formatted, with a long argument.
+     *
+     * @param format the format
+     * @param param1 its argument
+     */
+    public void tracef(String format, long param1) {
+        // Nothing to log in a stub.
+    }
+}
+JAVA
+  mkdir -p "$src/io/quarkus/logging" || return
+  cat >"$src/io/quarkus/logging/Log.java" <<'JAVA'
+package io.quarkus.logging;
+
+/** A stub of Quarkus' static logging facade. */
+public final class Log {
+
+    private Log() {
+    }
+
+    /**
+     * Logs, formatted.
+     *
+     * @param format the format
+     * @param param1 its argument
+     */
+    public static void infof(String format, Object param1) {
+        // Nothing to log in a stub.
+    }
+}
+JAVA
+  cat >"$src/devkit/fixture/XmlReader.java" <<'JAVA'
+package devkit.fixture;
+
+import io.quarkus.logging.Log;
+import jakarta.ws.rs.Path;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import org.jboss.logging.Logger;
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
+
+/** Reads XML. */
+public final class XmlReader {
+
+    private static final Logger LOG = Logger.getLogger(XmlReader.class);
+
+    /**
+     * Reads a document.
+     *
+     * @param in the document
+     * @param name its name
+     * @return the parsed document
+     * @throws IOException if reading fails
+     * @throws ParserConfigurationException if no parser is available
+     * @throws SAXException if the document is malformed
+     */
+    @Path("xml")
+    public Document read(InputStream in, String name)
+            throws IOException, ParserConfigurationException, SAXException {
+        LOG.infof("reading %s", name);
+        return DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(in);
+    }
+
+    /**
+     * Logs a name as the format of a long overload.
+     *
+     * @param name the name
+     */
+    public void named(String name) {
+        LOG.tracef(name, 1L);
+    }
+
+    /**
+     * Logs a number under a constant format.
+     *
+     * @param n the number
+     */
+    public void count(long n) {
+        LOG.tracef("count %d", n);
+    }
+
+    /**
+     * Logs a name through Quarkus' static facade.
+     *
+     * @param name the name
+     */
+    public void quarkus(String name) {
+        Log.infof("quarkus %s", name);
+    }
+}
+JAVA
+  make_says pass "$dir" format && make_says fail "$dir" lint "XXE_DOCUMENT" || return
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+got = {b.get("type") for b in root.iter("BugInstance")}
+logged = {b.find("Method").get("name") for b in root.iter("BugInstance") if b.get("type") == "CRLF_INJECTION_LOGS"}
+errors = root.find("Errors").get("errors")
+sys.exit(f"SpotBugs reported {sorted(got)!r} on {sorted(logged)!r} with {errors} analysis errors") if got != {"XXE_DOCUMENT", "CRLF_INJECTION_LOGS"} or logged != {"read", "named", "quarkus"} or errors != "0" else None' "$dir/target/spotbugsXml.xml"
+}
+
 # nullaway_below_src_test FILE: the NullAway-suppression break of FILE in a monolith copy below a
 # src/test directory still fails make lint.
 nullaway_below_src_test() {
@@ -687,6 +883,8 @@ negatives() {
   assert_helper_checks
   check "java-monolith: checkstyle-xpath-suppressions.xml suppresses a violation make lint reports" \
     xpath_suppression
+  check "java-monolith: find-sec-bugs runs: an XML parser open to external entities and a JBoss Logging or Quarkus Log call of an untrusted value fail make lint, also as the format of a long overload and not under a constant format with a long, the JAX-RS endpoint marker excluded, with no analysis error" \
+    find_sec_bugs
   local main=src/main/java/devkit/fixture/Greeter.java
   local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
   negative format lint "format violations" "$main" "$indent"
@@ -1056,6 +1254,16 @@ got = ET.parse(sys.argv[1]).getroot().get("version")
 sys.exit(f"SpotBugs ran {got!r}, the parent says {sys.argv[2]!r}") if got != sys.argv[2] else None' "$1" "$(spotbugs_version)"
 }
 
+# no_analysis_errors DIR MODULE...: each MODULE of DIR has a SpotBugs report with errors="0".
+no_analysis_errors() {
+  local module
+  for module in "${@:2}"; do
+    python3 -I -c 'import sys, xml.etree.ElementTree as ET
+errors = ET.parse(sys.argv[1]).getroot().find("Errors").get("errors")
+sys.exit(f"{sys.argv[1]}: {errors} analysis errors") if errors != "0" else None' "$1/$module/target/spotbugsXml.xml" || return
+  done
+}
+
 java_part() {
   prepare
   publish
@@ -1069,6 +1277,8 @@ java_part() {
     annotations_managed "$work/java-monolith"
   check "java-monolith: the SpotBugs run reports the parent's spotbugs.version" \
     analyzer_version "$work/java-monolith/target/spotbugsXml.xml"
+  check "java-multimodule: every module's SpotBugs run reports no analysis error" \
+    no_analysis_errors "$work/java-multimodule" core app
   check "java-monolith: the parent's UTF-8 source and report encoding reach a fixture that sets neither" \
     source_encoding "$work/java-monolith"
   check "java-monolith: make test with the integration tests on passes, the parent's quarkus.jacoco.report=false reaching failsafe too" \

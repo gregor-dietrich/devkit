@@ -829,19 +829,56 @@ one is missing or stale. A hook it did not write is never overwritten.
 
 ## Maven configuration
 
-Shared gate configs live in `java/config/` (`checkstyle.xml`,
-`pmd-ruleset.xml`, `eclipse-formatter.xml`, `spotbugs-baseline.xml`).
-devkit's [parent POM](#parent-pom) reads them as
-`${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD reads
-a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
-SpotBugs reads devkit's `spotbugs-baseline.xml` and then the module's own
-`spotbugs-exclude.xml`: devkit's excludes only
-`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION`, which reports every rethrow of a
-caught `RuntimeException`; PMD's `AvoidThrowingRawExceptionTypes` still
-rejects a `throw new RuntimeException(…)`. A project that sets
-`excludeFilterFile` itself replaces both. Project-specific files
-(`dependency-check-suppression.xml`, `spotbugs-exclude.xml`,
-`checkstyle-suppressions.xml`, `checkstyle-project.xml`) stay in the project.
+Shared gate configs live in `java/config/` (`checkstyle.xml`, `pmd-ruleset.xml`,
+`eclipse-formatter.xml`, `spotbugs-baseline.xml`,
+`findsecbugs-crlf-jboss-logging.txt`). devkit's [parent POM](#parent-pom) reads
+them as `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD
+reads a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
+Project-specific files (`dependency-check-suppression.xml`,
+`spotbugs-exclude.xml`, `checkstyle-suppressions.xml`, `checkstyle-project.xml`)
+stay in the project.
+
+SpotBugs runs at threshold `Low` with find-sec-bugs' security detectors
+(`com.h3xstream.findsecbugs:findsecbugs-plugin` at `findsecbugs.version`) beside
+its own, and reads devkit's `spotbugs-baseline.xml` and then the module's own
+`spotbugs-exclude.xml`. devkit's excludes only
+`THROWS_METHOD_THROWS_RUNTIMEEXCEPTION`, which reports every rethrow of a caught
+`RuntimeException` (PMD's `AvoidThrowingRawExceptionTypes` still rejects a
+`throw new RuntimeException(…)`), and find-sec-bugs' `JAXRS_ENDPOINT`, which
+marks every JAX-RS method annotated `@Path` for a security review rather than
+reporting a defect. The baseline admits a find-sec-bugs pattern only if it
+reports a construct rather than a defect and fires at threshold `Low` on a
+construct the stack assumes. Every other finding, find-sec-bugs' included, is
+fixed, or excluded as narrowly as it stands: in the module's
+`spotbugs-exclude.xml` by pattern and class or method, or with
+`@SuppressFBWarnings`. A project that sets `excludeFilterFile` itself replaces
+both files, devkit's exclusions included. SpotBugs keeps the plugin's heap and
+time limits (`maxHeap`, 512 MB, and `timeout`, 10 minutes); a project that needs
+more sets `<maxHeap>` or `<timeout>`.
+
+find-sec-bugs ships no log-injection sinks for JBoss Logging, the facade
+devkit's Checkstyle prescribes, or for Quarkus' `io.quarkus.logging.Log`, so the
+parent hands it `findsecbugs-crlf-jboss-logging.txt` through SpotBugs'
+`<systemPropertyVariables>`, as the property
+`findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector`: a call on
+`org.jboss.logging.Logger`, `org.jboss.logging.BasicLogger` or
+`io.quarkus.logging.Log` that logs a value the analysis cannot trace to a
+constant is a `CRLF_INJECTION_LOGS` finding. find-sec-bugs matches the type the
+call names, so a call through any other type, a `@MessageLogger` interface for
+one, is not covered. A project that adds sinks of its own sets that property to
+the parent's value and its own entries, joined with `:`; the parent check
+refuses a value without the parent's entry, a
+`<systemPropertyVariables combine.self="override">` without it, and a
+`<jvmArgs>` that sets the property, since each drops the sinks. SpotBugs splits
+its plugin list, and find-sec-bugs its sink files, on `:`, so in a project path
+containing one find-sec-bugs would silently not load: the parent check refuses
+such a path.
+
+An analysis error, a detector failing on a class, is written to
+`target/spotbugsXml.xml` but does not fail the check; devkit accepts that risk:
+find-sec-bugs builds against an older SpotBugs plugin API than the analyzer
+devkit pins, and devkit's own tests fail on an analysis error only for the code
+shapes its two fixtures hold.
 
 A rule that names a class, helper or field the project writes belongs to
 the project, not to the shared configs: PMD's UnitTestShouldIncludeAssert runs
@@ -947,6 +984,8 @@ inherit it, and Maven reads it through the link:
   `scripts/java/parent_check.py`, and only then the download, so a bad python3
   or parent fails offline. That fails, with one `ERROR` line and exit status 14,
   when
+  - the project's path contains `:`, on which SpotBugs splits its plugin list,
+    so find-sec-bugs would silently not load;
   - the root pom's `<parent>` is not devkit's;
   - the `<relativePath>` of the root pom, or of any module pom
     (`<modules>`, recursively, profiles included) whose `<parent>` is
@@ -967,7 +1006,14 @@ inherit it, and Maven reads it through the link:
     `.mvn/maven.config` the targets run it too, but the version is
     unrecorded and so unchecked ([Plugin checksums](#plugin-checksums));
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
-    `<annotationProcessorPaths>` without `combine.children="append"`.
+    `<annotationProcessorPaths>`, or spotbugs-maven-plugin's `<plugins>`,
+    without `combine.children="append"` or with `combine.self="override"`, or
+    sets `combine.self="override"` on spotbugs-maven-plugin's `<configuration>`;
+  - any of those poms sets spotbugs-maven-plugin's `<systemPropertyVariables>`
+    property `findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector`
+    to a value that does not keep the parent's entry among its `:`-separated
+    parts, overrides `<systemPropertyVariables>` without keeping it, or sets
+    that property in `<jvmArgs>`.
 - maven-enforcer-plugin (execution `environment`, goal `enforce`, at `validate`)
   checks the environment with two rules. `requireJavaVersion` holds the JDK
   Maven runs on to `devkit.jdk.range`, default `[0,)`, any JDK; make passes
@@ -993,10 +1039,11 @@ inherit it, and Maven reads it through the link:
   (`checkstyle.version`, `checkstyle-plugin.version`,
   `compiler-plugin.version`, `dependency-check-plugin.version`,
   `eclipse-formatter.version`, `enforcer-plugin.version`,
-  `error-prone.version`, `flatten-plugin.version`, `jacoco-plugin.version`,
-  `license-plugin.version`, `nullaway.version`, `pmd-plugin.version`,
-  `resources-plugin.version`, `spotbugs-plugin.version`, `spotbugs.version`,
-  `spotless-plugin.version`, `surefire-plugin.version`), and manages the
+  `error-prone.version`, `findsecbugs.version`, `flatten-plugin.version`,
+  `jacoco-plugin.version`, `license-plugin.version`, `nullaway.version`,
+  `pmd-plugin.version`, `resources-plugin.version`,
+  `spotbugs-plugin.version`, `spotbugs.version`, `spotless-plugin.version`,
+  `surefire-plugin.version`), and manages the
   `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
   JaCoCo matches the plugin's. `spotbugs.version` is the analyzer
   `spotbugs-plugin.version` runs, which SpotBugs is told to use as a plugin
@@ -1143,14 +1190,16 @@ inherit it, and Maven reads it through the link:
   beside it, and an override that leaves that key out has the filter read
   `checkstyle-xpath-suppressions.xml` from Maven's working directory, the
   project root under make.
-- Maven merges any list the parent sets with a consumer's redeclaration
-  element by element, by position, unless the consumer's list carries
-  `combine.children="append"`: a redeclared `<compilerArgs>` silently drops
-  the inherited `-Werror`, Error Prone or NullAway, and the same holds for
+- Maven merges any list the parent sets with a consumer's redeclaration element
+  by element, by position, unless the consumer's list carries
+  `combine.children="append"`: a redeclared `<compilerArgs>` silently drops the
+  inherited `-Werror`, Error Prone or NullAway, and the same holds for
   `<annotationProcessorPaths>`, JaCoCo's `<excludes>` and `<rules>`, PMD's
-  `<rulesets>` and dependency-check's `<suppressionFiles>`; license's
-  `<includedLicenses>` is replaced whole by the project's names, not merged by
-  position. The parent check enforces it for the compiler's two lists only.
+  `<rulesets>`, dependency-check's `<suppressionFiles>` and SpotBugs'
+  `<plugins>`, where a project's own detector would take find-sec-bugs' place;
+  license's `<includedLicenses>` is replaced whole by the project's names, not
+  merged by position. The parent check enforces it for the compiler's two lists
+  and SpotBugs' `<plugins>` only.
 - Some settings live at execution level, where a plugin-level override does not
   reach them; override them inside the execution with the id below: license's
   `force` (`true`, so that every build runs the license checks, not only the
@@ -1188,17 +1237,17 @@ inherit it, and Maven reads it through the link:
 `java/checksums/checksums.sha256` holds the SHA-256 of every artifact that
 building devkit's `java-*` test fixtures through `make lint`, `test`,
 `coverage`, `install` and `format` resolves: the parent's plugins and their
-dependencies, the annotation processors (Error Prone, NullAway) and the
-fixtures' dependencies, plus the closure of dependency-check's goals
-(recorded without an NVD key through the plugin's `help` goal; the closure
-its analysis downloads at run time, not through Maven, is not) and of the
-help and dependency plugins that `check_frontend_deps.py` runs. Each line is
-`<sha256>  <repository path>`. Maven's resolver checks every artifact it
-resolves against the file, from a download or from the local repository,
-and fails the build on a mismatch, so a repository or mirror that serves
-other bytes for a listed coordinate, or a jar altered in the local
-repository, fails the build with `Checksum validation failed … (Trusted
-Checksums Source: summaryFile)`.
+dependencies, the annotation processors (Error Prone, NullAway), find-sec-bugs'
+jar, which SpotBugs resolves through Maven's resolver, and the fixtures'
+dependencies, plus the closure of dependency-check's goals (recorded without an
+NVD key through the plugin's `help` goal; the closure its analysis downloads at
+run time, not through Maven, is not) and of the help and dependency plugins that
+`check_frontend_deps.py` runs. Each line is `<sha256>  <repository path>`.
+Maven's resolver checks every artifact it resolves against the file, from a
+download or from the local repository, and fails the build on a mismatch, so a
+repository or mirror that serves other bytes for a listed coordinate, or a jar
+altered in the local repository, fails the build with
+`Checksum validation failed … (Trusted Checksums Source: summaryFile)`.
 
 - The scripts behind `check`, `install`, `lint`, `format`, `test`, `coverage`,
   `audit` and `clean` run Maven through `scripts/lib/mvn_checked.sh`, which

@@ -57,6 +57,10 @@ break a gate silently.
   `scripts/lib/get_maven.sh`, `scripts/lib/mvn_checked.sh` and
   `scripts/java/check_frontend_deps.py`, whose constants name plugins the
   file must hold);
+  what silences or adds a SpotBugs finding for every consumer
+  (`java/config/spotbugs-baseline.xml` and
+  `java/config/findsecbugs-crlf-jboss-logging.txt`) and the parent POM
+  that applies the gates (`java/parent/pom.xml`);
   `scripts/java/version_check.py`, whose own copy of the
   `DEVKIT_MAVEN_MIRROR` rule decides where its requests go and keeps a
   credential out of what it prints;

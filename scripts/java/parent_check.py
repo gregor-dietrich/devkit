@@ -5,7 +5,8 @@ scripts/lib/get_maven.sh runs this before every Maven build: Maven reads the par
 through the .devkit link, and anything that makes it look de.vptr.devkit:devkit-parent up
 in a remote repository instead must fail here first. Every failure is one ERROR line on
 stderr; exit 14. The root pom must inherit devkit's parent; a module pom that inherits it
-directly gets the root's relativePath, version and groupId rules.
+directly gets the root's relativePath, version and groupId rules. What else it refuses is
+listed in docs/contract.md ("Parent POM").
 """
 
 import os
@@ -18,8 +19,18 @@ REPO_ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 DEVKIT: Path = Path(os.environ.get("DEVKIT", Path(__file__).resolve().parents[2]))
 RELATIVE_PATH = ".devkit/java/parent/pom.xml"
 UPGRADE_HINT = 'see "Upgrading from v0.1.x" in .devkit/README.md'
-# Maven merges these lists with the parent's by position unless the consumer appends.
-COMPILER_LISTS = ("compilerArgs", "annotationProcessorPaths")
+# Maven merges these lists with the parent's by position unless the consumer appends; what a
+# merge drops is the message's tail.
+APPEND_LISTS = {
+    "maven-compiler-plugin": (
+        ("compilerArgs", "annotationProcessorPaths"),
+        "drops the inherited -Werror, Error Prone or NullAway.",
+    ),
+    "spotbugs-maven-plugin": (("plugins",), "its plugin replaces find-sec-bugs."),
+}
+# The system property that hands find-sec-bugs the JBoss Logging sinks; the parent's value D for it
+# must stay in a project's, joined to its own with ':' (find-sec-bugs splits it on File.pathSeparator).
+SINKS_KEY = "findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector"
 EXIT_FAILED = 14
 
 
@@ -80,6 +91,13 @@ def pinned_version() -> str:
 
 def check() -> str:
     """Raise Failure on the first broken rule; return the pass line."""
+    # SpotBugs splits its plugin list, and find-sec-bugs its sink files, on the path separator, so in
+    # such a path find-sec-bugs would silently not load, while SpotBugs' own detectors still run.
+    if os.pathsep in str(REPO_ROOT):
+        raise Failure(
+            f"the project path {REPO_ROOT} contains '{os.pathsep}', on which SpotBugs splits its plugin "
+            "list: find-sec-bugs would silently not load; move the checkout to a path without it."
+        )
     devkit = load(DEVKIT / "java/parent/pom.xml")
     coordinate = f"{text(devkit, 'groupId')}:{text(devkit, 'artifactId')}"
     poms = project_poms(REPO_ROOT / "pom.xml")
@@ -129,6 +147,12 @@ def check() -> str:
             check_parent(path, pom, parent)
 
     owned = {local_name(p) for p in devkit.iterfind("{*}properties/*") if local_name(p).endswith(".version")}
+    sinks = None
+    for plugin in devkit.iterfind(".//{*}plugin"):
+        if text(plugin, "artifactId") == "spotbugs-maven-plugin":
+            sinks = sinks or text(plugin, f"configuration/systemPropertyVariables/{SINKS_KEY}")
+    if sinks is None:
+        raise Failure(f"the parent POM has no spotbugs-maven-plugin <{SINKS_KEY}>: a defective devkit release.")
     for path, pom in poms:
         for prop in pom.iterfind(".//{*}properties/*"):
             if local_name(prop) in owned:
@@ -136,16 +160,51 @@ def check() -> str:
                     f"partial migration: remove <{local_name(prop)}> from {shown(path)}; the parent owns it."
                 )
         for plugin in pom.iterfind(".//{*}plugin"):
-            if text(plugin, "artifactId") != "maven-compiler-plugin":
-                continue
-            for name in COMPILER_LISTS:
+            artifact = text(plugin, "artifactId")
+            names, dropped = APPEND_LISTS.get(artifact, ((), ""))
+            for name in names:
                 for element in plugin.iterfind(f".//{{*}}{name}"):
+                    if element.get("combine.self") == "override":
+                        raise Failure(
+                            f'{shown(path)} sets {artifact} <{name}> with combine.self="override"; '
+                            f"it drops the parent's list whatever combine.children says, so drop the override and "
+                            f'use combine.children="append".'
+                        )
                     if element.get("combine.children") != "append":
                         raise Failure(
-                            f'{shown(path)} sets maven-compiler-plugin <{name}> without combine.children="append"; '
-                            "Maven merges it with the parent's by position and drops the inherited "
-                            "-Werror, Error Prone or NullAway."
+                            f'{shown(path)} sets {artifact} <{name}> without combine.children="append"; '
+                            f"Maven merges it with the parent's by position and {dropped}"
                         )
+            if artifact != "spotbugs-maven-plugin":
+                continue
+            for element in plugin.iterfind(".//{*}configuration"):
+                if element.get("combine.self") == "override":
+                    raise Failure(
+                        f'{shown(path)} sets spotbugs-maven-plugin <configuration> with combine.self="override"; '
+                        "it drops the parent's whole configuration (find-sec-bugs, its JBoss Logging sinks, the "
+                        "baseline), so drop the override."
+                    )
+            for element in plugin.iterfind(".//{*}systemPropertyVariables"):
+                entry = element.find(f"{{*}}{SINKS_KEY}")
+                if entry is None and element.get("combine.self") == "override":
+                    raise Failure(
+                        f'{shown(path)} sets spotbugs-maven-plugin <systemPropertyVariables> with combine.self="override" '
+                        f"and without <{SINKS_KEY}>, which drops find-sec-bugs' JBoss Logging sinks; drop the "
+                        f"override, or keep {sinks} in the ':'-joined value of <{SINKS_KEY}>."
+                    )
+                if entry is not None and sinks not in (entry.text or "").strip().split(":"):
+                    raise Failure(
+                        f"{shown(path)} sets spotbugs-maven-plugin <{SINKS_KEY}> without the parent's {sinks}; "
+                        "it replaces the parent's value and drops find-sec-bugs' JBoss Logging sinks, so keep "
+                        "that entry in the ':'-joined value."
+                    )
+            for element in plugin.iterfind(".//{*}jvmArgs"):
+                if any(token.startswith(f"-D{SINKS_KEY}=") for token in (element.text or "").split()):
+                    raise Failure(
+                        f"{shown(path)} sets -D{SINKS_KEY} in spotbugs-maven-plugin <jvmArgs>, which the parent's "
+                        "<systemPropertyVariables> entry defeats; move a sink file into the "
+                        f"value of <systemPropertyVariables><{SINKS_KEY}>, joined to the parent's with ':'."
+                    )
     return f"devkit parent version check passed. ({text(root_parent, 'version')} == {pin})"
 
 

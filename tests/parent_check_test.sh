@@ -52,6 +52,12 @@ compiler_args() {
   printf '<compilerArgs%s><arg>-Xlint:none</arg></compilerArgs></configuration></plugin></plugins></build>' "$1"
 }
 
+# spotbugs CONFIG: a <build> whose SpotBugs plugin has the <configuration> CONFIG
+spotbugs() {
+  printf '<build><plugins><plugin><artifactId>spotbugs-maven-plugin</artifactId>'
+  printf '<configuration>%s</configuration></plugin></plugins></build>' "$1"
+}
+
 # expect LABEL WANT-STATUS WANT-TEXT [DEVKIT]: run the check; the output must contain WANT-TEXT
 expect() {
   local out rc=0
@@ -141,6 +147,52 @@ expect "<compilerArgs> without append in a module's profile fails" 14 \
   'app-api/pom.xml sets maven-compiler-plugin <compilerArgs> without combine.children="append"'
 project "$(parent)$own$(compiler_args ' combine.children="append"')"
 expect "<compilerArgs> with append passes" 0 "$passed"
+plugins='<plugin><groupId>x</groupId><artifactId>y</artifactId><version>1</version></plugin>'
+project "$(parent)$own$(spotbugs "<plugins>$plugins</plugins>")"
+expect "SpotBugs <plugins> without append fails" 14 \
+  'pom.xml sets spotbugs-maven-plugin <plugins> without combine.children="append"; Maven merges it with the parent'"'"'s by position and its plugin replaces find-sec-bugs'
+project "$(parent)$own$(spotbugs "<plugins combine.children=\"append\">$plugins</plugins>")"
+expect "SpotBugs <plugins> with append passes" 0 "$passed"
+key=findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector
+sinks=$(sed -n "s|^ *<systemPropertyVariables><$key>\\([^<]*\\)</$key></systemPropertyVariables>\$|\\1|p" "$root/java/parent/pom.xml")
+# sysprops [ATTRIBUTES] ENTRIES: a SpotBugs <configuration> whose <systemPropertyVariables ATTRIBUTES> holds ENTRIES
+sysprops() { spotbugs "<systemPropertyVariables$1>$2</systemPropertyVariables>"; }
+in_module() { # BUILD: BUILD in a module's profile
+  project "$(parent)$own"
+  module "<profiles><profile><id>p</id>$1</profile></profiles>"
+}
+in_module "$(sysprops '' '<foo>bar</foo>')"
+expect "SpotBugs <systemPropertyVariables> with another key passes" 0 "$passed"
+in_module "$(sysprops '' "<$key>$sinks:own.txt|CRLF_INJECTION_LOGS</$key>")"
+expect "SpotBugs <systemPropertyVariables> joining its own sinks file to the parent's passes" 0 "$passed"
+in_module "$(sysprops ' combine.self="override"' "<$key>$sinks</$key>")"
+expect "SpotBugs <systemPropertyVariables> override that keeps the parent's sinks passes" 0 "$passed"
+in_module "$(sysprops '' "<$key>own.txt|CRLF_INJECTION_LOGS</$key>")"
+expect "SpotBugs <systemPropertyVariables> sinks entry without the parent's value, in a module's profile, fails" 14 \
+  "app-api/pom.xml sets spotbugs-maven-plugin <$key> without the parent's $sinks"
+in_module "$(sysprops '' "<$key></$key>")"
+expect "SpotBugs <systemPropertyVariables> with an empty sinks entry fails" 14 \
+  "sets spotbugs-maven-plugin <$key> without the parent's $sinks"
+in_module "$(sysprops ' combine.self="override"' '<foo>bar</foo>')"
+expect "SpotBugs <systemPropertyVariables> override without a sinks entry fails" 14 \
+  'app-api/pom.xml sets spotbugs-maven-plugin <systemPropertyVariables> with combine.self="override" and without <findsecbugs'
+in_module "$(spotbugs '<jvmArgs>-Xss4m -Xmx1g</jvmArgs>')"
+expect "SpotBugs <jvmArgs> with other flags passes" 0 "$passed"
+in_module "$(spotbugs "<jvmArgs>-Xss4m -D$key=own.txt|CRLF_INJECTION_LOGS</jvmArgs>")"
+expect "SpotBugs <jvmArgs> setting the sinks property fails" 14 \
+  "app-api/pom.xml sets -D$key in spotbugs-maven-plugin <jvmArgs>"
+project "$(parent)$own$(spotbugs '<jvmArgs>-Xmx1g</jvmArgs>' | sed 's|<configuration>|<configuration combine.self="override">|')"
+expect "SpotBugs <configuration> with combine.self=override fails" 14 \
+  'pom.xml sets spotbugs-maven-plugin <configuration> with combine.self="override"'
+project "$(parent)$own$(compiler_args ' combine.self="override" combine.children="append"')"
+expect "<compilerArgs> with combine.self=override fails" 14 \
+  'pom.xml sets maven-compiler-plugin <compilerArgs> with combine.self="override"'
+project "$(parent)$own$(spotbugs "<plugins combine.self=\"override\" combine.children=\"append\">$plugins</plugins>")"
+expect "SpotBugs <plugins> with combine.self=override fails" 14 \
+  'pom.xml sets spotbugs-maven-plugin <plugins> with combine.self="override"'
+proj=$work/co:lon project "$(parent)$own"
+proj=$work/co:lon expect "a project path with ':' fails, as find-sec-bugs would silently not load" 14 \
+  "the project path $work/co:lon contains ':'"
 project "$(parent)$own"
 rm "$proj/pom.xml"
 expect "a missing pom.xml fails" 14 "cannot read pom.xml"

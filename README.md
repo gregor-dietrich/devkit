@@ -326,6 +326,38 @@ target of a fresh tools cache and about 15 seconds, at most 60, per
 that mirror for the rest of its run once a lookup times out or gets no answer,
 so the remaining pins land under "Could not check" at once.
 
+SpotBugs now also runs find-sec-bugs 1.14.0 (`findsecbugs.version`), whose
+security detectors report XML parsers open to external entities, path traversal,
+server-side request forgery, weak cryptography and predictable randomness,
+command and SQL injection, unsafe deserialization and log injection, at
+SpotBugs' threshold (Low). `make lint`, `make test` and `make install` can fail
+on code that passed before. Each new finding is fixed, or excluded as narrowly
+as it stands: in the module's `spotbugs-exclude.xml` by pattern and class or
+method, or with `@SuppressFBWarnings` and a `justification`. An exclusion of a
+whole pattern turns that check off for the module, and one of the `SECURITY`
+category all of them. devkit's baseline excludes `JAXRS_ENDPOINT`, which marks
+every JAX-RS method annotated `@Path` for review rather than reporting a defect;
+a project that sets `excludeFilterFile` itself adds `JAXRS_ENDPOINT` to its own
+filter. Expect `CRLF_INJECTION_LOGS` on a call on `org.jboss.logging.Logger`,
+`org.jboss.logging.BasicLogger` or Quarkus' `io.quarkus.logging.Log` that logs a
+value the analysis cannot trace to a constant (devkit adds their methods as
+sinks), and `IMPROPER_UNICODE` on `equalsIgnoreCase` and case conversions
+without a locale. The taint analysis takes more heap and time: a project that
+hits the plugin's limits raises `<maxHeap>` (512 MB by default) or `<timeout>`.
+A project that added find-sec-bugs to its own SpotBugs configuration removes
+that declaration and any `findsecbugs.version` property, which every Java target
+now refuses as a partial migration; one that declares another detector in
+SpotBugs' `<plugins>` adds `combine.children="append"` to that list; one that
+sets find-sec-bugs' sink property
+`findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector` itself keeps
+the parent's value in it, joined with `:`. The parent check refuses each
+otherwise, and says what to keep. It also refuses `combine.self="override"` on
+the compiler's `<compilerArgs>` and `<annotationProcessorPaths>` and on
+SpotBugs' `<plugins>` and `<configuration>`, which drops the parent's gates
+whatever `combine.children` says, and a project path containing `:`, where
+find-sec-bugs would silently not load: such a project drops the override, or
+moves its checkout.
+
 ### Upgrading from v0.7.x
 
 `devkitw` (revision 3) carries devkit's release key,
