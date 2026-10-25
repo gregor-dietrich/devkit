@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Report pom.xml version properties whose artifacts have a newer release on Maven Central or
-DEVKIT_MAVEN_MIRROR.
+"""Report pom.xml version properties whose artifacts have a newer release in the repositories
+DEVKIT_MAVEN_MIRROR lists, else devkit's default list.
 
 A version property is the unit of work: it is what you edit to bump, and one property can
 pin several artifacts (${vaadin.version} covers three). The artifacts behind each property
@@ -39,10 +39,17 @@ COORDINATE_TAGS = ("dependency", "plugin", "path", "extension")
 # <plugin> may omit <groupId>; Maven then assumes its own plugin group.
 DEFAULT_PLUGIN_GROUP = "org.apache.maven.plugins"
 
-MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
-# The rule every Java target holds DEVKIT_MAVEN_MIRROR to (docs/contract.md, Parent POM):
-# https://HOST[/PATH], no @ anywhere, no query, fragment or whitespace.
-MIRROR_URL = re.compile(r"https://[^/@?#\s]+(/[^?#\s]*)?")
+# The list DEVKIT_MAVEN_MIRROR defaults to (docs/contract.md, Parent POM). The shell side holds
+# the same list on one line; tests/version_check_test.sh checks the two are equal.
+DEFAULT_MIRRORS = (
+    "https://maven.vptr.de/central",
+    "https://maven-central.storage-download.googleapis.com/maven2",
+    "https://repo.maven.apache.org/maven2",
+)
+# The rule every Java target holds each entry of DEVKIT_MAVEN_MIRROR to (docs/contract.md,
+# Parent POM):
+# https://HOST[/PATH], no @ anywhere, no query, fragment, whitespace or control character.
+MIRROR_URL = re.compile(r"https://[^/@?#\s\x00-\x1f\x7f]+(/[^?#\s\x00-\x1f\x7f]*)?")
 REQUEST_TIMEOUT = 15  # per socket operation
 # Seconds of wall clock for one whole metadata lookup (connect, TLS, headers, redirects, body), a
 # trickling server included; a DNS lookup that ignores signals is bounded only by the resolver.
@@ -241,23 +248,25 @@ def parse_version(version: str) -> tuple[int, ...]:
     return tuple(int(chunk) for chunk in version.split("."))
 
 
-def repository() -> str:
-    """The base URL to query: DEVKIT_MAVEN_MIRROR, validated as every Java target does, else Central."""
+def repositories() -> list[str]:
+    """The base URLs to query, in order: DEVKIT_MAVEN_MIRROR's entries, validated as every Java
+    target does, else the default list."""
     mirror = os.environ.get("DEVKIT_MAVEN_MIRROR", "")
-    if not mirror:
-        return MAVEN_CENTRAL
-    # Never printed: the checks keep a secret out of the URL that the header prints.
+    # Never printed: the checks keep a secret out of the URLs that the header prints.
     if "@" in mirror:
         sys.exit(
             "ERROR: DEVKIT_MAVEN_MIRROR names a user or password (user@ or user:password@), "
             "which devkit would print; use a mirror that needs none"
         )
-    if not MIRROR_URL.fullmatch(mirror):
+    # Exactly the shell's separators: str.split() would also cut at U+00A0 or U+001C, which \s
+    # then refuses.
+    entries = re.findall(r"[^ \t\n]+", mirror) or list(DEFAULT_MIRRORS)
+    if not all(MIRROR_URL.fullmatch(entry) for entry in entries):
         sys.exit(
-            "ERROR: DEVKIT_MAVEN_MIRROR must be an https:// base URL with a host and no query, "
-            "fragment or whitespace"
+            "ERROR: each entry of DEVKIT_MAVEN_MIRROR must be an https:// base URL with a host and no "
+            "query, fragment, whitespace or control character"
         )
-    return mirror.removesuffix("/")
+    return list(dict.fromkeys(entry.removesuffix("/") for entry in entries))
 
 
 class HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -299,34 +308,47 @@ signal.signal(signal.SIGALRM, lookup_timed_out)
 OPENER = urllib.request.build_opener(HttpsOnlyRedirects)
 
 
-def get_latest_version(base: str, group: str, artifact: str) -> str | None:
-    """Return the newest stable version of an artifact in the repository at base, or None on failure.
+def get_latest_version(bases: list[str], group: str, artifact: str) -> str | None:
+    """Return the newest stable version of an artifact from the first of bases that answers, or None.
+
+    An answer of 5xx or 429 moves on to the next repository; any other status, an oversized or
+    malformed body is final. A repository that gives no answer or times out is removed from bases,
+    in place, so the caller's later lookups skip it.
 
     Central's <latest>/<release> markers routinely point at pre-releases (maven-compiler-plugin
     advertises 4.0.0-beta-4, quarkus-bom 3.38.0.CR1), which would report false upgrades, so the
     stable entries of <versions> decide. The markers are only a fallback for artifacts that
     publish no purely numeric version at all.
     """
-    url = f"{base}/{group.replace('.', '/')}/{artifact}/maven-metadata.xml"
-    try:
-        signal.setitimer(signal.ITIMER_REAL, LOOKUP_DEADLINE)
+    path = urllib.parse.quote(group.replace(".", "/") + "/" + artifact)  # an odd character is the mirror's 404
+    for base in list(bases):
+        url = f"{base}/{path}/maven-metadata.xml"
         try:
-            body = bytearray()
-            with OPENER.open(url, timeout=REQUEST_TIMEOUT) as response:
-                while chunk := response.read1(65536):  # chunks, so the size cap is checked as they arrive
-                    body += chunk
-                    if len(body) > MAX_METADATA_BYTES:
-                        print(f"Error: {group}:{artifact} — metadata over {MAX_METADATA_BYTES} bytes, given up",
-                              file=sys.stderr)
-                        return None
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-        content = bytes(body)
-    except urllib.error.HTTPError as exc:
-        print(f"Error: status {exc.code} for {group}:{artifact}", file=sys.stderr)
-        return None
-    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError, LookupTimeout) as exc:
-        print(f"Error: {group}:{artifact} — {str(exc)!r}", file=sys.stderr)
+            signal.setitimer(signal.ITIMER_REAL, LOOKUP_DEADLINE)
+            try:
+                body = bytearray()
+                with OPENER.open(url, timeout=REQUEST_TIMEOUT) as response:
+                    while chunk := response.read1(65536):  # chunks, so the size cap is checked as they arrive
+                        body += chunk
+                        if len(body) > MAX_METADATA_BYTES:
+                            print(f"Error: {group}:{artifact} — metadata over {MAX_METADATA_BYTES} bytes, given up",
+                                  file=sys.stderr)
+                            return None
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            content = bytes(body)
+        except urllib.error.HTTPError as exc:
+            print(f"Error: status {exc.code} for {group}:{artifact} from {base}", file=sys.stderr)
+            if exc.code == 429 or 500 <= exc.code <= 599:
+                continue
+            return None
+        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError, LookupTimeout) as exc:
+            print(f"Error: {group}:{artifact} — {str(exc)!r} from {base}, which the rest of this run skips",
+                  file=sys.stderr)
+            bases.remove(base)
+            continue
+        break
+    else:
         return None
 
     try:
@@ -364,7 +386,7 @@ def get_latest_version(base: str, group: str, artifact: str) -> str | None:
     return None
 
 
-def get_bump_target(pin: Pin, base: str) -> tuple[str | None, str, list[str]]:
+def get_bump_target(pin: Pin, bases: list[str]) -> tuple[str | None, str, list[str]]:
     """Find the version to report for a pin, its status against the pin (compare()), and any notes.
 
     One property bumped to a version that not all of its artifacts have released would break
@@ -375,7 +397,7 @@ def get_bump_target(pin: Pin, base: str) -> tuple[str | None, str, list[str]]:
     """
     latest_per_artifact: dict[Coordinate, str] = {}
     for coordinate in pin.coordinates:
-        latest = get_latest_version(base, coordinate.group, coordinate.artifact)
+        latest = get_latest_version(bases, coordinate.group, coordinate.artifact)
         if latest is None:
             return None, "unchecked", [f"could not check {coordinate}"]
         latest_per_artifact[coordinate] = latest
@@ -418,12 +440,12 @@ def main() -> None:
     if not POM_PATH.is_file():
         print(f"ERROR: {POM_PATH} not found.", file=sys.stderr)
         sys.exit(1)
-    base = repository()
+    bases = repositories()
 
     scan = get_version_pins(find_pom_paths(POM_PATH))
     print(
         f"Checking {len(scan.pins)} version properties "
-        f"({scan.artifact_count} artifacts) against {'Maven Central' if base == MAVEN_CENTRAL else base}...\n"
+        f"({scan.artifact_count} artifacts) against {', then '.join(bases)}...\n"
     )
 
     results: list[tuple[Pin, str, str]] = []  # pin, latest, status
@@ -431,7 +453,7 @@ def main() -> None:
     notes = list(scan.notes)
 
     for pin in scan.pins:
-        target, status, pin_notes = get_bump_target(pin, base)
+        target, status, pin_notes = get_bump_target(pin, bases)
         notes.extend(pin_notes)
         if target is None:
             unchecked.append(pin)

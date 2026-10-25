@@ -18,8 +18,8 @@
 # no ~/.m2/settings.xml, mirror or proxy setting is read by the recording, since a build would
 # record whatever bytes such a setting served, so a network that reaches Central only through a
 # proxy cannot record. The one exception is the distribution itself: it is fetched before
-# clean_env, so it may come through DEVKIT_MAVEN_MIRROR or a curl proxy, and is checked against
-# the pin either way.
+# clean_env, so it may come through DEVKIT_MAVEN_MIRROR's list (devkit's default list when it is
+# unset) or a curl proxy, and is checked against the pin either way.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

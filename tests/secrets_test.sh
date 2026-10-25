@@ -130,7 +130,7 @@ case_install() {
   run
   [[ $rc == 0 && -z $err && -x $installed/gitleaks && -z $(find "$installed" ! -type l -perm -u+w) ]] &&
     [[ $(ls -A "$installed") == gitleaks ]] && ! compgen -G "$tools/.tmp.*" >/dev/null &&
-    grep -q "^curl -fsSL --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M --retry 3 --retry-connrefused --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_linux_x64.tar.gz$" "$LOG" &&
+    grep -q "^curl -fsSL --globoff --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M --retry 3 --retry-connrefused --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v$version/gitleaks_${version}_linux_x64.tar.gz$" "$LOG" &&
     grep -q "^tar -xzf $tools/.tmp.[^ ]*/asset.tar.gz -C $tools/.tmp.[^ ]* gitleaks$" "$LOG" || return 1
   run
   [[ $rc == 0 ]] && ! logged curl && ! logged tar

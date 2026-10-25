@@ -225,9 +225,9 @@ below it; the tag is `v` + that version, and `tests/run.sh` tags the tree
 under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
-Before tagging, review the parent's pins against Maven
-Central, or against `DEVKIT_MAVEN_MIRROR` when that is set (advisory, needs the
-network):
+Before tagging, review the parent's pins against the repositories
+`DEVKIT_MAVEN_MIRROR` lists, devkit's default list when it is unset, empty or
+blank (advisory, needs the network):
 
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
@@ -309,6 +309,22 @@ git ls-remote <url> 'refs/tags/vX.Y.Z^{}'
 
 If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
+
+### Upgrading from v0.8.x
+
+`DEVKIT_MAVEN_MIRROR` is now an ordered list of base URLs, tried in turn
+([Parent POM](docs/contract.md#parent-pom)). Unset, empty or blank, it no longer
+means Maven Central only: the pinned Maven's download and `make check`'s pin
+report try `https://maven.vptr.de/central`, then Google's mirror of Central,
+then `https://repo.maven.apache.org/maven2`. A project whose network reaches one
+of them changes nothing. To ask Central only, set
+`DEVKIT_MAVEN_MIRROR=https://repo.maven.apache.org/maven2`; a network with its
+own mirror keeps setting it, now optionally followed by fallbacks. A machine
+that cannot reach `maven.vptr.de` pays up to about 10 seconds on the first Java
+target of a fresh tools cache and about 15 seconds, at most 60, per
+`make check`. A single-URL value works as before, except that `make check` skips
+that mirror for the rest of its run once a lookup times out or gets no answer,
+so the remaining pins land under "Could not check" at once.
 
 ### Upgrading from v0.7.x
 

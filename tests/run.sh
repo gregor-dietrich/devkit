@@ -134,8 +134,9 @@
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.36 (SSH signing; lint-secrets' remerge)
 #          and ssh-keygen (OpenSSH 8.1 or later), to sign and verify the tag,
-#          curl, tar, sha256sum or shasum, node with npm and the network (Maven
-#          Central, Eclipse P2, github.com, the npm registry);
+#          curl, tar, sha256sum or shasum, node with npm and the network (the
+#          default DEVKIT_MAVEN_MIRROR list, of which Maven Central alone
+#          suffices, Eclipse P2, github.com, the npm registry);
 #          ~/.m2 is used as is, and never installed into; tampered_plugin
 #          copies the compiler plugin's jar from ~/.m2/repository, and the
 #          install checks assume it is the local repository, and their

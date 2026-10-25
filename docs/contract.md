@@ -892,30 +892,54 @@ inherit it, and Maven reads it through the link:
   `scripts/lib/get_maven.sh`) runs the Maven that `scripts/lib/pinned_maven.sh`
   pins (the version and the SHA-256 of its distribution tarball live there),
   never `mvn` on `PATH` and never `./mvnw`. The first such target on a machine
-  downloads it from Maven Central, which needs curl, tar, and `sha256sum` or
-  `shasum`, retries a failed download up to three times as for gitleaks
-  (Repository gates), refuses it unless the SHA-256 matches, and keeps it,
-  read-only, in
+  downloads it from the first entry of `DEVKIT_MAVEN_MIRROR` that serves it,
+  which needs curl, tar, and `sha256sum` or `shasum`, refuses it unless the
+  SHA-256 matches, and keeps it, read-only, in
   `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/maven-<version>/`; later runs
-  need no network for it. `DEVKIT_MAVEN_MIRROR`, an environment variable,
-  replaces Central's base URL; empty means Central. Every Java target
-  validates it, not only a download: `https://`, a non-empty host and an
-  optional path, with no `@`, `?`, `#` or whitespace anywhere, and it is
-  refused otherwise without being printed. devkit prints the URL on a
-  download and in `make check`'s report, so it must hold no secret anywhere, a
-  path token included. `make check`'s report of outdated version pins
+  need no network for it. `DEVKIT_MAVEN_MIRROR`, an environment variable, is an
+  ordered list of Maven repository base URLs separated by spaces, tabs or line
+  breaks. Unset, empty or blank, it is devkit's default list:
+  `https://maven.vptr.de/central` (devkit's own),
+  `https://maven-central.storage-download.googleapis.com/maven2` (Google's
+  mirror of Central), `https://repo.maven.apache.org/maven2` (Central). A value
+  replaces that list whole; `https://repo.maven.apache.org/maven2` alone asks
+  Central only. Every Java target validates the value, not only a download: no
+  `@` anywhere, and each entry `https://`, a non-empty host and an optional
+  path, with no `?`, `#`, whitespace or control character, and it is refused
+  otherwise without being printed. devkit prints the URLs on a download and in
+  `make check`'s report, so they must hold no secret anywhere, a path token
+  included. The download tries the entries in turn: any failed download moves to
+  the next entry, a 404 included, since the SHA-256 decides whichever entry
+  serves it, and a SHA-256 mismatch fails at once without trying the next. Only
+  the last entry's download is retried, up to three times as for gitleaks
+  (Repository gates); an earlier entry gets one attempt, which costs up to about
+  10 seconds when it never answers, and up to 300 when it accepts and stalls.
+  `make check`'s report of outdated version pins
   (`scripts/java/version_check.py`) reads each artifact's `maven-metadata.xml`
-  from the mirror too, and validates the value at least as strictly (its `\s`
-  also covers non-ASCII whitespace and U+001C to U+001F). There is no
-  fallback to Central: the mirror must serve `maven-metadata.xml` for the
-  report, or every pin lands under "Could not check". A mirror that caches
-  metadata can delay an outdated line, or print a false "ahead" line, by its
-  cache lifetime. Each lookup gives up after 60 seconds of wall clock, or once
-  its metadata passes 1 MiB, and that pin lands under "Could not check".
-  Authenticated mirrors and air-gapped seeding are unsupported (#134). The
-  pinned-Maven download is capped at 100M. The pin and the cache path stay. A
-  cache entry without a launcher fails with the command that removes it, for a
-  retry. A project's `mvnw` is optional, of any distribution type, for an IDE or
+  from the same list, names it in its header, and validates the value at least
+  as strictly (it splits on the same three separators, and its `\s` also refuses
+  non-ASCII whitespace and U+001C to U+001F within an entry). A lookup moves to
+  the next entry when one gives no answer, times out, breaks off its answer, or
+  answers with a 5xx status or 429; any other answer, a 404 included, is final
+  for that artifact, so an artifact one entry lacks is never fetched from the
+  next. An entry that gave no answer, timed out or broke off its answer is
+  skipped for the rest of the run, with a line naming it; with one entry, the
+  remaining pins land under "Could not check" at once. A 5xx or 429 does not
+  skip the entry, so one that answers slowly costs that time on every lookup.
+  Each lookup gives up on an entry after 60 seconds of wall clock, or once its
+  metadata passes 1 MiB, and a pin with an artifact no entry serves lands under
+  "Could not check". One run's answers can come from several entries, and a
+  mirror that caches metadata can delay an outdated line, or print a false
+  "ahead" line, by its cache lifetime. By default, a download and every
+  `make check` ask devkit's host first, Google's mirror only when that fails as
+  above, and Central last. `DEVKIT_MAVEN_MIRROR` steers only these two: Maven's
+  own resolution of plugins and dependencies follows Maven's settings
+  (`~/.m2/settings.xml`, `-s` or `-gs` in `.mvn/maven.config`). Authenticated
+  mirrors and air-gapped seeding are unsupported (#134). The pinned-Maven
+  download is capped at 100M, with curl before 8.4.0 only when the server states
+  the size in advance. The pin and the cache path stay. A cache entry without a
+  launcher fails with the command that removes it, for a retry. A project's
+  `mvnw` is optional, of any distribution type, for an IDE or
   a bare build. `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs
   on (`$JAVA_HOME/bin/java`, else `java` on `PATH`; the probe follows the
   caller's `JAVA_HOME`, so one set in `/etc/mavenrc` or `~/.mavenrc` is not
