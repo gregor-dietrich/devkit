@@ -49,6 +49,10 @@ REQUEST_TIMEOUT = 15  # per socket operation
 LOOKUP_DEADLINE = 60
 MAX_METADATA_BYTES = 1024 * 1024  # 1 MiB: maven-metadata.xml is kilobytes (the largest on Central is about 65 KB)
 
+# A <release>/<latest> marker is printed, notes included, so it must look like a version: no space,
+# comma or colon to forge another artifact's entry with, no control character, at most 100 characters.
+MARKER = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,99}")
+
 PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
 
 # Guard against a property cycle (${a} -> ${b} -> ${a}) while resolving placeholders.
@@ -348,7 +352,7 @@ def get_latest_version(base: str, group: str, artifact: str) -> str | None:
         for marker in ("release", "latest"):
             element = versioning.find(marker)
             latest = element.text.strip() if element is not None and element.text else ""
-            if latest and latest.isascii() and latest.isprintable():
+            if MARKER.fullmatch(latest):
                 if is_stable(latest):
                     parse_version(latest)  # callers compare it numerically
                 return latest
@@ -360,32 +364,33 @@ def get_latest_version(base: str, group: str, artifact: str) -> str | None:
     return None
 
 
-def get_bump_target(pin: Pin, base: str) -> tuple[str | None, list[str]]:
-    """Find the newest version publishable for every artifact a pin covers, plus any notes.
+def get_bump_target(pin: Pin, base: str) -> tuple[str | None, str, list[str]]:
+    """Find the version to report for a pin, its status against the pin (compare()), and any notes.
 
     One property bumped to a version that not all of its artifacts have released would break
-    the build, so the lowest of their latest releases wins (they usually agree).
+    the build, so the lowest of their latest releases wins (they usually agree), and a pin with
+    an artifact that could not be checked gets no target at all. A latest that is no number (a
+    non-numeric <release>/<latest> marker) orders against nothing: once the latests differ and
+    one of them is no number, the pin is not compared, whatever its own version.
     """
-    notes: list[str] = []
     latest_per_artifact: dict[Coordinate, str] = {}
     for coordinate in pin.coordinates:
         latest = get_latest_version(base, coordinate.group, coordinate.artifact)
         if latest is None:
-            notes.append(f"could not check {coordinate}")
-            continue
+            return None, "unchecked", [f"could not check {coordinate}"]
         latest_per_artifact[coordinate] = latest
 
-    if not latest_per_artifact:
-        return None, notes
-
     candidates = list(latest_per_artifact.values())
-    stable = [version for version in candidates if is_stable(version)]
-    target = min(stable, key=parse_version) if stable else candidates[0]
-
-    if len(set(candidates)) > 1:
-        ahead = sorted(f"{coordinate} at {v}" for coordinate, v in latest_per_artifact.items() if v != target)
-        notes.append(f"{pin.name} held at {target} by its oldest artifact; newer available: {', '.join(ahead)}")
-    return target, notes
+    unnumbered = [version for version in candidates if not is_stable(version)]
+    target = unnumbered[0] if unnumbered else min(candidates, key=parse_version)
+    if len(set(candidates)) == 1:
+        return target, compare(pin.version, target), []
+    if unnumbered:
+        listed = ", ".join(sorted(f"{coordinate} at {v}" for coordinate, v in latest_per_artifact.items()))
+        return target, "unordered", [f"{pin.name} not compared, a latest release is not numeric: {listed}"]
+    ahead = ", ".join(sorted(f"{coordinate} at {v}" for coordinate, v in latest_per_artifact.items() if v != target))
+    note = f"{pin.name} held at {target} by its oldest artifact; newer available: {ahead}"
+    return target, compare(pin.version, target), [note]
 
 
 def compare(current: str, latest: str) -> str:
@@ -426,12 +431,12 @@ def main() -> None:
     notes = list(scan.notes)
 
     for pin in scan.pins:
-        target, pin_notes = get_bump_target(pin, base)
+        target, status, pin_notes = get_bump_target(pin, base)
         notes.extend(pin_notes)
         if target is None:
             unchecked.append(pin)
             continue
-        results.append((pin, target, compare(pin.version, target)))
+        results.append((pin, target, status))
 
     outdated = [entry for entry in results if entry[2] == "outdated"]
     if outdated:

@@ -218,7 +218,9 @@ done
 # unit LABEL CODE: CODE, run with the script imported as v and OPENER stubbable, must print PASS. The
 # prelude: Stub(BODY, DELAY) serves BODY without TLS after DELAY seconds; meta/versions build metadata;
 # lookup(BODY, NAME=VALUE...) runs one lookup with module globals patched; redirect(URL, FP, OLD) asks
-# the redirect handler about a redirect to URL; report(BODY) is the stdout of main() on BODY
+# the redirect handler about a redirect to URL; ByArtifact(ARTIFACT=BODY...) serves each artifact its
+# own BODY; report(BODY) is the stdout of main() on BODY or a ByArtifact; bump(PINNED, ARTIFACT=BODY...)
+# is get_bump_target's result for a pin at PINNED over those artifacts of group g
 unit() {
   local out
   out=$(python3 -I -B -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); import version_check as v
@@ -236,10 +238,16 @@ def lookup(body, **patch):
     return v.get_latest_version("https://a", "g", "a")
 def redirect(url, fp=None, old=None):
     return v.HttpsOnlyRedirects().redirect_request(old or v.urllib.request.Request("https://a/m"), fp, 302, "", {}, url)
+class ByArtifact:
+    def __init__(self, **bodies): self.bodies = bodies
+    def open(self, url, timeout=None): return io.BufferedReader(io.BytesIO(self.bodies[url.split("/")[-2]]))
 def report(body):
-    v.OPENER, out = Stub(body), io.StringIO()
+    v.OPENER, out = body if isinstance(body, ByArtifact) else Stub(body), io.StringIO()
     with contextlib.redirect_stdout(out): v.main()
     return out.getvalue()
+def bump(pinned, **bodies):
+    v.OPENER = ByArtifact(**bodies)
+    return v.get_bump_target(v.Pin("p", pinned, [v.Coordinate("g", a) for a in bodies], True), "https://r")
 '"$2"'
 print("PASS")' "${script%/*}" 2>"$work/err") || :
   if [[ $out == PASS ]]; then
@@ -287,14 +295,41 @@ done
 unit "a version of non-ASCII digits is not stable" 'assert not v.is_stable("\u00b2")'
 unit "a non-ASCII-digit version is skipped for the stable one" 'assert lookup(versions("1.0", "\u00b2")) == "1.0"'
 unit "a version of 5000 digits is unusable, not a traceback" 'assert lookup(versions("9" * 5000)) is None'
-unit "a marker with a control character is no version, a plain one is" '
-assert lookup(meta("<release>4.0&#x9b;31m</release>")) is None
-assert lookup(meta("<release>4.0.0-beta-4</release>")) == "4.0.0-beta-4"'
+unit "a marker with a control character, a space, a comma or over 100 characters is no version, a plain one is" '
+for bad in ("4.0&#x9b;31m", "4.0&#x7f;", "4.0&#xa;forged", "4.0&#x9;x", "3.0-beta, g:x at 9.9", "1" + "a" * 100):
+    assert lookup(meta(f"<release>{bad}</release>")) is None, bad
+for good in ("4.0.0-beta-4", "2.0.0.Final", "1.0+build_2", "1" + "a" * 99):
+    assert lookup(meta(f"<release>{good}</release>")) == good, good'
 unit "a latest that is no number is classified, not parsed" \
   'assert v.compare("1.0", "4.0.0-beta-4") == v.compare("1.0-rc1", "4.0.0-beta-4") == "unordered"'
 project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example lib "$(ref lib.version)")</dependencies>"
 PROJECT_ROOT=$proj unit "a release marker that is no number is printed as not compared" \
   'assert "is not numeric, not compared" in report(meta("<release>4.0.0-beta-4</release>"))'
+unit "a pin's numeric artifacts hold it at their lowest latest, ordered as numbers" '
+assert bump("1.0", a=versions("10.0"), b=versions("9.0")) == \
+  ("9.0", "outdated", ["p held at 9.0 by its oldest artifact; newer available: g:a at 10.0"])'
+unit "a pin mixing a numeric and a marker-only artifact is not compared, at the marker too, in either order" '
+numeric, marker = versions("2.0"), meta("<release>3.0-beta</release>")
+for pinned in ("1.0", "3.0-beta"):
+    for got, a, b in [(bump(pinned, a=numeric, b=marker), "2.0", "3.0-beta"), (bump(pinned, a=marker, b=numeric), "3.0-beta", "2.0")]:
+        assert got == ("3.0-beta", "unordered", [f"p not compared, a latest release is not numeric: g:a at {a}, g:b at {b}"]), got'
+unit "a pin over differing markers names each, in no order, and is not compared at either" '
+for pinned in ("3.0-beta", "2.0-rc1"):
+    got = bump(pinned, a=meta("<release>3.0-beta</release>"), b=meta("<release>2.0-rc1</release>"))
+    assert got == ("3.0-beta", "unordered", ["p not compared, a latest release is not numeric: g:a at 3.0-beta, g:b at 2.0-rc1"]), got'
+unit "a pin over agreeing markers has no note, and is current at the marker" '
+same = meta("<release>3.0-beta</release>")
+assert bump("1.0", a=same, b=same) == ("3.0-beta", "unordered", []) and bump("3.0-beta", a=same, b=same) == ("3.0-beta", "current", [])'
+unit "a pin with an artifact that could not be checked gets no target, whichever it is" '
+assert bump("1.0", a=b"", b=versions("2.0")) == (None, "unchecked", ["could not check g:a"])
+assert bump("1.0", a=versions("2.0"), b=b"") == (None, "unchecked", ["could not check g:b"])'
+project "$own<properties><lib.version>1.0</lib.version></properties><dependencies>$(dep org.example a "$(ref lib.version)")$(dep org.example b "$(ref lib.version)")</dependencies>"
+PROJECT_ROOT=$proj unit "a mixed pin is printed as not compared, and not as outdated" '
+out = report(ByArtifact(a=versions("2.0"), b=meta("<release>3.0-beta</release>")))
+assert "lib.version pinned at 1.0, latest release 3.0-beta is not numeric, not compared" in out and "Outdated" not in out, out'
+PROJECT_ROOT=$proj unit "a pin with an artifact that could not be checked is printed under Could not check" '
+out = report(ByArtifact(a=versions("2.0"), b=b""))
+assert "Could not check (1):\n  lib.version (1.0)" in out and "Outdated" not in out, out'
 for pair in "2.0|Outdated (1):" "1.0|Up to date: 1" "0.9|newer than the latest release"; do
   PROJECT_ROOT=$proj unit "a latest of ${pair%%|*} for the 1.0 pin prints '${pair#*|}'" \
     'assert "'"${pair#*|}"'" in report(versions("'"${pair%%|*}"'"))'
