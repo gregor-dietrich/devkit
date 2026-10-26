@@ -60,7 +60,8 @@ break a gate silently.
   `scripts/maven_checksums.sh`,
   `scripts/lib/get_maven.sh`, `scripts/lib/mvn_checked.sh` and
   `scripts/java/check_frontend_deps.py`, whose constants name plugins the
-  file must hold);
+  file must hold, and `scripts/java/formatter_lockfile.py`, which refuses a
+  formatter version Spotless would fetch from P2);
   what silences or adds a SpotBugs finding for every consumer
   (`java/config/spotbugs-baseline.xml` and
   `java/config/findsecbugs-crlf-jboss-logging.txt`) and the parent POM
@@ -93,8 +94,8 @@ break a gate silently.
   tagged only after it passes. A new closure joins its list in the
   `Makefile`.
 - `make maven-checksums` regenerates `java/checksums/checksums.sha256`
-  after a plugin version in the parent, or the Maven version
-  `pinned_maven.sh` pins, changes (network; `tests/run.sh
+  after a plugin version in the parent, `eclipse-formatter.version`, or the
+  Maven version `pinned_maven.sh` pins, changes (network; `tests/run.sh
   shell` fails without it).
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then

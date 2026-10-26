@@ -20,6 +20,9 @@
 # proxy cannot record. The one exception is the distribution itself: it is fetched before
 # clean_env, so it may come through DEVKIT_MAVEN_MIRROR's list (devkit's default list when it is
 # unset) or a curl proxy, and is checked against the pin either way.
+# The run also fails when the spotless-lib-extra it resolved embeds no lockfile for the parent's
+# eclipse-formatter.version, since Spotless would then provision the formatter from P2, unchecked
+# (scripts/java/formatter_lockfile.py).
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -104,6 +107,9 @@ conflicts=$(cut -d' ' -f3 "$tmp/sorted" | uniq -d)
     echo "ERROR: recorded with two different hashes: $conflicts" >&2
     exit 1
 }
+# The formatter's lockfile, in the spotless-lib-extra the recording resolved: without one, Spotless
+# provisions the formatter from P2, outside Maven and so outside the trusted checksums.
+python3 -I "$root/scripts/java/formatter_lockfile.py" "$root/java/parent/pom.xml" "$tmp/repo" "$tmp/sorted"
 committed=$root/java/checksums/checksums.sha256
 # A release path on Central never changes, so a new hash for a listed path is what a poisoned
 # recording looks like; the committed file stays as it is.

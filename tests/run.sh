@@ -15,6 +15,7 @@
 #          tests/markdown_test.sh, tests/hooks_test.sh,
 #          tests/uv_project_test.sh, tests/get_uv_test.sh,
 #          tests/pinned_maven_test.sh, tests/mvn_checked_test.sh,
+#          tests/formatter_lockfile_test.sh,
 #          tests/sealed_dir_test.sh,
 #          tests/coverage_floor_test.sh, tests/coverage_test.sh,
 #          tests/version_check_test.sh, tests/python_invocations_test.sh,
@@ -143,14 +144,21 @@
 #          SpotBugs' matching pattern to fail it where SpotBugs reports the
 #          construct, and lint to pass once that pattern is excluded, or at
 #          once for a constructor handing this out, which SpotBugs does not
-#          report.
+#          report. Expect imports of java, org and jakarta in the order from
+#          before jakarta joined the import order to fail lint, and make
+#          format to put jakarta after java and before org. Expect the
+#          committed java/checksums/checksums.sha256 to list every artifact
+#          of the formatter version the parent pins, whose lockfile
+#          spotless-lib-extra (from ~/.m2, after the fixtures ran) embeds
+#          (scripts/java/formatter_lockfile.py), so that a bump of
+#          eclipse-formatter.version without make maven-checksums fails.
 #          audit runs only without an NVD key, where it must refuse to
 #          start; kill not at all here (the shell part tests it). Needs
 #          JDK 25, python3, git >= 2.36 (SSH signing; lint-secrets' remerge)
 #          and ssh-keygen (OpenSSH 8.1 or later), to sign and verify the tag,
 #          curl, tar, sha256sum or shasum, node with npm and the network (the
 #          default DEVKIT_MAVEN_MIRROR list, of which Maven Central alone
-#          suffices, Eclipse P2, github.com, the npm registry);
+#          suffices, github.com, the npm registry);
 #          ~/.m2 is used as is, and never installed into; tampered_plugin
 #          copies the compiler plugin's jar from ~/.m2/repository, and the
 #          install checks assume it is the local repository, and their
@@ -239,6 +247,7 @@ shell_tests() { # every test file of the shell part, run again by the floor part
   check "make tests" "$root/tests/make_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
+  check "formatter_lockfile tests" "$root/tests/formatter_lockfile_test.sh"
   check "parent_check tests" "$root/tests/parent_check_test.sh"
   check "check_pins tests" "$root/tests/check_pins_test.sh"
   check "check_decisions tests" "$root/tests/check_decisions_test.sh"
@@ -356,8 +365,9 @@ shell_part() {
 # scripts/lib/tree.sh: groupId:artifactId:version, one per line) names, at the path the local
 # repository gives it, and holds the line DIST (maven_pin of tree.sh: the pinned Maven, whose
 # default lifecycle plugins the file records). Only top-level jars are checked, not their transitive
-# closure. A bump of a version, Maven's included, without scripts/maven_checksums.sh leaves an entry
-# out and fails.
+# closure. A bump of a plugin, plugin dependency, processor or Maven version without
+# scripts/maven_checksums.sh leaves an entry out and fails; the formatter's artifacts are not in the
+# POM's declarations, and formatter_lockfile.py covers them (the java part's check of the committed file).
 checksums_cover() {
   # shellcheck disable=SC2016 # the program's ${...} is a Maven property, not a shell expansion
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
@@ -706,19 +716,11 @@ XML
     (cd "$work" && "$mvn" -B -q -f "$dir/pom.xml" -Dmaven.multiModuleProjectDirectory="$other" checkstyle:check)
 }
 
-# find_sec_bugs: a monolith copy with an XML parser open to external entities and logging calls of an
-# untrusted value, in a JAX-RS endpoint (Path, JBoss Logging's Logger and Quarkus' Log are stubbed, as
-# the fixture stubs Quarkus' test annotations), fails make lint with exactly those two finding types:
-# not JAXRS_ENDPOINT, which the baseline excludes, and no analysis error. The calls are to Logger's
-# infof, to its overload with a long argument, whose format is checked at its own stack slot (a
-# constant format with a long is no finding), and to Log's static infof. The stubs carry no logic: the
-# detectors match by class and descriptor.
-find_sec_bugs() {
-  local dir=$work/find-sec-bugs src
-  setup "$root/tests/fixtures/java-monolith" "$dir" || return
-  src=$dir/src/main/java
-  mkdir -p "$src/jakarta/ws/rs" "$src/org/jboss/logging" || return
-  cat >"$src/jakarta/ws/rs/Path.java" <<'JAVA'
+# jakarta_path_stub SRC: SRC/jakarta/ws/rs/Path.java, a stub of the JAX-RS annotation (the detectors and
+# the formatter's import order match by name, so no JAX-RS jar is needed)
+jakarta_path_stub() {
+  mkdir -p "$1/jakarta/ws/rs" &&
+    cat >"$1/jakarta/ws/rs/Path.java" <<'JAVA'
 package jakarta.ws.rs;
 
 import java.lang.annotation.Retention;
@@ -736,6 +738,21 @@ public @interface Path {
     String value();
 }
 JAVA
+}
+
+# find_sec_bugs: a monolith copy with an XML parser open to external entities and logging calls of an
+# untrusted value, in a JAX-RS endpoint (Path, JBoss Logging's Logger and Quarkus' Log are stubbed, as
+# the fixture stubs Quarkus' test annotations), fails make lint with exactly those two finding types:
+# not JAXRS_ENDPOINT, which the baseline excludes, and no analysis error. The calls are to Logger's
+# infof, to its overload with a long argument, whose format is checked at its own stack slot (a
+# constant format with a long is no finding), and to Log's static infof. The stubs carry no logic: the
+# detectors match by class and descriptor.
+find_sec_bugs() {
+  local dir=$work/find-sec-bugs src
+  setup "$root/tests/fixtures/java-monolith" "$dir" || return
+  src=$dir/src/main/java
+  mkdir -p "$src/org/jboss/logging" || return
+  jakarta_path_stub "$src" || return
   cat >"$src/org/jboss/logging/Logger.java" <<'JAVA'
 package org.jboss.logging;
 
@@ -902,6 +919,43 @@ javac_lint() {
   } && make_says pass "$dir" lint "Lint checks completed."
 }
 
+# jakarta_order: a monolith copy whose class imports java, org and jakarta in the order before jakarta
+# joined the import order (jakarta last) fails make lint with the format violation, and make format
+# puts jakarta after java and before org, so that lint passes. Path is stubbed by jakarta_path_stub.
+jakarta_order() {
+  local dir=$work/jakarta-order src
+  setup "$root/tests/fixtures/java-monolith" "$dir" || return
+  src=$dir/src/main/java
+  jakarta_path_stub "$src" || return
+  cat >"$src/devkit/fixture/Endpoint.java" <<'JAVA'
+package devkit.fixture;
+
+import java.util.List;
+
+import org.w3c.dom.Node;
+
+import jakarta.ws.rs.Path;
+
+/** An endpoint. */
+@Path("endpoint")
+public final class Endpoint {
+
+    /**
+     * Counts the nodes.
+     *
+     * @param nodes the nodes
+     * @return their number
+     */
+    public int count(List<Node> nodes) {
+        return nodes.size();
+    }
+}
+JAVA
+  make_says fail "$dir" lint "format violations" &&
+    make_says pass "$dir" format && make_says pass "$dir" lint &&
+    [[ $(grep '^import' "$src/devkit/fixture/Endpoint.java" | sed -n 2p) == 'import jakarta.ws.rs.Path;' ]]
+}
+
 negatives() {
   assert_helper_checks
   check "java-monolith: a Serializable class without a serialVersionUID fails make lint, until the module appends -Xlint:-serial and excludes SpotBugs' SE_NO_SERIALVERSIONID" \
@@ -921,6 +975,8 @@ negatives() {
   local test=src/test/java/devkit/fixture/GreeterTest.java indent='s/^    public/  public/'
   negative format lint "format violations" "$main" "$indent"
   check "java-monolith: make format fixes a format break" formatted "$main" "$indent"
+  check "java-monolith: imports of java, org and jakarta in the order before jakarta joined it fail make lint, and make format puts jakarta after java" \
+    jakarta_order
   negative checkstyle lint "Fully Qualified Class Names" "$main" \
     's/return name\./return java.util.Objects.requireNonNull(name)./'
   negative project-checkstyle lint "Fixture project rule" "$main" \
@@ -1317,6 +1373,8 @@ java_part() {
     integration_tests "$work/java-monolith"
   check "parent: the SpotBugs analyzer dependency excludes what the plugin's own declaration of it excludes" \
     spotbugs_exclusions_match "$root/java/parent/pom.xml" "$HOME/.m2/repository"
+  check "parent: the committed checksums list the artifacts of the formatter version Spotless runs, whose lockfile spotless-lib-extra embeds" \
+    python3 -I "$root/scripts/java/formatter_lockfile.py" "$root/java/parent/pom.xml" "$HOME/.m2/repository" "$root/java/checksums/checksums.sha256"
   out_of_reactor
   check "java-multimodule: a dependency under a groupId that only starts with the project's is still license-checked, by every make test until an override declares its license" \
     foreign_group

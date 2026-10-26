@@ -169,12 +169,12 @@ without a package or a reason fails, and so does one that matches no
 advisory, so a bump that fixes it forces its removal. Otherwise the fix is a
 bump of the closure.
 
-When a plugin's version, or parent configuration that changes what a plugin
-resolves, changes in `java/parent/pom.xml`, run `make maven-checksums` and
-commit `java/checksums/checksums.sha256` with the change; so does a bump of
-the Maven `scripts/lib/pinned_maven.sh` pins, and a change to a `java-*`
-fixture's dependencies. It records under that Maven,
-so it needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
+When a plugin's version, `eclipse-formatter.version`, or parent configuration
+that changes what a plugin resolves, changes in `java/parent/pom.xml`, run
+`make maven-checksums` and commit `java/checksums/checksums.sha256` with the
+change; so does a bump of the Maven `scripts/lib/pinned_maven.sh` pins, and a
+change to a `java-*` fixture's dependencies. It records under that Maven, so it
+needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
 Maven Central, but no Maven on `PATH`.
 `tests/run.sh shell` fails on a pinned jar, or the pinned Maven
 distribution's line, that the file lacks, but not on a changed transitive
@@ -185,6 +185,15 @@ repository, not an artifact already malicious on Central; a re-record fails
 when it would change the hash of a path already in the file (release paths
 on Central are immutable), naming each path, and deleting that line and
 re-running is the escape hatch.
+
+`make maven-checksums` also refuses a run whose spotless-lib-extra embeds no
+lockfile for the parent's `eclipse-formatter.version` (Spotless would then
+provision the formatter from P2, outside the trusted checksums), or whose
+lockfile names a coordinate the recording did not list. Pick a formatter
+version the Spotless release has a lockfile for, or wait for a release that
+embeds one. `tests/run.sh java` fails when the committed file lacks the
+coordinates of the formatter version, so a bump of `eclipse-formatter.version`
+without a re-record cannot land.
 
 A dependency pin bump in devkit takes only a release published at least 24
 hours before the bump's commit (the cutoff), so a compromised release is
@@ -408,6 +417,14 @@ branch` onto an existing branch now refuses when tracked files have uncommitted
 changes, which the reset could discard. Where an untracked file is in the way
 of the reset, it stops with the target checked out and nothing discarded (git
 names the file): move or delete the file and run it again.
+
+The import order now puts `jakarta.*` after `javax.*` (static imports first,
+then java, javax, jakarta, org, com, the rest). A file importing `jakarta`
+together with `org`, `com` or other packages outside `java` and `javax` changes
+under `make format`, so `make lint`, `make test`, `make coverage` and `make
+install` (Spotless checks at `verify`) fail on it until `make format` has run
+once. Run it in a commit of its own and list that commit in
+`.git-blame-ignore-revs`.
 
 ### Upgrading from v0.7.x
 

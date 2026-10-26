@@ -663,7 +663,11 @@
               <eclipse>
                 <file>${maven.multiModuleProjectDirectory}/.devkit/java/config/eclipse-formatter.xml</file>
                 <version>${eclipse-formatter.version}</version>
-                <!-- download.eclipse.org suffers recurring outages; provision P2 from a mirror -->
+                <!-- Applies only to a formatter version whose spotless-lib-extra embeds no lockfile,
+                     which make maven-checksums refuses: with one, Spotless resolves the formatter
+                     through Maven, so the trusted checksums cover it once make maven-checksums has
+                     recorded the version. download.eclipse.org suffers recurring outages; provision
+                     P2 from a mirror -->
                 <p2Mirrors>
                   <p2Mirror>
                     <prefix>https://download.eclipse.org/</prefix>
@@ -672,7 +676,7 @@
                 </p2Mirrors>
               </eclipse>
               <importOrder>
-                <order>java,javax,org,com,#</order>
+                <order>java,javax,jakarta,org,com,#</order>
               </importOrder>
               <removeUnusedImports />
             </java>
