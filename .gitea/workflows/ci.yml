@@ -10,10 +10,12 @@
 # audit-ignore entry lands (#58). The shell job's floor part bootstraps the
 # pinned uv, hash-verified, and has it use an installed CPython 3.11 and 3.14
 # or download them. Every job runs as root, which a file mode does not stop, so
-# the shell job's unprivileged leg runs the shell part as a user created for it,
-# which takes the sealed caches' non-root paths that root never takes (#95). No
-# job needs the checkout's token (lint-repo's release fetch sets its own header,
-# and every test remote is local), so no checkout leaves it for later steps.
+# the shell and python jobs' unprivileged legs run their parts as a user
+# created for the leg, which takes the sealed caches' non-root paths that root
+# never takes (#95, #203): the floor and python parts are the ones that run the
+# real sealed uv. No job needs the checkout's token (lint-repo's release fetch
+# sets its own header, and every test remote is local), so no checkout leaves it
+# for later steps.
 # Accepted risk: the runner may share one tool cache across jobs, as
 # act_runner's container mode does by default (not checked on this runner). If
 # it does, root in a pull request's job can replace the node setup-node cached,
@@ -95,12 +97,12 @@ jobs:
         if: matrix.user == 'root'
       # runuser keeps the environment but makes HOME the user's own; PATH is passed on explicitly, in
       # case login.defs has runuser reset it, so the user finds setup-node's node.
-      - name: tests/run.sh shell, as an unprivileged user
+      - name: tests/run.sh shell floor, as an unprivileged user
         if: matrix.user == 'unprivileged'
         run: |
           useradd -m ci
           chown -R ci: .
-          runuser -u ci -- env PATH="$PATH" tests/run.sh shell
+          runuser -u ci -- env PATH="$PATH" tests/run.sh shell floor
 
   java:
     runs-on: ubuntu-latest
@@ -121,6 +123,10 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # a failing leg must not cancel the other's verdict
+      matrix:
+        user: [root, unprivileged]
     # No Python setup action: the first fixture's make install bootstraps the uv its uv.lock pins,
     # hash-verified, and later installs find it in the cache; uv provisions the CPython
     # .python-version pins. Node runs make lint's jscpd.
@@ -134,3 +140,11 @@ jobs:
           check-latest: true # not an older 22.x the runner has cached
       - run: apt-get update -qq && apt-get install -y -qq python3-venv # the bootstrap's throwaway venv
       - run: tests/run.sh python
+        if: matrix.user == 'root'
+      # As the shell job's unprivileged leg: HOME becomes the user's, PATH finds setup-node's node (jscpd).
+      - name: tests/run.sh python, as an unprivileged user
+        if: matrix.user == 'unprivileged'
+        run: |
+          useradd -m ci
+          chown -R ci: .
+          runuser -u ci -- env PATH="$PATH" tests/run.sh python
