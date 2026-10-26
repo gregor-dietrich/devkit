@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic tests for scripts/lib/pinned_maven.sh: a temp copy of devkit's
 # scripts/ whose pin is replaced by the sha256 of a fixture tarball, holding a
-# fake mvn; stubs for curl (copies the fixture asset, or fails) and tar (logs,
-# then runs the real one). No network. Prints PASS/FAIL per case.
+# fake mvn; stubs for curl (copies the fixture asset, or fails; or writes 2 MiB
+# ignoring --max-filesize, standing in for curl before 8.4 on a source with no
+# stated size) and tar (logs, then runs the real one). The copy's size cap is
+# shrunk to 1 MiB. No network. Prints PASS/FAIL per case.
 set -euo pipefail
 
 uncache() { chmod -R u+w "$@" 2>/dev/null || :; rm -rf "$@"; } # the caches are read-only, directories too
@@ -46,6 +48,9 @@ sed "s/^sha256=.*/sha256=$(sha256_of "$work/good.tar.gz")/" "$root/scripts/lib/p
 bad_script=$work/devkit/scripts/lib/pinned_maven_bad.sh
 sed "s/^sha256=.*/sha256=$(sha256_of "$work/bad.tar.gz")/" "$root/scripts/lib/pinned_maven.sh" >"$bad_script"
 chmod +x "$bad_script"
+# The size cap shrunk to 1 MiB in the copy, so a case need not write 100 MiB.
+sed 's/^\( *\)cap=100$/\1cap=1/' "$root/scripts/lib/fetch.sh" >"$work/devkit/scripts/lib/fetch.sh"
+grep -q '^ *cap=1$' "$work/devkit/scripts/lib/fetch.sh" || { echo "FAIL setup: cap=100 not found in fetch.sh"; exit 1; }
 
 # Stubs, first on PATH; ${PATH#*:} drops their directory again.
 mkdir "$work/bin"
@@ -59,15 +64,21 @@ stub() { # stub NAME BODY
 echo "curl $*" >>"$LOG"
 for url; do :; done
 for p in ${FAKE_CURL_FAIL-}; do case $url in "$p"*) exit 22;; esac; done
+for p in ${FAKE_CURL_BIG-}; do case $url in "$p"*)
+  while [ $# -gt 0 ]; do [ "$1" = -o ] && { dd if=/dev/zero of="$2" bs=1024 count=2048 2>/dev/null; echo "dd rc=$? bytes=$(($(wc -c <"$2")))" >>"$LOG"; }; shift; done
+  echo "curl: (23) Failure writing output to destination" >&2; exit 23;; esac; done
 while [ $# -gt 0 ]; do [ "$1" = -o ] && cp "$FAKE_ASSET" "$2"; shift; done'
   stub tar 'echo "tar $*" >>"$LOG"; PATH=${PATH#*:}; exec tar "$@"'
 }
 export PATH=$work/bin:$PATH FAKE_ASSET=$work/good.tar.gz
 
-run() { # run: the script; sets rc, out, err
+run() { # run: the script, under the soft file-size limit FSIZE (KiB) if set; sets rc, out, err
   : >"$LOG"
   rc=0
-  out=$("$script" 2>"$work/err") || rc=$?
+  out=$(
+    [[ -z ${FSIZE-} ]] || ulimit -S -f "$FSIZE"
+    "$script" 2>"$work/err"
+  ) || rc=$?
   err=$(<"$work/err")
 }
 fails=0
@@ -89,7 +100,7 @@ one_error() { # one_error TEXT: exactly one ERROR line, naming TEXT (the downloa
   [[ $rc == 1 && $errors == "ERROR: pinned Maven: "*"$1"* && $errors != *$'\n'* ]]
 }
 curled() { # curled URL [FLAG [RETRY]]: curl was asked for URL, with --retry RETRY (default 3) and FLAG
-  grep -q "^curl -fsSL --globoff --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 100M --retry ${3:-3} ${2:---retry-connrefused} --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz $1$" "$LOG"
+  grep -q "^curl -fsSL --globoff --proto =https --tlsv1.2 --connect-timeout 10 --max-time 300 --max-filesize 1M --retry ${3:-3} ${2:---retry-connrefused} --retry-max-time 300 -o $tools/.tmp.[^ ]*/asset.tar.gz $1$" "$LOG"
 }
 curl_urls() { grep '^curl' "$LOG" | sed 's/.* //' | tr '\n' ' '; } # the URLs curl was asked for, in order
 
@@ -222,6 +233,36 @@ case_cannot_unpack() { # the hash matches the pin, but the distribution is not i
   FAKE_ASSET=$work/bad.tar.gz script=$bad_script run
   one_error "cannot unpack $vptr/$path" && logged tar && nothing_cached
 }
+over_cap() { # over_cap SIZE: the stub's 2 MiB write was stopped at SIZE bytes, not killed by SIGXFSZ (153)
+  grep -q "^dd rc=[1-9][0-9]* bytes=$1$" "$LOG" && ! logged "dd rc=153"
+}
+case_cap_earlier() { # an earlier URL over the cap fails like any failed download
+  uncache "$dir"
+  FAKE_CURL_BIG=$vptr/ run
+  [[ $rc == 0 && $out == "$launcher" && $err == *"pinned Maven: cannot download $vptr/$path; trying $google/$path"* ]] &&
+    [[ $err != *ERROR* ]] && over_cap 1048576 && logged tar
+}
+case_cap_last() {
+  uncache "$dir"
+  FAKE_CURL_BIG=https:// run
+  one_error "cannot download $central/$path" && nothing_cached && over_cap 1048576
+}
+case_cap_lower_kept() { # a caller's soft limit below the cap is kept, not raised
+  uncache "$dir"
+  FSIZE=512 FAKE_CURL_BIG=https:// run
+  one_error "cannot download $central/$path" && nothing_cached && over_cap 524288
+}
+case_cap_lowers_limit() { # a caller's finite soft limit above the cap is lowered to it
+  uncache "$dir"
+  FSIZE=4096 FAKE_CURL_BIG=https:// run
+  one_error "cannot download $central/$path" && nothing_cached && over_cap 1048576
+}
+case_cap_posixly_correct() { # POSIXLY_CORRECT keeps ulimit's 1 KiB units in the subshell
+  uncache "$dir"
+  POSIXLY_CORRECT=1 FAKE_CURL_BIG=https:// run
+  one_error "cannot download $central/$path" && nothing_cached && over_cap 1048576
+}
+case_shipped_cap() { grep -q '^ *cap=100$' "$root/scripts/lib/fetch.sh"; }
 case_shipped_pin() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $pinned =~ ^[0-9a-f]{64}$ ]] &&
     [[ $(maven_pin "$root") == "$pinned  $path" ]]
@@ -245,6 +286,12 @@ t "9 a mirror that is no https://HOST[/PATH] URL (credentials, query, fragment, 
 t "10 a bad mirror fails on a warm cache too" case_mirror_warm_cache
 t "11 a matching archive without the distribution fails to unpack, caching nothing" case_cannot_unpack
 t "12 the shipped pin is well-formed and maven_pin prints its checksums line" case_shipped_pin
+t "13 a download over the cap on an earlier URL is stopped at the cap, the next URL serves" case_cap_earlier
+t "14 a download over the cap on the last URL is stopped at the cap and fails, caching nothing" case_cap_last
+t "15 a lower file-size limit of the caller is kept" case_cap_lower_kept
+t "15b a caller's finite file-size limit above the cap is lowered to it" case_cap_lowers_limit
+t "15c the cap holds under POSIXLY_CORRECT" case_cap_posixly_correct
+t "16 the shipped cap is 100 MiB" case_shipped_cap
 
 [[ $fails == 0 ]] || {
   echo "$fails case(s) failed"

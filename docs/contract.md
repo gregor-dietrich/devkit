@@ -486,10 +486,12 @@ changes instead.
     `safe.directory` included, applies.
   - It needs curl (7.52 or later, which added `--retry-connrefused`), tar,
     `sha256sum` or `shasum`, and git 2.36 or later for the history scan; a
-    failed download is retried up to three times, none starting after 300
-    seconds (with curl before 7.71 only a timeout, a refused connect or a
-    transient HTTP error, not a dropped connection); the binary lands,
-    read-only, in
+    failed download is retried up to three times, none decided later than 300
+    seconds after the first attempt (the pause before it and the attempt
+    itself come on top; with curl before 7.71 only a timeout, a refused
+    connect or a transient HTTP error, not a dropped connection); the
+    download is capped at 100M on any curl, like the pinned Maven's; the
+    binary lands, read-only, in
     `${XDG_CACHE_HOME:-$HOME/.cache}/devkit/tools/gitleaks-<version>-<platform>/`.
   - The history scan runs `git log` with `--text` (a file `.gitattributes` marks
     `-diff` or `binary` is read as text), `--diff-merges=remerge` (it reads what
@@ -980,8 +982,8 @@ inherit it, and Maven reads it through the link:
   own resolution of plugins and dependencies follows Maven's settings
   (`~/.m2/settings.xml`, `-s` or `-gs` in `.mvn/maven.config`). Authenticated
   mirrors and air-gapped seeding are unsupported (#134). The pinned-Maven
-  download is capped at 100M, with curl before 8.4.0 only when the server states
-  the size in advance. The pin and the cache path stay. A cache entry without a
+  download is capped at 100M per download on any curl; a larger one fails like
+  any failed download. The pin and the cache path stay. A cache entry without a
   launcher fails with the command that removes it, for a retry. A project's
   `mvnw` is optional, of any distribution type, for an IDE or
   a bare build. `get_maven.sh` first adjusts `MAVEN_OPTS` for the JDK Maven runs
