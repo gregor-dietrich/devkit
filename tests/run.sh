@@ -22,8 +22,8 @@
 #          tests/python_audit_judge_test.sh,
 #          tests/java_clean_test.sh,
 #          tests/duplication_test.sh, tests/anchored_match_test.sh,
-#          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh
-#          and tests/tag_test.sh,
+#          tests/markdown_isolation_test.sh, tests/closure_audit_test.sh,
+#          tests/tag_test.sh and tests/git_tooling_test.sh,
 #          and that no includedLicense of the parent is empty or holds a line
 #          break, a tab, a double space or edge whitespace, that no name is
 #          listed twice and that the allowlist names the licenses devkit's
@@ -265,6 +265,7 @@ shell_tests() { # every test file of the shell part, run again by the floor part
   check "markdown isolation tests" "$root/tests/markdown_isolation_test.sh"
   check "closure_audit tests" "$root/tests/closure_audit_test.sh"
   check "tag tests" "$root/tests/tag_test.sh"
+  check "git tooling tests" "$root/tests/git_tooling_test.sh"
 }
 
 shell_part() {

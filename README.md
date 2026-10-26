@@ -401,6 +401,14 @@ warning itself: the failure says only that warnings were found with `-Werror`
 set. An IDE build, or `mvn test-compile` without `-q` (`compile` alone misses
 test sources), names it.
 
+`make rebase` no longer pushes: after it, review the rebase (and run the gates)
+and push with `git push --force-with-lease --force-if-includes` (if git
+refuses it, fetch and integrate the remote branch, then push again). `make
+branch` onto an existing branch now refuses when tracked files have uncommitted
+changes, which the reset could discard. Where an untracked file is in the way
+of the reset, it stops with the target checked out and nothing discarded (git
+names the file): move or delete the file and run it again.
+
 ### Upgrading from v0.7.x
 
 `devkitw` (revision 3) carries devkit's release key,

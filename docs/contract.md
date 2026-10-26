@@ -254,6 +254,13 @@ include .devkit/make/python-uv.mk
   it refuses unless HEAD is the tip as the remote reports it now and the
   working tree is clean, untracked files included. `untag` offers the
   highest such tag, an rc before its final, and no default without one.
+- `branch` prompts for a target and a source (default `origin/main`), fetches,
+  and creates the target at the source, or resets an existing one (local or
+  only on origin) to it. It refuses first while tracked files have uncommitted
+  changes and, through `git reset --keep`, where an untracked file is in the
+  way. It then pushes the target, with `--force-with-lease` when origin has it.
+  `rebase` prompts for a target (default `origin/main`), fetches, rebases the
+  current branch onto it, and pushes nothing.
 - `check`, `lint` and `format` are composed by prerequisites, never by two
   recipes: `common.mk` declares `check: check-devkit check-hooks`,
   `lint: lint-repo` and `format: format-md`; the language file adds

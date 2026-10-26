@@ -14,7 +14,4 @@ REBASE_TARGET=${REBASE_TARGET:-origin/main}
 echo "Rebasing against: $REBASE_TARGET"
 git rebase "$REBASE_TARGET"
 
-echo "Force pushing..."
-git push --force-with-lease
-
-echo "Rebase operation completed."
+echo "Rebase completed; review it, then push with git push --force-with-lease --force-if-includes."
