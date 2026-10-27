@@ -42,7 +42,9 @@
 #          and that java/config/findsecbugs-crlf-jboss-logging.txt passes
 #          scripts/java/jboss_logging_sinks.py --check and that the check
 #          rejects a copy whose long-argument line lists the argument's
-#          slots instead of the format's,
+#          slots instead of the format's, that java/config/pmd-ruleset.xml
+#          sets no property but the ones devkit means to and that the check
+#          rejects a raised complexity threshold and an extra property,
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin (find-sec-bugs' detector included), plugin dependency and
 #          annotation processor the parent pins and of the plugins
@@ -146,7 +148,17 @@
 #          -Xlint:-serial or -Xlint:-this-escape, SpotBugs' matching pattern
 #          to fail it where SpotBugs reports the construct, and lint to pass
 #          once that pattern is excluded, or at once for a constructor
-#          handing this out, which SpotBugs does not report. Expect imports
+#          handing this out, which SpotBugs does not report; and PMD's
+#          ConstructorCallsOverridableMethod to fail it too, until the
+#          module's own pmd-ruleset.xml references the kit's filtered copy and
+#          excludes that rule (docs/contract.md), which still leaves PMD's
+#          other rules and pmd.extraAssertMethodNames in force; the same in a
+#          java-multimodule module, whose reference is
+#          <module dir>/target/devkit/pmd-ruleset.xml, for lint and lint
+#          ONLY=<module dir>. Expect a catch that throws a new exception
+#          without the caught one as its cause and a method over
+#          PMD's default cyclomatic complexity to fail lint, naming
+#          PreserveStackTrace and CyclomaticComplexity. Expect imports
 #          of java, org and jakarta in the order from before jakarta joined
 #          the import order to fail lint, and make format to put jakarta
 #          after java and before org. Expect the
@@ -297,6 +309,12 @@ shell_part() {
     lists_reject 's|<includedLicense>Plexus</includedLicense>|&&|' "includedLicense entries listed twice"
   check "parent: the license lists check rejects an allowlist without a required name" \
     lists_reject '/<includedLicense>Unknown license</d' "required names missing from the allowlist"
+  check "pmd-ruleset.xml: sets no property but the assertion helpers, the thresholds of TooManyMethods and TooManyFields and LinguisticNaming's two checks, so the complexity rules run at PMD's defaults" \
+    ruleset_thresholds_default "$root/java/config/pmd-ruleset.xml"
+  check "pmd-ruleset.xml: the property check rejects a raised complexity threshold" \
+    ruleset_thresholds_reject 's|<rule ref="category/java/design.xml/TooManyFields">|<rule ref="category/java/design.xml/CyclomaticComplexity">\n        <properties><property name="methodReportLevel" value="30" /></properties>\n    </rule>\n    &|'
+  check "pmd-ruleset.xml: the property check rejects reportLevel on a rule that may set another property" \
+    ruleset_thresholds_reject 's|<property name="maxmethods" value="40" />|&<property name="reportLevel" value="60" />|'
   check "parent: spotbugs-plugin.version is spotbugs.version plus a fourth component" spotbugs_versions_match
   check "parent: the SpotBugs analyzer dependency excludes log4j-core, as the plugin's own declaration does" \
     spotbugs_log4j_excluded "$root/java/parent/pom.xml"
@@ -456,6 +474,33 @@ lists_reject() { # lists_reject SED TEXT [CHECK]: CHECK (default license_lists_w
   local copy err
   copy=$(mktemp) && sed "$1" "$root/java/parent/pom.xml" >"$copy" && ! cmp -s "$copy" "$root/java/parent/pom.xml" &&
     ! err=$("${3:-license_lists_whole}" "$copy" 2>&1) && [[ $err == *"$2"* ]]
+  local status=$?
+  rm -f "$copy"
+  return $status
+}
+
+# ruleset_thresholds_default FILE: the PMD ruleset FILE sets no property but the ones devkit means to
+# set: the assertion helpers of UnitTestShouldIncludeAssert, the 40 of TooManyMethods and
+# TooManyFields, and the two LinguisticNaming checks it narrows off. Any other, such as a raised
+# threshold of a complexity rule, fails, so the rules run at PMD's defaults.
+ruleset_thresholds_default() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"p": "http://pmd.sourceforge.net/ruleset/2.0.0"}
+allowed = {"UnitTestShouldIncludeAssert": {"extraAssertMethodNames"}, "TooManyMethods": {"maxmethods"},
+           "TooManyFields": {"maxfields"}, "LinguisticNaming": {"checkGetters", "checkPrefixedTransformMethods"}}
+rules = ET.parse(sys.argv[1]).getroot().findall("p:rule", ns)
+set_ = {(r.get("ref", "").rsplit("/", 1)[-1], p.get("name")) for r in rules for p in r.iterfind("p:properties/p:property", ns)}
+extra = {s for s in set_ if s[1] not in allowed.get(s[0], ())}
+sys.exit(f"{sys.argv[1]} sets no property at all (namespace or structure changed?)") if not set_ else None
+sys.exit(f"{sys.argv[1]} sets properties devkit does not: {sorted(extra)}") if extra else None' "$1"
+}
+
+# ruleset_thresholds_reject SED: the check fails on a copy of the shipped ruleset run through SED
+# (which must change it).
+ruleset_thresholds_reject() {
+  local file=$root/java/config/pmd-ruleset.xml copy err
+  copy=$(mktemp) && sed "$1" "$file" >"$copy" && ! cmp -s "$copy" "$file" &&
+    ! err=$(ruleset_thresholds_default "$copy" 2>&1) && [[ $err == *"sets properties devkit does not"* ]]
   local status=$?
   rm -f "$copy"
   return $status
@@ -654,11 +699,12 @@ formatted() { # formatted FILE SED: make format undoes SED's break in a monolith
     make_says pass "$work/formatted" format && make_says pass "$work/formatted" lint
 }
 
-assert_helper_checks() { # a test whose only check is a helper PMD does not know fails lint until the pom names it
-  local dir=$work/negative-assert-helper testdir=src/test/java/devkit/fixture
-  setup "$root/tests/fixtures/java-monolith" "$dir"
+# add_assert_helper DIR: a test in the monolith copy DIR whose only check is a helper PMD does not
+# know.
+add_assert_helper() {
+  local testdir=$1/src/test/java/devkit/fixture
   # No assert*, verify* or check* in the names: PMD accepts those by default.
-  cat >"$dir/$testdir/GreetingIs.java" <<'JAVA'
+  cat >"$testdir/GreetingIs.java" <<'JAVA'
 package devkit.fixture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -673,7 +719,7 @@ final class GreetingIs {
     }
 }
 JAVA
-  cat >"$dir/$testdir/HelperTest.java" <<'JAVA'
+  cat >"$testdir/HelperTest.java" <<'JAVA'
 package devkit.fixture;
 
 import org.junit.jupiter.api.Test;
@@ -686,6 +732,12 @@ class HelperTest {
     }
 }
 JAVA
+}
+
+assert_helper_checks() { # a test whose only check is a helper PMD does not know fails lint until the pom names it
+  local dir=$work/negative-assert-helper
+  setup "$root/tests/fixtures/java-monolith" "$dir"
+  add_assert_helper "$dir"
   check "java-monolith: an unknown assertion helper fails make lint, PMD finding one violation" \
     make_says fail "$dir" lint "has found 1 violation" "PMD Failure: devkit.fixture.HelperTest:8 Rule:UnitTestShouldIncludeAssert"
   sed_into "$dir/pom.xml" 's|<maven.compiler.release>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
@@ -954,12 +1006,13 @@ nullaway_in_tests() {
   grep -qF '@SuppressWarnings("NullAway")' "$1/$2" && make_says pass "$1" lint "Lint checks completed."
 }
 
-# javac_lint LINT SED PATTERN [NAME]: SED's break of Greeter in a monolith copy fails make lint on
-# javac's LINT under -Werror, naming the file and position of the warning (mvn_checked.sh's logger
-# keys keep it under -q). Once the copy appends -Xlint:-LINT to its compilerArgs, as a module whose
-# framework needs that does, javac is silent: a non-empty PATTERN makes lint fail on SpotBugs'
+# javac_lint LINT SED PATTERN [NAME [PMD]]: SED's break of Greeter in a monolith copy fails make
+# lint on javac's LINT under -Werror, naming the file and position of the warning (mvn_checked.sh's
+# logger keys keep it under -q). Once the copy appends -Xlint:-LINT to its compilerArgs, as a module
+# whose framework needs that does, javac is silent: a non-empty PATTERN makes lint fail on SpotBugs'
 # PATTERN for the same construct, and it passes once the class excludes PATTERN; an empty one is a
-# construct only javac reports, which then passes.
+# construct only javac reports, which then passes. A non-empty PMD is a PMD rule that reports the
+# construct too: lint then fails on it, naming Rule:<PMD>, and passes once pmd_without drops it.
 # NAME (default LINT) keeps the copies of one LINT's cases apart.
 javac_lint() {
   local dir=$work/javac-${4:-$1}
@@ -968,7 +1021,41 @@ javac_lint() {
   [[ -z $3 ]] || {
     make_says fail "$dir" lint "$3" &&
       sed_into "$dir/spotbugs-exclude.xml" "s|\" />\$|\">\\n  <Match>\\n    <Class name=\"devkit.fixture.Greeter\" />\\n    <Bug pattern=\"$3\" />\\n  </Match>\\n</FindBugsFilter>|"
-  } && make_says pass "$dir" lint "Lint checks completed."
+  } || return
+  [[ -z ${5-} ]] || { make_says fail "$dir" lint "Rule:$5" && pmd_without "$dir" "$5"; } || return
+  make_says pass "$dir" lint "Lint checks completed."
+}
+
+# pmd_without DIR RULE [REF]: the project or module DIR drops RULE of devkit's PMD ruleset, as
+# docs/contract.md teaches: its pom redeclares PMD's <rulesets> with its own pmd-ruleset.xml, which
+# references the filtered copy of the kit's at REF (default target/devkit/pmd-ruleset.xml, relative
+# to Maven's directory) and excludes RULE. The pom holds a <build> with <plugins> (javac_lint's
+# does) or none at all.
+pmd_without() {
+  # shellcheck disable=SC2016 # the literal ${project.basedir} is for Maven
+  local plugin='      <plugin>\n        <artifactId>maven-pmd-plugin</artifactId>\n        <configuration>\n          <rulesets>\n            <ruleset>${project.basedir}/pmd-ruleset.xml</ruleset>\n          </rulesets>\n        </configuration>\n      </plugin>\n'
+  if grep -q '^    </plugins>' "$1/pom.xml"; then
+    sed_into "$1/pom.xml" "s|^    </plugins>|$plugin&|"
+  else
+    sed_into "$1/pom.xml" "s|^</project>|  <build>\\n    <plugins>\\n$plugin    </plugins>\\n  </build>\\n&|"
+  fi || return
+  # shellcheck disable=SC2016 # the literal ${project.basedir} is for Maven
+  grep -qF '${project.basedir}/pmd-ruleset.xml' "$1/pom.xml" || {
+    echo "pmd_without: $1/pom.xml did not take the <rulesets> edit" >&2
+    return 1
+  }
+  cat >"$1/pmd-ruleset.xml" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Module PMD Rules"
+    xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+  <description>devkit's rules without $2.</description>
+  <rule ref="${3:-target/devkit/pmd-ruleset.xml}">
+    <exclude name="$2" />
+  </rule>
+</ruleset>
+XML
 }
 
 # jakarta_order: a monolith copy whose class imports java, org and jakarta in the order before jakarta
@@ -1008,6 +1095,104 @@ JAVA
     [[ $(grep '^import' "$src/devkit/fixture/Endpoint.java" | sed -n 2p) == 'import jakarta.ws.rs.Path;' ]]
 }
 
+# catch_without_cause: a sed that adds to Greeter a method whose catch throws a new exception
+# without the caught one as its cause (PMD's PreserveStackTrace).
+catch_without_cause() {
+  printf '%s' 's/^}$/\n    \/** Parses {@code text}, losing the cause. *\/\n    public int lossy(String text) {\n        try {\n            return Integer.parseInt(text);\n        } catch (NumberFormatException e) {\n            throw new IllegalArgumentException("bad number");\n        }\n    }\n}/'
+}
+
+# many_branches: a sed that adds to Greeter a method of eleven if branches, over PMD's cyclomatic
+# complexity of 10.
+many_branches() {
+  local body='' i
+  for i in {1..11}; do body+="        if (n == $i) {\\n            return $i;\\n        }\\n"; done
+  printf '%s' "s/^}\$/\\n    \\/** Names a number. *\\/\\n    public int branchy(int n) {\\n${body}        return 0;\\n    }\\n}/"
+}
+
+# pmd_recipe_keeps: a monolith copy that drops PMD's ConstructorCallsOverridableMethod through its
+# own pmd-ruleset.xml still has the filtered pmd.extraAssertMethodNames (an unknown assertion helper
+# named there passes) and PMD's other rules (a catch without the cause fails on PreserveStackTrace
+# alone).
+pmd_recipe_keeps() {
+  local dir=$work/pmd-recipe
+  setup "$root/tests/fixtures/java-monolith" "$dir" && add_assert_helper "$dir" &&
+    sed_into "$dir/pom.xml" 's|<maven.compiler.release>|<pmd.extraAssertMethodNames>greetingIs</pmd.extraAssertMethodNames>\n    &|' &&
+    pmd_without "$dir" ConstructorCallsOverridableMethod &&
+    make_says pass "$dir" lint "Lint checks completed." &&
+    sed_into "$dir/src/main/java/devkit/fixture/Greeter.java" "$(catch_without_cause)" &&
+    make_says fail "$dir" lint "has found 1 violation" "Rule:PreserveStackTrace"
+}
+
+# pmd_module_recipe: in java-multimodule, a package-private class of app whose constructor calls an
+# overridable method (SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR, excluded in app) fails
+# make lint on PMD's ConstructorCallsOverridableMethod, until app's own pmd-ruleset.xml references
+# app/target/devkit/pmd-ruleset.xml, as MODULES lists the module, and excludes the rule: lint and
+# lint ONLY=app then pass, with app's pmd.extraAssertMethodNames, which only app's pom names,
+# reaching the test that checks through a helper. ONLY=app reads core from the local repository
+# out_of_reactor installed it into, so this runs after it.
+pmd_module_recipe() {
+  local dir=$work/pmd-module-recipe app=$work/pmd-module-recipe/app
+  local srcdir=$app/src/main/java/devkit/fixture/app testdir=$app/src/test/java/devkit/fixture/app
+  setup "$root/tests/fixtures/java-multimodule" "$dir" || return
+  cat >"$srcdir/Boxed.java" <<'JAVA'
+package devkit.fixture.app;
+
+/** Fills its label on construction. */
+class Boxed {
+
+    private String label = "";
+
+    Boxed() {
+        fill();
+    }
+
+    String label() {
+        return label;
+    }
+
+    void fill() {
+        label = "boxed";
+    }
+}
+JAVA
+  # No assert*, verify* or check* in the names: PMD accepts those by default.
+  cat >"$testdir/ParityIs.java" <<'JAVA'
+package devkit.fixture.app;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+final class ParityIs {
+
+    private ParityIs() {
+    }
+
+    static void parityIs(String expected, int number) {
+        assertEquals(expected, new Parity().of(number));
+    }
+}
+JAVA
+  cat >"$testdir/HelperTest.java" <<'JAVA'
+package devkit.fixture.app;
+
+import org.junit.jupiter.api.Test;
+
+class HelperTest {
+
+    @Test
+    void namesByHelper() {
+        ParityIs.parityIs("even", 2);
+    }
+}
+JAVA
+  sed_into "$app/spotbugs-exclude.xml" "s|\" />\$|\">\\n  <Match>\\n    <Class name=\"devkit.fixture.app.Boxed\" />\\n    <Bug pattern=\"MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR\" />\\n  </Match>\\n</FindBugsFilter>|" &&
+    sed_into "$app/pom.xml" 's|^  <artifactId>app</artifactId>|&\n\n  <properties>\n    <pmd.extraAssertMethodNames>parityIs</pmd.extraAssertMethodNames>\n  </properties>|' &&
+    make_says fail "$dir" lint "has found 1 violation" "Rule:ConstructorCallsOverridableMethod" &&
+    pmd_without "$app" ConstructorCallsOverridableMethod app/target/devkit/pmd-ruleset.xml &&
+    make_says pass "$dir" lint "Lint checks completed." &&
+    ONLY=app MAVEN_ARGS="-Dmaven.repo.local=$work/m2 -Dmaven.repo.local.tail=$HOME/.m2/repository -o" \
+      make_says pass "$dir" lint "Lint checks completed."
+}
+
 negatives() {
   assert_helper_checks
   check "java-monolith: a duplicated block fails make lint, CPD naming each place" \
@@ -1015,9 +1200,13 @@ negatives() {
   check "java-monolith: a Serializable class without a serialVersionUID fails make lint, until the module appends -Xlint:-serial and excludes SpotBugs' SE_NO_SERIALVERSIONID" \
     javac_lint serial 's/^import edu/import java.io.Serializable;\n\nimport edu/; s/^public final class Greeter {/public final class Greeter implements Serializable {/' \
     SE_NO_SERIALVERSIONID
-  check "java-monolith: a constructor calling an overridable method fails make lint, until the module appends -Xlint:-this-escape and excludes SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR" \
+  check "java-monolith: a constructor calling an overridable method fails make lint, until the module appends -Xlint:-this-escape, excludes SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR and drops PMD's ConstructorCallsOverridableMethod through its own pmd-ruleset.xml" \
     javac_lint this-escape 's/^public final class Greeter {/public class Greeter {\n\n    \/** Greets once on construction. *\/\n    public Greeter() {\n        greet("x");\n    }/' \
-    MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR
+    MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR "" ConstructorCallsOverridableMethod
+  check "java-monolith: the module's own pmd-ruleset.xml keeps PMD's other rules and pmd.extraAssertMethodNames in force" \
+    pmd_recipe_keeps
+  check "java-multimodule: a module's own pmd-ruleset.xml referencing <module dir>/target/devkit/pmd-ruleset.xml drops a PMD rule from make lint and make lint ONLY=app, keeping the module's pmd.extraAssertMethodNames" \
+    pmd_module_recipe
   check "java-monolith: a constructor handing this out to a static list fails make lint, which SpotBugs does not report, until the module appends -Xlint:-this-escape" \
     javac_lint this-escape 's/^import edu/import java.util.ArrayList;\nimport java.util.List;\n\nimport edu/; s/^public final class Greeter {/public class Greeter {\n\n    private static final List<Object> SEEN = new ArrayList<>();\n\n    \/** Registers itself on construction. *\/\n    public Greeter() {\n        SEEN.add(this);\n    }/' \
     "" this-escape-handed
@@ -1031,6 +1220,8 @@ negatives() {
   check "java-monolith: make format fixes a format break" formatted "$main" "$indent"
   check "java-monolith: imports of java, org and jakarta in the order before jakarta joined it fail make lint, and make format puts jakarta after java" \
     jakarta_order
+  negative preserve-stack-trace lint "Rule:PreserveStackTrace" "$main" "$(catch_without_cause)"
+  negative cyclomatic-complexity lint "Rule:CyclomaticComplexity" "$main" "$(many_branches)"
   negative checkstyle lint "Fully Qualified Class Names" "$main" \
     's/return name\./return java.util.Objects.requireNonNull(name)./'
   negative project-checkstyle lint "Fixture project rule" "$main" \

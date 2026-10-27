@@ -16,6 +16,7 @@ devkit is written against this page; change it here first.
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
 | `checkstyle-suppressions.xml` | Maven: the project's Checkstyle exemptions, in every module, the root included; required (`<suppressions/>` when none) |
 | `spotbugs-exclude.xml` | Maven: the project's SpotBugs exclusions, in every module with classes; required (an empty `<FindBugsFilter/>` when none) |
+| `pmd-ruleset.xml` | Maven, optional: a module's own PMD ruleset that drops a rule of devkit's, beside the module's pom (see Parent POM) |
 | `checkstyle-xpath-suppressions.xml` | Maven, optional: the project's Checkstyle XPath exemptions, in any module, read from that module's directory (see Parent POM) |
 | `dependency-check-suppression.xml` | Maven: the project's dependency-check suppressions, at the root, read by `make audit` |
 | `pyproject.toml` | uv: the package, or a virtual workspace root (no `[project]` table) whose members are the packages; its `dev` dependency group lists ruff, pytest, pytest-cov, vulture, pip-audit and uv, and `[tool.vulture]` sets `paths` (see uv projects) |
@@ -844,8 +845,8 @@ Shared gate configs live in `java/config/` (`checkstyle.xml`, `pmd-ruleset.xml`,
 them as `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD
 reads a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
 Project-specific files (`dependency-check-suppression.xml`,
-`spotbugs-exclude.xml`, `checkstyle-suppressions.xml`, `checkstyle-project.xml`)
-stay in the project.
+`spotbugs-exclude.xml`, `checkstyle-suppressions.xml`, `checkstyle-project.xml`,
+and a module's own optional PMD ruleset) stay in the project.
 
 SpotBugs runs at threshold `Low` with find-sec-bugs' security detectors
 (`com.h3xstream.findsecbugs:findsecbugs-plugin` at `findsecbugs.version`) beside
@@ -1185,6 +1186,55 @@ inherit it, and Maven reads it through the link:
   plugin-level maven-resources-plugin configuration and its build filters do
   not reach the copy, and `maven.resources.skip` does not skip it; a project
   that redeclares the execution `pmd-ruleset` itself does reach it.
+
+- A module drops one rule of devkit's PMD ruleset, keeping every other rule and
+  the filled-in `pmd.extraAssertMethodNames`, without copying the file. It
+  redeclares PMD's `<rulesets>` with one entry, a `pmd-ruleset.xml` of its own,
+  and that file references the filtered
+  copy, `target/devkit/pmd-ruleset.xml`, and excludes the rule. A Vaadin module,
+  whose constructors call setters while building the UI, drops
+  `ConstructorCallsOverridableMethod` this way. The module's pom:
+
+  ```xml
+  <plugin>
+    <artifactId>maven-pmd-plugin</artifactId>
+    <configuration>
+      <rulesets>
+        <ruleset>${project.basedir}/pmd-ruleset.xml</ruleset>
+      </rulesets>
+    </configuration>
+  </plugin>
+  ```
+
+  The plugin goes in the `<build>` of the module's pom. The `pmd-ruleset.xml`
+  beside that pom:
+
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <ruleset name="Module PMD Rules"
+      xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>devkit's rules without ConstructorCallsOverridableMethod.</description>
+    <rule ref="target/devkit/pmd-ruleset.xml">
+      <exclude name="ConstructorCallsOverridableMethod" />
+    </rule>
+  </ruleset>
+  ```
+
+  PMD expands no `${…}` in the reference, and resolves a relative path against
+  the directory Maven runs from, the project root under make, not against the
+  file that holds it. In a module of a multi-module project the reference is
+  the module's directory as `MODULES` lists it, then `/target/devkit/`:
+  `app/target/devkit/pmd-ruleset.xml` for the `MODULES` entry `app`. The bare
+  `target/devkit/pmd-ruleset.xml` there reads the root's copy, if the last build
+  left one, which holds the root's `pmd.extraAssertMethodNames`, not the
+  module's. From another directory
+  PMD fails where no file is at that path and reads whatever file is there
+  otherwise: run a module from the root (`mvn -pl <module dir>`), not from
+  inside it. The `<rulesets>` list carries no `combine.children="append"`: it
+  replaces the parent's entry, where an appended one would keep the rule. One
+  place is silenced with `@SuppressWarnings("PMD.<RuleName>")`.
 
 - `MAVEN_ARGS` reaches every Maven call of the targets above:
   `MAVEN_ARGS=-Pproduction make install` applies a profile, and

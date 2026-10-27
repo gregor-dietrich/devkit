@@ -3,26 +3,29 @@
     xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
-    <description>Minimal PMD rules shared by every project that consumes devkit.
-        Focus on critical issues only.</description>
+    <description>PMD rules shared by every project that consumes devkit: the categories
+        below minus their excludes, at PMD's default thresholds unless a rule below sets
+        one; a comment beside an exclude names a gate that covers its defect, or the
+        construct it fires on.</description>
 
-    <!-- Error Prone: Only critical rules -->
+    <!-- Error Prone: category enabled, minus the excludes below -->
     <rule ref="category/java/errorprone.xml">
         <exclude name="AvoidDuplicateLiterals" />
         <exclude name="AvoidFieldNameMatchingMethodName" />
         <exclude name="AvoidLiteralsInIfCondition" />
+        <!-- SpotBugs reports a stream opened and never closed (OBL_UNSATISFIED_OBLIGATION,
+             OS_OPEN_STREAM); PMD's also fires on container-owned resources such as a
+             JAX-RS Response -->
         <exclude name="CloseResource" />
         <exclude name="AssignmentInOperand" />
-        <exclude name="ConstructorCallsOverridableMethod" />
         <exclude name="DoNotTerminateVM" />
         <exclude name="TestClassWithoutTestCases" />
-        <exclude name="EmptyCatchBlock" />
+        <!-- javac -Xlint:serial under -Werror (the parent pom) fails the build on it -->
         <exclude name="MissingSerialVersionUID" />
         <exclude name="NullAssignment" />
-        <exclude name="CompareObjectsWithEquals" />
     </rule>
 
-    <!-- Best Practices: Only critical rules -->
+    <!-- Best Practices: category enabled, minus the excludes below -->
     <rule ref="category/java/bestpractices.xml">
         <exclude name="AbstractClassWithoutAbstractMethod" />
         <exclude name="AccessorMethodGeneration" />
@@ -37,12 +40,14 @@
         <exclude name="SystemPrintln" />
         <exclude name="UnitTestShouldUseTestAnnotation" />
         <exclude name="UnitTestContainsTooManyAsserts" />
+        <!-- configured below -->
         <exclude name="UnitTestShouldIncludeAssert" />
         <exclude name="LooseCoupling" />
         <exclude name="MethodReturnsInternalArray" />
+        <!-- Error Prone's MissingOverride under -Werror fails the build on it -->
         <exclude name="MissingOverride" />
+        <!-- Checkstyle's MultipleVariableDeclarations (checkstyle.xml) fails the build on it -->
         <exclude name="OneDeclarationPerLine" />
-        <exclude name="PreserveStackTrace" />
         <exclude name="ReplaceEnumerationWithIterator" />
         <exclude name="ReplaceHashtableWithMap" />
         <exclude name="ReplaceVectorWithList" />
@@ -55,8 +60,7 @@
         UnitTestShouldIncludeAssert is on with PMD's defaults (assert*, verify*, ...). A
         project names its own assertion helpers, e.g. a REST Assured terminal call or a
         test utility that asserts, in the pmd.extraAssertMethodNames property in the
-        <properties> of each pom that inherits devkit's parent (the root pom, and any
-        module that inherits it directly). The parent filters that value in, as a
+        <properties> of the root pom, or of a module that needs its own. The parent filters that value in, as a
         comma-separated list, when it copies this file to the build directory; PMD reads
         the copy.
     -->
@@ -67,7 +71,7 @@
         </properties>
     </rule>
 
-    <!-- Design: Only critical rules -->
+    <!-- Design: category enabled, minus the excludes below -->
     <rule ref="category/java/design.xml">
         <exclude name="AvoidCatchingGenericException" />
         <exclude name="AvoidDeeplyNestedIfStmts" />
@@ -87,23 +91,8 @@
         <exclude name="UseObjectForClearerAPI" />
     </rule>
 
-    <!-- Design complexity rules with elevated thresholds -->
-    <rule ref="category/java/design.xml/CognitiveComplexity">
-        <properties>
-            <property name="reportLevel" value="35" />
-        </properties>
-    </rule>
-    <rule ref="category/java/design.xml/CyclomaticComplexity">
-        <properties>
-            <property name="classReportLevel" value="200" />
-            <property name="methodReportLevel" value="50" />
-        </properties>
-    </rule>
-    <rule ref="category/java/design.xml/NPathComplexity">
-        <properties>
-            <property name="reportLevel" value="600000" />
-        </properties>
-    </rule>
+    <!-- TooManyMethods and TooManyFields stay raised: at PMD's defaults they fire on test
+         classes, DTOs, entities and views. The complexity rules run at PMD's defaults. -->
     <rule ref="category/java/design.xml/TooManyMethods">
         <properties>
             <property name="maxmethods" value="40" />
@@ -115,7 +104,7 @@
         </properties>
     </rule>
 
-    <!-- Code Style: Only critical rules -->
+    <!-- Code Style: category enabled, minus the excludes below -->
     <rule ref="category/java/codestyle.xml">
         <exclude name="AtLeastOneConstructor" />
         <exclude name="CallSuperInConstructor" />
@@ -123,6 +112,7 @@
         <exclude name="CommentDefaultAccessModifier" />
         <exclude name="ConfusingTernary" />
         <exclude name="LambdaCanBeMethodReference" />
+        <!-- configured below -->
         <exclude name="LinguisticNaming" />
         <exclude name="FieldDeclarationsShouldBeAtStartOfClass" />
         <exclude name="ForLoopShouldBeWhileLoop" />
@@ -137,8 +127,10 @@
         <exclude name="ShortVariable" />
         <exclude name="TooManyStaticImports" />
         <exclude name="UnnecessaryCast" />
+        <!-- Checkstyle's RegexpSinglelineJava.FullyQualifiedName (checkstyle.xml) fails
+             the build on a qualified name under the package roots it lists; PMD's also fires
+             on a static call qualified by an inherited class (Panache's Entity.find) -->
         <exclude name="UnnecessaryFullyQualifiedName" />
-        <exclude name="UnnecessaryLocalBeforeReturn" />
         <exclude name="UnnecessaryModifier" />
         <exclude name="UnnecessaryReturn" />
         <exclude name="UnnecessarySemicolon" />
@@ -165,7 +157,7 @@
         </properties>
     </rule>
 
-    <!-- Performance: Only critical rules -->
+    <!-- Performance: category enabled, minus the excludes below -->
     <rule ref="category/java/performance.xml">
         <exclude name="AddEmptyString" />
         <exclude name="AppendCharacterWithChar" />
@@ -188,7 +180,7 @@
         <exclude name="UselessStringValueOf" />
     </rule>
 
-    <!-- Multithreading: Only critical rules -->
+    <!-- Multithreading: category enabled, minus the excludes below -->
     <rule ref="category/java/multithreading.xml">
         <exclude name="AvoidSynchronizedAtMethodLevel" />
         <exclude name="AvoidSynchronizedStatement" />
@@ -197,6 +189,6 @@
         <exclude name="UseConcurrentHashMap" />
     </rule>
 
-    <!-- Security: All rules enabled -->
+    <!-- Security: category enabled -->
     <rule ref="category/java/security.xml" />
 </ruleset>

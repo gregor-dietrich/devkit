@@ -375,9 +375,11 @@ or with a non-transient field of a non-serializable type such as `List`, and a
 constructor of a class open to subclasses that calls an overridable method or
 hands `this` out. What newly fails:
 
-- Test sources: SpotBugs does not analyse them and PMD's twin rules are
-  excluded. A package-private class gets no `this-escape`, which spares most
-  JUnit classes.
+- Test sources: SpotBugs does not analyse them and PMD's
+  MissingSerialVersionUID is excluded. A package-private class gets no
+  `this-escape`, which spares most JUnit classes; PMD's
+  ConstructorCallsOverridableMethod still applies to test sources, and fires on
+  a package-private test class whose constructor calls an overridable method.
 - Code that passes only because SpotBugs is told to skip it: a
   `spotbugs-exclude.xml` entry or `@SuppressFBWarnings` for
   `SE_NO_SERIALVERSIONID`, `SE_BAD_FIELD` or
@@ -413,6 +415,27 @@ each place of a duplicate) instead of a count and the report path. No consumer
 action; a project script that calls `MVN_CMD` without `-q` now sees those two
 plugins at WARN, which [Plugin checksums](docs/contract.md#plugin-checksums)
 describes.
+
+PMD now enforces more of its own rules, so `make lint`, `make test`, `make
+coverage` and `make install` can fail on code that passed before, each violation
+named by rule, class and line. Five excludes are gone, so
+ConstructorCallsOverridableMethod, EmptyCatchBlock, CompareObjectsWithEquals and
+PreserveStackTrace (a catch that throws a new exception without the caught one
+as its cause) report again, and UnnecessaryLocalBeforeReturn is no longer
+excluded (PMD 7 deprecates it for VariableCanBeInlined, which was already on;
+PMD skips the deprecated rule, so dropping its exclude changes nothing, and
+VariableCanBeInlined reports the construct).
+The ruleset also no longer raises the thresholds of CognitiveComplexity,
+CyclomaticComplexity and NPathComplexity, which now use PMD's defaults:
+cognitive complexity 15, cyclomatic complexity 10 per method and 80 per class,
+NPath 200 (PMD 7.17.0's defaults); TooManyMethods and TooManyFields keep their
+40. A violation is fixed, or silenced at its place with
+`@SuppressWarnings("PMD.<RuleName>")`. A Vaadin module, which calls setters
+while building a view in its constructor, drops
+ConstructorCallsOverridableMethod beside `-Xlint:-this-escape` (above) with the
+recipe in the [Parent POM](docs/contract.md#parent-pom) section: its own
+`pmd-ruleset.xml` references the parent's filtered copy of the kit's and
+excludes the rule, so every other rule stays.
 
 `make rebase` no longer pushes: after it, review the rebase (and run the gates)
 and push with `git push --force-with-lease --force-if-includes` (if git
