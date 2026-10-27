@@ -30,6 +30,7 @@
         <exclude name="AbstractClassWithoutAbstractMethod" />
         <exclude name="AccessorMethodGeneration" />
         <exclude name="ArrayIsStoredDirectly" />
+        <!-- Checkstyle's RegexpSinglelineJava.ConsoleOutput (checkstyle.xml) fails the build on it -->
         <exclude name="AvoidPrintStackTrace" />
         <exclude name="AvoidReassigningParameters" />
         <exclude name="ConstantsInInterface" />
@@ -37,6 +38,7 @@
         <exclude name="GuardLogStatement" />
         <exclude name="ExhaustiveSwitchHasDefault" />
         <exclude name="JUnit5TestShouldBePackagePrivate" />
+        <!-- Checkstyle's RegexpSinglelineJava.ConsoleOutput (checkstyle.xml) fails the build on it -->
         <exclude name="SystemPrintln" />
         <exclude name="UnitTestShouldUseTestAnnotation" />
         <exclude name="UnitTestContainsTooManyAsserts" />

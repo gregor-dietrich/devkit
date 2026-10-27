@@ -14,6 +14,10 @@
     Authors: Max Vetrenko, Ruslan Diachenko, Roman Ivanov.
  -->
 
+<!-- Each rule's cases are under tests/fixtures/checkstyle-cases/{main,test}/<rule id>/ (by check
+     name where a rule has no id, or joined with other ids by + where a case reports several), and
+     the forms it must accept under .../allowed/. -->
+
 <module name="Checker">
     <property name="charset" value="UTF-8" />
 
@@ -62,93 +66,291 @@
             value="^package.*|^import.*|a href|http://|https://|ftp://|^\s+&quot;SELECT|^\s+&quot;FROM" />
     </module>
 
-    <!--
-        Ban concatenating a runtime value into a log message. Use the *f methods with
-        printf-style %s placeholders instead. Three reasons, in increasing order of impact:
+    <!-- A concatenated or pre-formatted log message destroys the template: the aggregator can no
+         longer group by message, and the arguments stop being separate fields. The *f variants
+         keep both. A concatenation of literals alone, a long message wrapped, is a template.
 
-        1. Cost. Concatenation builds the string eagerly, before the call, so it is paid even
-           when the level is disabled and the message is discarded.
+         Three reasons, in increasing order of impact. Cost: concatenation builds the string
+         eagerly, before the call, so it is paid even when the level is disabled. Observability:
+         aggregators fingerprint on the template, so a million occurrences of one event can no
+         longer collapse into one row. Log flooding: under attacker-driven volume a disabled level
+         stops acting as a throttle, and dedup, sampling and rate limiting, which all key on the
+         fingerprint, degrade exactly when they are needed.
 
-        2. Observability. It replaces the reusable message template with a unique string per
-           call. Aggregators fingerprint on the template, so a million occurrences of one event
-           can no longer collapse into one row.
+         Scope limit, so this rule is not over-trusted: it is defence in depth, not the control. At
+         an enabled level a flood costs the same either way. The levers that bound flooding are
+         sampling and rate limiting at the emit site, level discipline on hot paths, and bounding
+         attacker-controlled values before they are logged, e.g. logging the length of
+         attacker-controlled text rather than the text; no linter enforces that.
 
-        3. Log flooding. (1) and (2) compound under attacker-driven volume. Because of (1) a
-           disabled level stops acting as a throttle: a hot path that only logs at DEBUG still
-           pays full string construction per request with DEBUG off. Because of (2) the
-           downstream defences degrade exactly when they are needed, since dedup, sampling and
-           rate limiting all key on the fingerprint, and a flood of unique strings becomes a
-           high-cardinality ingest problem for the logging backend itself.
-
-        Scope limit, so this rule is not over-trusted: it is defence in depth, not the control.
-        At an ENABLED level a flood costs the same either way. The levers that actually bound
-        flooding are sampling and rate limiting at the emit site, level discipline on hot paths,
-        and bounding attacker-controlled values before they are logged, e.g. logging the length of
-        attacker-controlled text rather than the text; no linter enforces that, and it matters more
-        than this rule does.
-
-        Checker-level (RegexpMultiline) rather than RegexpSinglelineJava so that calls wrapped
-        across lines are caught — a sizeable share of log calls span more than one line.
-
-        The regex anchors on the FIRST argument of the call, which is what keeps it precise:
-          - "msg " + value        -> flagged (literal, then +, then a non-literal)
-          - prefix + "msg"        -> flagged (identifier, then +)
-          - "long msg "
-                + "continued %s"  -> NOT flagged; the trailing [^"\s] requires the right-hand
-                                     operand to be a non-literal. Literal-to-literal wrapping is
-                                     constant-folded at compile time and keeps the template.
-          - "count %s", a + b     -> NOT flagged; a '+' past the first argument is arithmetic in
-                                     an argument, not message building.
-          - "1 + 2 = %s", sum     -> NOT flagged; a '+' inside the literal cannot match, because
-                                     the literal must be consumed whole before the '+'.
-    -->
+         Checker-level (RegexpMultiline), so that calls wrapped across lines are caught.
+         Keys on the logger field LOG and on Quarkus' static Log. Known limits: a message held in a
+         variable, or starting with a variable after the Throwable, is not caught, and
+         LOG.infof(TEMPLATE, "a" + b) is reported although the concatenation is an argument. -->
     <module name="RegexpMultiline">
         <property name="id" value="RegexpMultiline.LogConcatenation" />
         <property name="fileExtensions" value="java" />
         <property name="format"
-            value="\bLOG\.(trace|debug|info|warn|error|fatal)f?\(\s*(?:&quot;[^&quot;]*&quot;\s*\+\s*[^&quot;\s]|[A-Za-z_][A-Za-z0-9_.]*(?:\([^()]*\)|\[[^\]]*\])*\s*\+)" />
+            value="\b(?:LOG|Log)\.(?:(?:trace|debug|info|warn|error|fatal)f?\(\s*|logf?\(\s*[A-Za-z_][A-Za-z0-9_.]*\s*,\s*)(?:[A-Za-z_][A-Za-z0-9_.]*(?:\(\s*\))?\s*,\s*(?=&quot;|(?:(?:String|MessageFormat)\.)?format\())?(?:(?:(?:&quot;&quot;&quot;(?:(?!&quot;&quot;&quot;)[\s\S])*&quot;&quot;&quot;|&quot;(?:[^&quot;\\\n]++|\\.)*+&quot;)\s*\+\s*)+[^&quot;\s]|[A-Za-z_][A-Za-z0-9_.]*(?:\([^()]*\)|\[[^\]]*\])*\s*\+|(?:(?:String|MessageFormat)\.)?format\(|(?:&quot;&quot;&quot;(?:(?!&quot;&quot;&quot;)[\s\S])*&quot;&quot;&quot;|&quot;(?:[^&quot;\\\n]++|\\.)*+&quot;|[A-Za-z_][A-Za-z0-9_.]*)\s*\.(?:formatted|concat)\()" />
         <property name="message"
-            value="Do not concatenate into a log message — use *f methods (infof, debugf, etc.) with printf-style %s placeholders so the message template is preserved." />
+            value="Do not concatenate or pre-format a log message — use the *f methods (infof, debugf, …) with printf-style %s placeholders so the message template is preserved." />
+    </module>
+
+    <!-- Blanket escape hatches are banned rather than reviewed case by case: each switches a whole
+         gate off for a class or a stretch of code, and the gate then reports a conformance it never
+         checked. A narrow, justified exemption belongs in the suppression files, where it is
+         reviewable. Multiline so that a wrapped @SuppressWarnings({…}) array is caught as well. -->
+    <!-- PMD.UnusedImports is the name UnnecessaryImport had before PMD 7, and PMD.DuplicatedCode
+         names CPD's duplication finding -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.SuppressWarningsPmd" />
+        <property name="fileExtensions" value="java" />
+        <property name="format"
+            value="@\s*(?:[\w$]+\s*\.\s*)*+SuppressWarnings\s*\([^)]*&quot;PMD(\.(UnnecessaryImport|UnusedImports|DuplicatedCode))?&quot;" />
+        <property name="message"
+            value="Do not suppress PMD as a whole, PMD.UnnecessaryImport, PMD.UnusedImports or PMD.DuplicatedCode — fix the finding, or suppress the single rule that misfires as PMD.RuleName." />
+    </module>
+    <!-- The NOPMD marker silences every PMD rule on its line, like @SuppressWarnings("PMD") at line
+         scope -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.NoPmd" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="NOPMD" />
+        <property name="message"
+            value="Do not use NOPMD — fix the finding, or suppress the single rule that misfires with @SuppressWarnings(&quot;PMD.RuleName&quot;)." />
+    </module>
+    <!-- CPD reads the comments CPD-OFF/CPD-ON and, in Java, @SuppressWarnings("CPD-START") and
+         ("CPD-END"); one pattern catches all four. -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.CpdSuppression" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="CPD-(START|END|OFF|ON)" />
+        <property name="message"
+            value="Do not switch CPD off — remove the duplication instead." />
+    </module>
+    <!-- CheckNullabilityTypes is NullAway's alternative name and switches it off just the same -->
+    <module name="RegexpMultiline">
+        <property name="id" value="SuppressWarningsNullAway" />
+        <property name="fileExtensions" value="java" />
+        <property name="format"
+            value="@\s*(?:[\w$]+\s*\.\s*)*+SuppressWarnings\s*\([^)]*&quot;(NullAway|CheckNullabilityTypes)&quot;" />
+        <property name="message"
+            value="Do not suppress NullAway — state the nullness with @Nullable and guard with Objects.requireNonNull instead." />
+    </module>
+    <!-- "all" switches off PMD, Error Prone and NullAway at once -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.SuppressWarningsAll" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="@\s*(?:[\w$]+\s*\.\s*)*+SuppressWarnings\s*\([^)]*&quot;all&quot;" />
+        <property name="message"
+            value="Do not suppress all warnings — fix the finding, or suppress the single check that misfires." />
+    </module>
+    <!-- The bans above match a literal anywhere before the first closing parenthesis, so the
+         argument has to be one: a string, or an array of strings, without escapes or a closing
+         parenthesis and without a comment before or inside the parentheses. A constant or a
+         concatenation such as "Null" + "Away" would get past them.
+
+         Known limits of the suppression bans, which read source text: a comment between the @ and
+         the name, or a Unicode escape in the name, gets past them, and so does an annotation
+         another tool honours under a name they do not list (a project-declared
+         android.annotation.SuppressLint). -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.SuppressWarningsLiteral" />
+        <property name="fileExtensions" value="java" />
+        <property name="format"
+            value="@\s*(?:[\w$]+\s*\.\s*)*+SuppressWarnings\b(?!\s*+\(\s*+(value\s*+=\s*+)?(\{\s*+)?&quot;[^&quot;\\)]*&quot;(\s*+,\s*+&quot;[^&quot;\\)]*&quot;)*\s*+,?+\s*+\}?+\s*+\))" />
+        <property name="message"
+            value="Name the suppressed checks as plain string literals without comments next to or inside the parentheses, e.g. @SuppressWarnings(&quot;PMD.RuleName&quot;); put the reason above the annotation." />
+    </module>
+    <!-- Without a bug pattern, @SuppressFBWarnings silences every SpotBugs detector on the
+         annotated element, and SpotBugs matches a pattern as a prefix of the bug type or as a
+         whole category or abbreviation, so "E" or "CORRECTNESS" silences a family. Hence bug-type
+         names only: an underscore in the name, and the categories and the abbreviation that have
+         one excluded in any case, as SpotBugs compares those ignoring case. They come first in the
+         annotation so that the check can see them. SpotBugs still matches them as prefixes, so the
+         name has to be the full type to suppress just that one. -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.SuppressFbWarningsPattern" />
+        <property name="fileExtensions" value="java" />
+        <property name="format"
+            value="@\s*(?:[\w$]+\s*\.\s*)*+SuppressFBWarnings\b(?!\s*+\(\s*+(value\s*+=\s*+)?(\{\s*+&quot;(?!(?i:BAD_PRACTICE|MALICIOUS_CODE|MT_CORRECTNESS|USELESS_STRING)&quot;)[A-Z][A-Za-z0-9]*(_[A-Z0-9]+)+&quot;(\s*+,\s*+&quot;(?!(?i:BAD_PRACTICE|MALICIOUS_CODE|MT_CORRECTNESS|USELESS_STRING)&quot;)[A-Z][A-Za-z0-9]*(_[A-Z0-9]+)+&quot;)*\s*+,?+\s*+\}|&quot;(?!(?i:BAD_PRACTICE|MALICIOUS_CODE|MT_CORRECTNESS|USELESS_STRING)&quot;)[A-Z][A-Za-z0-9]*(_[A-Z0-9]+)+&quot;)\s*+[,)])" />
+        <property name="message"
+            value="Name bug types first, in full and without comments inside the parentheses, e.g. @SuppressFBWarnings(value = &quot;EI_EXPOSE_REP2&quot;, justification = &quot;…&quot;)." />
+    </module>
+    <!-- matchType = REGEX turns the pattern into a regular expression, so ".*" silences every
+         detector -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.SuppressMatchType" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="\bSuppressMatchType\b" />
+        <property name="message"
+            value="Do not change how @SuppressFBWarnings matches — name bug types in full instead." />
+    </module>
+    <!-- NullAway recognises @NullUnmarked by its simple name and treats the annotated code as
+         unannotated, which switches it off there; JSpecify's or a project-declared one alike -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.NullUnmarked" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="@\s*(?:[\w$]+\s*\.\s*)*+NullUnmarked\b" />
+        <property name="message"
+            value="Do not switch NullAway off — state the nullness with @Nullable instead." />
+    </module>
+    <!-- Tools that go by the simple name of an annotation retained in the class file: JaCoCo
+         leaves out of the coverage check every class and method carrying one whose name contains
+         Generated, and SpotBugs treats any name ending in SuppressWarnings or SuppressFBWarnings
+         as its own suppression, without a bug pattern as one for every detector. A
+         project-declared annotation of such a name would get past the rules above. -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.ToolNamedAnnotation" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="@\s*interface\s+\w*(Generated|Suppress(FB)?Warnings\b)" />
+        <property name="message"
+            value="Do not declare an annotation named *Generated*, *SuppressWarnings or *SuppressFBWarnings — JaCoCo or SpotBugs would exempt the code it marks." />
+    </module>
+    <!-- NullAway honours any annotation named Nullable or CheckForNull, and one declared in the
+         same package needs no import, so IllegalImport.Nullable does not see it -->
+    <module name="RegexpMultiline">
+        <property name="id" value="RegexpMultiline.NullableAnnotation" />
+        <property name="fileExtensions" value="java" />
+        <property name="format" value="@\s*interface\s+(Nullable|CheckForNull)\b" />
+        <property name="message"
+            value="Do not declare an annotation named Nullable or CheckForNull — use jakarta.annotation.Nullable." />
     </module>
 
     <module name="TreeWalker">
         <module name="OuterTypeFilename" />
-        <!-- Ban fully-qualified class names in source (use imports instead).
-             The lookahead requires whitespace after the keyword, so only a real import/package
-             declaration is exempted — an identifier that merely starts with those letters
-             (importedCount, packageName) stays subject to the check. -->
+        <!-- Imports instead of fully qualified class names. A name counts once the dotted run from
+             a root reaches a capitalised segment, the type: a package name, a system property such
+             as java.io.tmpdir or a variable named org is no class name. ignoreComments=false on
+             purpose: a {@link} to a fully-qualified name is just as unreadable, and the short form
+             links the same. tools.jackson is Jackson 3. The lookahead requires whitespace after
+             the keyword, so only a real import/package declaration is exempted — an identifier
+             that merely starts with those letters (importedCount, packageName) stays subject to
+             the check. -->
         <module name="RegexpSinglelineJava">
             <property name="id" value="RegexpSinglelineJava.FullyQualifiedName" />
             <property name="format"
-                value="^(?!\s*(import|package)\s).*\b(java|javax|jakarta|org|de|com|net|io|edu)\.[a-zA-Z]" />
+                value="^(?!\s*(import|package)\s).*\b(?:java|javax|jakarta|org|de|com|net|io|edu|tools\.jackson)(?:\.[a-z_][a-z0-9_]*)*\.[A-Z]" />
             <property name="ignoreComments" value="false" />
             <property name="message"
-                value="Use imports instead of Fully Qualified Class Names (FQCN)." />
+                value="Use imports instead of fully qualified class names (FQCN)." />
         </module>
+        <!-- One @Nullable for the whole project. NullAway honours any annotation named Nullable or
+             CheckForNull, and the classpath carries several (JSR 305 and SpotBugs, JSpecify,
+             Jakarta, WildFly, SmallRye, Spring, test libraries), so a second one would pass the
+             build and split the codebase. Hence every import of such a name but
+             jakarta.annotation.Nullable, the one the contract's conventions name and that Quarkus
+             brings with jakarta.annotation-api. No illegalPkgs: the check's default, sun, would be
+             reported with this message; IllegalImport.Sun bans it instead. Known limit: a nullable
+             annotation NullAway recognises under another name (checker-qual's MonotonicNonNull)
+             gets past it. -->
         <module name="IllegalImport">
-            <property name="id" value="IllegalImport.Javax.Annotation.Nullable" />
-            <property name="illegalClasses" value="javax.annotation.Nullable" />
+            <property name="id" value="IllegalImport.Nullable" />
+            <property name="regexp" value="true" />
+            <property name="illegalPkgs" value="" />
+            <property name="illegalClasses"
+                value="^(?!jakarta\.annotation\.Nullable$).+\.(Nullable|CheckForNull)$" />
             <message key="import.illegal"
                 value="Use jakarta.annotation.Nullable instead." />
         </module>
+        <!-- SpotBugs' deprecated SuppressWarnings defaults to no bug pattern, so a bare one
+             silences every detector; javac -Werror lets it through next to @Deprecated -->
+        <module name="IllegalImport">
+            <property name="id" value="IllegalImport.SpotBugsSuppressWarnings" />
+            <property name="illegalPkgs" value="" />
+            <property name="illegalClasses"
+                value="edu.umd.cs.findbugs.annotations.SuppressWarnings" />
+            <message key="import.illegal"
+                value="Use @SuppressFBWarnings with a bug type instead." />
+        </module>
+        <module name="IllegalImport">
+            <property name="id" value="IllegalImport.Sun" />
+            <property name="illegalPkgs" value="sun" />
+            <message key="import.illegal"
+                value="Do not use the JDK-internal sun.* APIs." />
+        </module>
         <!-- The logging facade is JBoss Logging (org.jboss.logging.Logger), which the LOG rules
-             below assume. SLF4J and java.util.logging both resolve on the classpath through
-             transitive Quarkus dependencies, so nothing but this rule stops one from being
-             imported by accident.
-             The whole SLF4J package is banned, not just Logger/LoggerFactory: MDC is the class
-             one imports next to the logger, and it resolves transitively just the same. -->
+             assume. The JDK ships java.util.logging and System.Logger, and SLF4J and Commons
+             Logging resolve through transitive Quarkus dependencies, so nothing but this rule
+             stops one from being imported by accident.
+             Quarkus' static io.quarkus.logging.Log is a supported facade and not banned. The
+             managers behind a logger have a rule of their own, IllegalImport.LogManager below. -->
         <module name="IllegalImport">
             <property name="id" value="IllegalImport.Logging" />
-            <property name="illegalPkgs" value="org.slf4j" />
-            <property name="illegalClasses" value="java.util.logging.Logger" />
+            <!-- The whole SLF4J and Commons Logging packages, not just the logger and its factory:
+                 MDC is the class one imports next to the logger, and it resolves transitively just
+                 the same. Of java.util.logging only the logger, static imports of its members
+                 included: a Quarkus @LoggingFilter implements
+                 java.util.logging.Filter and reads its LogRecord. A wildcard import of a package or
+                 class holding one of these loggers is banned here as well, so that the ban holds
+                 where a project suppresses AvoidStarImport. -->
+            <property name="regexp" value="true" />
+            <property name="illegalPkgs" value="org\.slf4j, org\.apache\.commons\.logging" />
+            <property name="illegalClasses"
+                value="^(java\.util\.logging\.Logger|java\.lang\.System\.Logger(?:Finder)?)(\..+)?$, ^(java\.util\.logging|java\.lang\.System)\.\*$" />
             <message key="import.illegal"
                 value="Use org.jboss.logging.Logger instead." />
         </module>
-        <!-- Both log-template rules below key on a field named LOG, so a logger called LOGGER or
-             log would silently switch them off for the whole class — the gate would report
-             conformance it never checked. This rule is what actually holds the name. It is scoped
-             to the static field the convention prescribes: an injected Logger cannot be named LOG
-             anyway, because MemberName requires camelCase on a non-static field. -->
+        <!-- The log managers, java.util.logging.LogManager and the JBoss LogManager with its
+             logger, apart from the loggers above: a test that captures log output may need them,
+             and a project exempts its test sources from this id alone, so the logger bans keep
+             holding there. Static imports of their members and a wildcard import of
+             org.jboss.logmanager included. Known limit: a logger obtained through another class of
+             org.jboss.logmanager, such as LogContext, gets past it. -->
+        <module name="IllegalImport">
+            <property name="id" value="IllegalImport.LogManager" />
+            <property name="regexp" value="true" />
+            <property name="illegalPkgs" value="" />
+            <property name="illegalClasses"
+                value="^(java\.util\.logging\.LogManager|org\.jboss\.logmanager\.(Logger|LogManager))(\..+)?$, ^org\.jboss\.logmanager\.\*$" />
+            <message key="import.illegal"
+                value="Use org.jboss.logging.Logger instead; a test that captures log output may exempt its test sources from IllegalImport.LogManager." />
+        </module>
+        <!-- System.Logger needs no import -->
+        <module name="RegexpSinglelineJava">
+            <property name="id" value="RegexpSinglelineJava.SystemLogger" />
+            <property name="format" value="\bSystem\.(getLogger|Logger(?:Finder)?)\b" />
+            <property name="ignoreComments" value="true" />
+            <property name="message" value="Use org.jboss.logging.Logger instead." />
+        </module>
+        <!-- Output past the logging facade: it escapes log levels, the JSON format and any
+             masking. The routes through System, FileDescriptor, java.lang.IO (implicitly imported
+             since JDK 25) and the stack-trace printers: the streams and the console of System, the
+             file descriptors, IO.print, IO.println and IO.readln (which prints its prompt), the
+             no-argument printStackTrace (one given a stream is caught as the stream, and one given a
+             PrintWriter renders the trace without printing it) and dumpStack, method references and
+             static imports included. A project whose tests may print exempts its test sources in its
+             checkstyle-suppressions.xml. Known limit: a comment between System and .out gets past
+             it. -->
+        <module name="RegexpSinglelineJava">
+            <property name="id" value="RegexpSinglelineJava.ConsoleOutput" />
+            <property name="format"
+                value="\b(System|FileDescriptor)\s*\.\s*(out|err)\b|\bSystem\s*(?:\.|::)\s*console\b|\bIO\s*(?:\.|::)\s*(?:print(?:ln)?|readln)\b|\bprintStackTrace\s*\(\s*\)|::\s*printStackTrace\b|\bdumpStack\b" />
+            <property name="ignoreComments" value="true" />
+            <property name="message"
+                value="Do not write to the console — log through org.jboss.logging.Logger, an exception as the Throwable argument, e.g. LOG.errorf(e, &quot;… %s&quot;, value)." />
+        </module>
+        <!-- Google style 3.3.1; a wildcard import would also get past the illegalClasses of the
+             IllegalImport rules above, which match single classes. Only IllegalImport.Logging,
+             IllegalImport.LogManager and IllegalImport.Sun catch one themselves (the wildcard
+             clauses of the first two, and the illegalPkgs of Logging and Sun for a package);
+             AvoidStarImport covers the rest -->
+        <module name="AvoidStarImport" />
+        <!-- A module import is a wildcard import of every package a module exports, its
+             transitive requirements included (java.sql brings java.logging), and AvoidStarImport
+             does not cover it -->
+        <module name="IllegalToken">
+            <property name="id" value="IllegalToken.ModuleImport" />
+            <property name="tokens" value="MODULE_IMPORT" />
+            <message key="illegal.token"
+                value="Do not import a whole module — import the classes one by one." />
+        </module>
+        <!-- Both log-template rules key on a field named LOG (or on Quarkus' static Log), so a
+             logger called LOGGER or log would silently switch them off for the whole class — the
+             gate would report conformance it never checked. This rule is what actually holds the
+             name. It is scoped to the static field the convention prescribes: an injected Logger
+             cannot be named LOG anyway, because MemberName requires camelCase on a non-static
+             field. -->
         <module name="RegexpSinglelineJava">
             <property name="id" value="RegexpSinglelineJava.LoggerFieldName" />
             <property name="format" value="static\s+final\s+Logger\s+(?!LOG\b)" />
@@ -156,13 +358,14 @@
             <property name="message"
                 value="Name the logger field LOG (private static final Logger LOG = Logger.getLogger(...)) — the log-template checks key on that name." />
         </module>
+        <!-- The *v variants take MessageFormat patterns ({0}); the contract's convention is printf
+             style, and mixing the two silently prints the pattern instead of the value. -->
         <module name="RegexpSinglelineJava">
             <property name="id" value="RegexpSinglelineJava.LogMessageFormat" />
-            <property name="format"
-                value="\bLOG\.(infov|debugv|warnv|errorv|tracev)\(" />
+            <property name="format" value="\b(?:LOG|Log)\.(infov|debugv|warnv|errorv|tracev|fatalv|logv)\(" />
             <property name="ignoreComments" value="true" />
             <property name="message"
-                value="Use *f methods (infof, debugf, etc.) with printf-style %s placeholders instead of *v MessageFormat-style methods." />
+                value="Use the *f methods (infof, debugf, …) with printf-style %s placeholders instead of the *v MessageFormat-style methods." />
         </module>
         <module name="RegexpSinglelineJava">
             <property name="id" value="RegexpSinglelineJava.LocalDateNow" />
@@ -177,63 +380,6 @@
             <property name="ignoreComments" value="true" />
             <property name="message"
                 value="Use LocalDateTime.now(ZoneId.systemDefault()) instead for explicit timezone handling." />
-        </module>
-
-        <!--
-            The blanket escape hatches below are banned outright rather than suppressed
-            case by case: each one switches a whole gate off for a file, which makes the
-            gate report a conformance it never checked. Narrow, justified exemptions
-            belong in this project's suppression files, where they are reviewable.
-        -->
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.SuppressWarningsPmd" />
-            <property name="format"
-                value="@SuppressWarnings\s*\(\s*&quot;PMD&quot;\s*\)" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="@SuppressWarnings(&quot;PMD&quot;) is banned - refactor the code to eliminate PMD warnings properly." />
-        </module>
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.SuppressWarningsPmdUnusedImports" />
-            <property name="format"
-                value="@SuppressWarnings\s*\(\s*&quot;PMD\.UnusedImports&quot;\s*\)" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="@SuppressWarnings(&quot;PMD.UnusedImports&quot;) is banned - refactor the code to eliminate unused imports properly." />
-        </module>
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.SuppressWarningsPmdDuplicatedCode" />
-            <property name="format"
-                value="@SuppressWarnings\s*\(\s*&quot;PMD\.DuplicatedCode&quot;\s*\)" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="@SuppressWarnings(&quot;PMD.DuplicatedCode&quot;) is banned - refactor the code to eliminate duplication properly." />
-        </module>
-        <!-- Test sources are exempt through the SuppressionSingleFilter above. Other scoped
-             exceptions live in each project's checkstyle-suppressions.xml: the Jackson
-             response DTOs whose no-arg deserialization constructors legitimately leave
-             fields unset. -->
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="SuppressWarningsNullAway" />
-            <property name="format"
-                value="@SuppressWarnings\s*\(\s*\{?[^)]*&quot;NullAway&quot;" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="@SuppressWarnings(&quot;NullAway&quot;) is banned - fix nullability with @Nullable annotations and Objects.requireNonNull guards instead." />
-        </module>
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.CpdOff" />
-            <property name="format" value="//\s*CPD-OFF" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="// CPD-OFF is banned - refactor the code to eliminate duplication properly." />
-        </module>
-        <module name="RegexpSinglelineJava">
-            <property name="id" value="RegexpSinglelineJava.CpdOn" />
-            <property name="format" value="//\s*CPD-ON" />
-            <property name="ignoreComments" value="false" />
-            <property name="message"
-                value="// CPD-ON is banned - refactor the code to eliminate duplication properly." />
         </module>
         <module name="IllegalTokenText">
             <property name="tokens" value="STRING_LITERAL, CHAR_LITERAL" />
@@ -373,28 +519,32 @@
             <message key="name.invalidPattern"
                 value="Member name ''{0}'' must match pattern ''{1}''." />
         </module>
+        <!-- '_' is the unnamed variable of Java 22 and later, for declarations that are deliberately
+             unused. Java allows it for lambda parameters, catch parameters, locals and pattern
+             variables, not for method or constructor parameters, so the four rules that can see
+             it accept it and ParameterName does not. -->
         <module name="ParameterName">
             <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$" />
             <message key="name.invalidPattern"
                 value="Parameter name ''{0}'' must match pattern ''{1}''." />
         </module>
         <module name="LambdaParameterName">
-            <property name="format" value="^(?!_$)(_|[a-z]([a-z0-9][a-zA-Z0-9]*)?)$" />
+            <property name="format" value="^(_|[a-z]([a-z0-9][a-zA-Z0-9]*)?)$" />
             <message key="name.invalidPattern"
                 value="Lambda parameter name ''{0}'' must match pattern ''{1}''." />
         </module>
         <module name="CatchParameterName">
-            <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$" />
+            <property name="format" value="^(_|[a-z]([a-z0-9][a-zA-Z0-9]*)?)$" />
             <message key="name.invalidPattern"
                 value="Catch parameter name ''{0}'' must match pattern ''{1}''." />
         </module>
         <module name="LocalVariableName">
-            <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$" />
+            <property name="format" value="^(_|[a-z]([a-z0-9][a-zA-Z0-9]*)?)$" />
             <message key="name.invalidPattern"
                 value="Local variable name ''{0}'' must match pattern ''{1}''." />
         </module>
         <module name="PatternVariableName">
-            <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$" />
+            <property name="format" value="^(_|[a-z]([a-z0-9][a-zA-Z0-9]*)?)$" />
             <message key="name.invalidPattern"
                 value="Pattern variable name ''{0}'' must match pattern ''{1}''." />
         </module>

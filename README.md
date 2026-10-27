@@ -453,6 +453,121 @@ install` (Spotless checks at `verify`) fail on it until `make format` has run
 once. Run it in a commit of its own and list that commit in
 `.git-blame-ignore-revs`.
 
+The shared Checkstyle config reports findings it did not before, so `make
+lint` can fail on code that passed. Its rules are in
+`java/config/checkstyle.xml`, and a `checkstyle-suppressions.xml` entry names
+one by its id. Grep for what these report first.
+
+New rules:
+
+- `RegexpSinglelineJava.ConsoleOutput`: `System.out` and `System.err`,
+  `FileDescriptor.out` and `err`, `System.console`, `IO.print`, `IO.println`
+  and `IO.readln` (method references and static imports included), the
+  no-argument `printStackTrace` and `dumpStack`. Log through
+  `org.jboss.logging.Logger`, an exception as the Throwable argument.
+- `RegexpSinglelineJava.SystemLogger`: `System.getLogger`, `System.Logger` and
+  `System.LoggerFinder`, which need no import.
+- `RegexpMultiline.NullableAnnotation`: a project-declared annotation named
+  `Nullable` or `CheckForNull`.
+- `IllegalImport.LogManager`: `java.util.logging.LogManager` and
+  the JBoss `LogManager` and `Logger`, static and wildcard imports included.
+- `IllegalImport.SpotBugsSuppressWarnings`: SpotBugs' own
+  `SuppressWarnings`; use `@SuppressFBWarnings` with a bug type.
+- `IllegalToken.ModuleImport`: `import module`.
+- `AvoidStarImport` (it has no id): any wildcard import.
+- `RegexpMultiline.SuppressWarningsAll`: `@SuppressWarnings("all")`;
+  `RegexpMultiline.SuppressWarningsLiteral`: an argument that is not plain
+  string literals (a constant, a concatenation, a comment inside).
+- `RegexpMultiline.SuppressFbWarningsPattern`: `@SuppressFBWarnings` without a
+  full bug type first; `RegexpMultiline.SuppressMatchType`: `SuppressMatchType`.
+- `RegexpMultiline.NullUnmarked`: `@NullUnmarked`.
+- `RegexpMultiline.NoPmd`: `NOPMD`.
+- `RegexpMultiline.ToolNamedAnnotation`: a project-declared annotation named
+  `*Generated*`, `*SuppressWarnings` or `*SuppressFBWarnings`, which JaCoCo or
+  SpotBugs would honour.
+
+Rules that report more than they did, the first three renamed (see the table
+below):
+
+- `RegexpMultiline.SuppressWarningsPmd`: besides `@SuppressWarnings("PMD")`,
+  `"PMD.UnusedImports"` and `"PMD.DuplicatedCode"`, also
+  `"PMD.UnnecessaryImport"`, an array wrapped over lines, a qualified name and
+  an `@` followed by a space.
+- `RegexpMultiline.CpdSuppression`: besides `CPD-OFF` and `CPD-ON`, also
+  `CPD-START` and `CPD-END`.
+- `IllegalImport.Nullable`: every `Nullable` or `CheckForNull` import but
+  `jakarta.annotation.Nullable`, not only javax's.
+
+- `IllegalImport.Logging`: besides `java.util.logging.Logger` and SLF4J, the
+  whole Commons Logging package, `java.lang.System.Logger` and
+  `java.lang.System.LoggerFinder`, static and wildcard imports included.
+  Quarkus' `io.quarkus.logging.Log` is not banned.
+- `RegexpMultiline.LogConcatenation`: also a message that follows the
+  Throwable, chained literals, `.concat`, `MessageFormat.format`, text blocks,
+  the `log` and `logf` methods with a level, and calls on Quarkus' static
+  `Log`.
+- `RegexpSinglelineJava.LogMessageFormat`: also `fatalv` and `logv`, and
+  Quarkus' static `Log`.
+- `SuppressWarningsNullAway`: also the alias `CheckNullabilityTypes`, an array
+  wrapped over lines, a qualified name and an `@` followed by a space.
+- `RegexpSinglelineJava.FullyQualifiedName`: also `tools.jackson`. It no
+  longer reports a package-like name that never reaches a type (`java.io.tmpdir`
+  in a string, a variable named `org`).
+
+`_` is accepted as the name of an unused lambda parameter, catch parameter,
+local or pattern variable. A Javadoc or comment that mentions
+`@SuppressWarnings`, `@SuppressFBWarnings` or `@NullUnmarked` fails the
+suppression rules, which read comments too: write the name without the `@`.
+Removing a project's own JaCoCo-excluding annotation (`*Generated*`) that
+`ToolNamedAnnotation` now reports puts the code it marked back into the
+coverage check, so `make coverage` may fail next. `jakarta.annotation.Nullable`
+has no `@Target`, so it sits on declarations only: a type-use `@Nullable`, such
+as `List<@Nullable String>`, has no equivalent. Drop it, and annotate a
+declaration only where the declaration itself may be null. A main class that must
+print (a command-mode or CLI entry point) takes a per-file `ConsoleOutput`
+suppression. A project whose tests print, or capture log output through a log
+manager, may exempt its test sources from the console-output rule or from
+`IllegalImport.LogManager` in its `checkstyle-suppressions.xml` (each module's,
+on the parent's default); the lookahead keeps an ancestor directory of the
+checkout named `src/test` from exempting main sources:
+
+```xml
+<suppress id="RegexpSinglelineJava.ConsoleOutput"
+          files="[\\/]src[\\/]test[\\/](?!.*[\\/]src[\\/](main|test)[\\/])" />
+<suppress id="IllegalImport.LogManager"
+          files="[\\/]src[\\/]test[\\/](?!.*[\\/]src[\\/](main|test)[\\/])" />
+```
+
+These rule ids are renamed. A suppression entry keyed on an old id silently
+stops matching, so the finding it suppressed fails the build until the entry is
+renamed:
+
+| Old id | New id |
+| ------ | ------ |
+| `RegexpSinglelineJava.SuppressWarningsPmd` | `RegexpMultiline.SuppressWarningsPmd` |
+| `RegexpSinglelineJava.SuppressWarningsPmdUnusedImports` | `RegexpMultiline.SuppressWarningsPmd` |
+| `RegexpSinglelineJava.SuppressWarningsPmdDuplicatedCode` | `RegexpMultiline.SuppressWarningsPmd` |
+| `RegexpSinglelineJava.CpdOff` | `RegexpMultiline.CpdSuppression` |
+| `RegexpSinglelineJava.CpdOn` | `RegexpMultiline.CpdSuppression` |
+| `IllegalImport.Javax.Annotation.Nullable` | `IllegalImport.Nullable` |
+
+A renamed entry can cover more than before: one renamed from any of the three
+PMD ids now covers all four PMD forms, one from `CpdOff` or `CpdOn` all four
+CPD markers, and `IllegalImport.Nullable` every `Nullable` or `CheckForNull`
+import.
+Check that each is still needed, and keep its `files` narrow. A `sun.*` import
+that the old `IllegalImport.Javax.Annotation.Nullable` reported now reports
+`IllegalImport.Sun`. An entry keyed on a check name rather than an id,
+`checks="RegexpMultiline"`, now also covers every suppression ban (an entry like
+that lets `@SuppressWarnings("PMD")` pass): re-key it on the id it meant, e.g.
+`id="RegexpMultiline.LogConcatenation"`. The suppression bans run at Checker
+level, so an entry in `checkstyle-xpath-suppressions.xml` cannot reach them;
+such an entry moves to `checkstyle-suppressions.xml`.
+
+`SuppressWarningsNullAway` keeps its id and its `src/test` exemption (its
+pattern now also catches the alias, wrapped arrays, a qualified name and an `@`
+followed by a space).
+
 ### Upgrading from v0.7.x
 
 `devkitw` (revision 3) carries devkit's release key,

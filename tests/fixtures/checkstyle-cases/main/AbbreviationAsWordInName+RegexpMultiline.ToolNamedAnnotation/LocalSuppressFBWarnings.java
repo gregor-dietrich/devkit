@@ -1,0 +1,3 @@
+package cases;
+
+@interface LocalSuppressFBWarnings {}

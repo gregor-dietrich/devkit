@@ -140,6 +140,11 @@
 #          directory, and pass in tests, make test with the integration tests
 #          on (MAVEN_ARGS=-DskipITs=false) to pass, and the parent's
 #          exclusions on the SpotBugs analyzer to equal the plugin pom's own,
+#          each case of tests/fixtures/checkstyle-cases, in a copy below a
+#          src/test directory, to report the shared Checkstyle rules its
+#          directory is named after and nothing else, the allowed ones
+#          nothing, and the test exemptions of ConsoleOutput and LogManager to
+#          pass their test cases,
 #          and find-sec-bugs to run: an XML parser open to external entities
 #          and a JBoss Logging call of an untrusted value to fail lint, the
 #          JAX-RS endpoint marker excluded, with no analysis error. Expect
@@ -997,7 +1002,7 @@ nullaway_below_src_test() {
   local dir=$work/ancestor/src/test/proj
   mkdir -p "${dir%/*}" &&
     edited "$dir" "$1" 's/^public final class/@SuppressWarnings("NullAway")\n&/' &&
-    make_says fail "$dir" lint "fix nullability with @Nullable"
+    make_says fail "$dir" lint "Do not suppress NullAway"
 }
 
 # nullaway_in_tests DIR FILE: FILE of the monolith copy DIR carries the suppression (the sed must have
@@ -1093,6 +1098,86 @@ JAVA
   make_says fail "$dir" lint "format violations" &&
     make_says pass "$dir" format && make_says pass "$dir" lint &&
     [[ $(grep '^import' "$src/devkit/fixture/Endpoint.java" | sed -n 2p) == 'import jakarta.ws.rs.Path;' ]]
+}
+
+# checkstyle_report REPORT DIR CASES [ID...]: REPORT, the Checkstyle result of the checkstyle_cases
+# copy in DIR, holds for each case file exactly the rule ids its directory is named after, less the
+# IDs for a src/test file (the ones the run exempts there), and none for allowed/. A file missing
+# from the report fails, as does a number of case files other than CASES.
+checkstyle_report() {
+  python3 -I - "$@" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+report, root, cases, exempt = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), set(sys.argv[4:])
+PREFIX = "com.puppycrawl.tools.checkstyle.checks."
+
+
+def rule(source):
+    """The module id after the check's class, else the check's name"""
+    check, _, module_id = source.partition("#")
+    return module_id or check.removeprefix(PREFIX).rsplit(".", 1)[-1].removesuffix("Check")
+
+
+found = {
+    Path(f.get("name", "")).resolve(): {rule(e.get("source", "")) for e in f.iter("error")}
+    for f in ET.parse(report).getroot().iter("file")
+}
+problems, checked = [], 0
+for kind in ("main", "test"):
+    for java in sorted((root / "src" / kind / "java" / "cases").rglob("*.java")):
+        name = java.parent.name
+        want = set() if name == "allowed" else set(name.split("+")) - (exempt if kind == "test" else set())
+        got = found.get(java.resolve())
+        checked += 1
+        if got is None:
+            problems.append(f"{kind}/{name}/{java.name}: not in the report")
+        elif got != want:
+            problems.append(f"{kind}/{name}/{java.name}: expected {sorted(want)}, got {sorted(got)}")
+if checked != cases:
+    problems.append(f"{checked} case files found, expected {cases}")
+sys.exit("\n".join(problems)) if problems else None
+PY
+}
+
+# checkstyle_cases: tests/fixtures/checkstyle-cases in a java-monolith copy, main/ and test/ as
+# src/main/java/cases and src/test/java/cases. A directory named by a rule's id (by its check's
+# name where it has none), or by several joined with +, holds files that must each report those
+# rules and nothing else; allowed/ holds files that must report nothing. Only the shared Checkstyle
+# execution runs, through the pinned Maven and mvn_checked.sh, so the cases need not compile. The
+# copy sits below a src/test directory, as a checkout may: the kit's own exemption of
+# SuppressWarningsNullAway must still hold only for the copy's src/test, and the documented test
+# exemptions for ConsoleOutput and LogManager, in a second run, must pass the test/ cases there as
+# well.
+checkstyle_cases() {
+  local dir=$work/below/src/test/checkstyle-cases mvn kind cases java id
+  local exempt=(RegexpSinglelineJava.ConsoleOutput IllegalImport.LogManager)
+  cases=$(find "$root/tests/fixtures/checkstyle-cases" -name '*.java' | wc -l) &&
+    mkdir -p "${dir%/*}" || return
+  setup "$root/tests/fixtures/java-monolith" "$dir" &&
+    make --no-print-directory -C "$dir" help >/dev/null || return # links .devkit
+  for kind in main test; do
+    mkdir -p "$dir/src/$kind/java/cases" &&
+      cp -r "$root/tests/fixtures/checkstyle-cases/$kind/." "$dir/src/$kind/java/cases/" || return
+  done
+  mvn=$("$root/scripts/lib/pinned_maven.sh") &&
+    java=$(sed -n 's/^JAVA_VERSION := //p' "$dir/Makefile") && [[ -n $java ]] || return
+  checkstyle_only() {
+    rm -rf "$dir/target"
+    (cd "$dir" && MVN_LAUNCHER="$mvn" JAVA_VERSION=$java "$root/scripts/lib/mvn_checked.sh" -B -q \
+      org.apache.maven.plugins:maven-checkstyle-plugin:check@checkstyle >"$dir.checkstyle.log" 2>&1)
+    # The check fails the build on the cases; the report is what counts
+    [[ -s $dir/target/checkstyle-result.xml ]] || {
+      tail -n 40 "$dir.checkstyle.log"
+      return 1
+    }
+  }
+  checkstyle_only && checkstyle_report "$dir/target/checkstyle-result.xml" "$dir" "$cases" || return
+  for id in "${exempt[@]}"; do
+    sed_into "$dir/checkstyle-suppressions.xml" 's#^</suppressions>#    <suppress id="'"$id"'" files="[\\\\/]src[\\\\/]test[\\\\/](?!.*[\\\\/]src[\\\\/](main|test)[\\\\/])" />\n&#' || return
+  done
+  checkstyle_only && checkstyle_report "$dir/target/checkstyle-result.xml" "$dir" "$cases" "${exempt[@]}"
 }
 
 # catch_without_cause: a sed that adds to Greeter a method whose catch throws a new exception
@@ -1222,7 +1307,7 @@ negatives() {
     jakarta_order
   negative preserve-stack-trace lint "Rule:PreserveStackTrace" "$main" "$(catch_without_cause)"
   negative cyclomatic-complexity lint "Rule:CyclomaticComplexity" "$main" "$(many_branches)"
-  negative checkstyle lint "Fully Qualified Class Names" "$main" \
+  negative checkstyle lint "fully qualified class names (FQCN)" "$main" \
     's/return name\./return java.util.Objects.requireNonNull(name)./'
   negative project-checkstyle lint "Fixture project rule" "$main" \
     's/^package .*/&\n\nimport java.util.Objects;/; s/return name\./return Objects.requireNonNull(name)./'
@@ -1230,7 +1315,7 @@ negatives() {
   negative suppression lint "Fixture project rule" checkstyle-suppressions.xml '/FixtureObjects/d'
   # The shared config bans a NullAway suppression in main sources and exempts src/test, with no
   # line in the fixture's checkstyle-suppressions.xml.
-  negative nullaway-suppression lint "fix nullability with @Nullable" "$main" \
+  negative nullaway-suppression lint "Do not suppress NullAway" "$main" \
     's/^public final class/@SuppressWarnings("NullAway")\n&/'
   # The exemption is of the checkout's own src/test, not of an ancestor directory named so.
   check "java-monolith: a NullAway suppression in a main source fails make lint in a checkout below a src/test directory" \
@@ -1642,6 +1727,8 @@ java_part() {
   check "java-multimodule: a dependency under an unlisted license fails every make test, until the module appends it to includedLicenses, and two dependencies under an allowed and a commercial license pass" \
     unlisted
   check "java-multimodule: dependencies under the common spellings of allowed licenses pass make test" spellings
+  check "java-monolith: each Checkstyle case reports the rules its directory names and nothing else, the allowed forms pass, and the documented test exemptions pass the ConsoleOutput and LogManager cases" \
+    checkstyle_cases
   negatives
 }
 

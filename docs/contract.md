@@ -897,11 +897,31 @@ with its defaults, and a project names its own assertion helpers in the
 configs do keep the stack's conventions: JBoss Logging as the facade, a
 static `LOG` logger field, `jakarta.annotation.Nullable`, and failsafe's `*IT`
 names for integration tests, which Checkstyle's `AbbreviationAsWordInName`
-accepts. A project's own
-Checkstyle rules live in `checkstyle-project.xml` at the project root, a
-complete Checkstyle configuration (a `Checker` root). The parent runs it as
-the checkstyle plugin's execution `project`, with its own `configLocation`,
-`cacheFile` and `outputFile`, and the shared config at plugin level.
+accepts. The shared Checkstyle config states those conventions as rules
+(`java/config/checkstyle.xml`; the README's upgrade note lists the ids each
+release adds, renames or widens): one logging facade (JBoss Logging, which
+Quarkus' static `Log` writes through; other logging APIs and `System.Logger`
+are banned), one `@Nullable` (every `Nullable` or `CheckForNull` annotation but
+`jakarta.annotation.Nullable` is banned), no console output, no wildcard or
+module imports, and no blanket or tool-switching suppressions. It names `_` an
+acceptable name for an unused binding. A project whose tests print, or capture
+log output through a log manager, exempts its test sources from the
+console-output rule or from `IllegalImport.LogManager` in its
+`checkstyle-suppressions.xml`; the lookahead keeps an ancestor directory of the
+checkout named `src/test` from exempting main sources:
+
+```xml
+<suppress id="RegexpSinglelineJava.ConsoleOutput"
+          files="[\\/]src[\\/]test[\\/](?!.*[\\/]src[\\/](main|test)[\\/])" />
+<suppress id="IllegalImport.LogManager"
+          files="[\\/]src[\\/]test[\\/](?!.*[\\/]src[\\/](main|test)[\\/])" />
+```
+
+A project's own Checkstyle rules live in `checkstyle-project.xml` at the
+project root, a complete Checkstyle configuration (a `Checker` root). The parent
+runs it as the checkstyle plugin's execution `project`, with its own
+`configLocation`, `cacheFile` and `outputFile`, and the shared config at plugin
+level.
 
 `make lint` runs `checkstyle:check` and `checkstyle:check@project`. The
 execution's `check` goal binds to `verify` by default, so `make test`,
