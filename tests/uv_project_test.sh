@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Tests for scripts/python/uv_project.py: per case, a temp project whose
-# uv.lock and pyproject.toml are synthetic, shaped as uv writes them (a
-# single project has no [manifest] and its own package at "."; a workspace
-# lists its members by name in [manifest] members, each a package whose
-# source is its directory). No uv, no network. Prints PASS/FAIL per case.
+# Tests for scripts/python/uv_project.py: a temp project whose uv.lock and
+# pyproject.toml are synthetic, shaped as uv writes them (a single project
+# has no [manifest] and its own package at "."; a workspace lists its members
+# by name in [manifest] members, each a package whose source is its
+# directory). The last cases check that each committed fixture's uv.lock pins
+# uv at UV_FLOOR and its uv_build ranges run from UV_FLOOR up to the next
+# minor. No uv, no network. Prints PASS/FAIL per case.
 set -euo pipefail
 
-script=$(cd "$(dirname "$0")/.." && pwd)/scripts/python/uv_project.py
+root=$(cd "$(dirname "$0")/.." && pwd)
+script=$root/scripts/python/uv_project.py
 # Physical: the scripts report resolved paths, and macOS's TMPDIR is under the
 # /var -> /private/var symlink. Two steps, so set -e catches a failed mktemp.
 work=$(mktemp -d)
@@ -27,7 +30,7 @@ package() { printf '[[package]]\nname = "%s"\nversion = "0.1.0"\nsource = { %s }
 # uv HASH...: the uv entry, one wheel per HASH; "none" is a wheel without one
 uv() {
   local hash field
-  printf '[[package]]\nname = "uv"\nversion = "0.12.23"\nsource = { registry = "https://pypi.org/simple" }\nwheels = [\n'
+  printf '[[package]]\nname = "uv"\nversion = "0.13.5"\nsource = { registry = "https://pypi.org/simple" }\nwheels = [\n'
   for hash; do
     field=", hash = \"sha256:$hash\""
     [[ $hash != none ]] || field=
@@ -59,25 +62,25 @@ single=$(package app 'virtual = "."')
 
 # uv-version
 lock "$single" "$(uv "$h1")"
-expect "uv-version prints the locked uv's version" 0 "0.12.23" uv-version
-lock "$single" $'[[package]]\nversion = "0.12.23"\nname = "uv"\nsource = { registry = "https://pypi.org/simple" }' \
+expect "uv-version prints the locked uv's version" 0 "0.13.5" uv-version
+lock "$single" $'[[package]]\nversion = "0.13.5"\nname = "uv"\nsource = { registry = "https://pypi.org/simple" }' \
   "$(package zzz 'registry = "https://pypi.org/simple"')"
-expect "uv-version reads a uv entry whose version precedes its name" 0 "0.12.23" uv-version
+expect "uv-version reads a uv entry whose version precedes its name" 0 "0.13.5" uv-version
 lock "$single" "$(package uvicorn 'registry = "https://pypi.org/simple"')"
 expect "a lock without a uv entry fails" 1 "uv.lock pins no uv package" uv-version
-lock "$single" "$(uv "$h1")" "$(uv "$h2" | sed 's/0\.12\.23/0.13.1/')"
-expect "two uv entries fail" 1 "uv.lock pins uv more than once (0.12.23, 0.13.1)" uv-version
+lock "$single" "$(uv "$h1")" "$(uv "$h2" | sed 's/0\.13\.5/0.14.1/')"
+expect "two uv entries fail" 1 "uv.lock pins uv more than once (0.13.5, 0.14.1)" uv-version
 lock "$single" "$(uv "$h1" | sed 's|^version = .*|version = "../0.1"|')"
 expect "a uv version unfit for a path fails" 1 "no usable version" uv-version
-for below in 0!0.12.22 0.12.22 0.12.23rc1 0.12.23.dev1 0.12.9 0.9; do
+for below in 0!0.13.4 0.13.4 0.13.5rc1 0.13.5.dev1 0.13.5a1 0.13.5b1 0.13.5c1 0.13.5pre1 0.13.5-alpha1 0.12.99 0.9; do
   lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$below\"|")"
-  expect "uv $below is below the minimum" 1 "uv.lock pins uv $below, below devkit's minimum 0.12.23; require uv>=0.12.23" uv-version
+  expect "uv $below is below the minimum" 1 "uv.lock pins uv $below, below devkit's minimum 0.13.5; require uv>=0.13.5" uv-version
 done
-for ok in 0.12.23+local 0.12.23.post1 0.13.0 1.0 0!0.13.0 0!1.0 1!0.1; do
+for ok in 0.13.5+local 0.13.5.post1 0.13.5.post1.dev1 0.13.6rc1 0.13.10 0.14.0 1.0 0!0.14.0 0!1.0 1!0.1; do
   lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$ok\"|")"
   expect "uv $ok meets the minimum" 0 "$ok" uv-version
 done
-for long in "0.12.$(printf '9%.0s' {1..4301})" "0.13.0+$(printf 'a%.0s' {1..60})"; do
+for long in "0.13.$(printf '9%.0s' {1..4301})" "0.14.0+$(printf 'a%.0s' {1..60})"; do
   lock "$single" "$(uv "$h1" | sed "s|^version = .*|version = \"$long\"|")"
   expect "a uv version over 64 characters fails" 1 "no usable version" uv-version
 done
@@ -89,11 +92,11 @@ expect "a malformed uv.lock fails" 1 "cannot read uv.lock" uv-version
 # uv-requirements
 lock "$single" "$(uv "$h1" "$h2")"
 expect "uv-requirements pins uv by every wheel hash" 0 \
-  "uv==0.12.23 \\"$'\n'"    --hash=sha256:$h1 \\"$'\n'"    --hash=sha256:$h2" uv-requirements
+  "uv==0.13.5 \\"$'\n'"    --hash=sha256:$h1 \\"$'\n'"    --hash=sha256:$h2" uv-requirements
 lock "$single" "$(uv "$h1" none)"
-expect "a wheel without a hash fails" 1 "no sha256 hash for every uv 0.12.23 wheel" uv-requirements
+expect "a wheel without a hash fails" 1 "no sha256 hash for every uv 0.13.5 wheel" uv-requirements
 lock "$single" "$(uv)"
-expect "a uv without wheels fails" 1 "no sha256 hash for every uv 0.12.23 wheel" uv-requirements
+expect "a uv without wheels fails" 1 "no sha256 hash for every uv 0.13.5 wheel" uv-requirements
 
 # members
 lock "$single" "$(uv "$h1")"
@@ -140,5 +143,36 @@ else
   echo "FAIL an unknown command exits 2: exit $rc, got: $out"
   fails=$((fails + 1))
 fi
+
+# The fixtures pin uv exactly at UV_FLOOR and allow uv_build from UV_FLOOR up
+# to the next minor (README, "Gating devkit itself"): one off it fails here.
+read -r floor below <<<"$(python3 -I -c 'import runpy, sys
+major, minor, *_ = floor = runpy.run_path(sys.argv[1])["UV_FLOOR"]
+print(".".join(map(str, floor)), f"{major}.{minor + 1}")' "$script")"
+for fixture in "$root"/tests/fixtures/python-*/; do
+  proj=${fixture%/} expect "$(basename "$fixture") pins uv at UV_FLOOR ($floor)" 0 "$floor" uv-version
+done
+# uv_build_check LABEL TEXT: every uv_build requirement in TEXT is the
+# floor's, and there is at least one
+uv_build_check() {
+  local want="uv_build>=$floor,<$below" found
+  found=$(grep -oE 'requires = \[[^]]*\]' <<<"$2" | grep -oE 'uv[_-]build[^"]*' || :)
+  if [[ -n $found && -z $(grep -vxF "$want" <<<"$found" || :) ]]; then
+    echo "PASS $1 requires $want"
+  else
+    echo "FAIL $1 requires $want: got '${found//$'\n'/ }'"
+    fails=$((fails + 1))
+  fi
+}
+checked=0
+for pyproject in "$root"/tests/fixtures/python-*/packages/*/pyproject.toml "$root"/tests/fixtures/python-*/pyproject.toml; do
+  [[ ! -e $pyproject ]] || ! grep -qE 'uv[_-]build' "$pyproject" ||
+    { uv_build_check "${pyproject#"$root"/tests/fixtures/}" "$(<"$pyproject")" && checked=$((checked + 1)); }
+done
+if [[ $checked == 0 ]]; then
+  echo "FAIL a fixture's pyproject.toml requires uv_build"
+  fails=$((fails + 1))
+fi
+uv_build_check "tests/run.sh's packaged-root rewrite" "$(grep 'requires = \["uv_build' "$root/tests/run.sh")"
 
 [[ $fails == 0 ]]

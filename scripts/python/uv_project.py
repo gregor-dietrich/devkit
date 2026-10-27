@@ -29,10 +29,12 @@ ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 VERSION = re.compile(r"(?!.{65})(?:([0-9]+)!)?([0-9]+(?:\.[0-9]+)*)[0-9A-Za-z.+!-]*")
 HASH = re.compile(r"sha256:[0-9a-f]{64}")
 RELOCK = "add uv to the dev dependency group, then uv lock"
-# The oldest uv devkit's flags are tested with, the one the fixtures' dev groups pin exactly, so a
-# relock keeps it; docs/contract.md ("Pins and drift") states it.
-UV_FLOOR = (0, 12, 23)
-PRERELEASE = re.compile(r"[._-]?(a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE)
+# The oldest uv devkit's flags are tested with and the security floor for the eMudhra emSign CA
+# incident (GHSA-hq85-5cpj-mr62 and the intermediate-key rejection after it); the fixtures' dev groups
+# pin it exactly, so a relock keeps it, which tests/uv_project_test.sh checks; docs/contract.md
+# ("Pins and drift") states it.
+UV_FLOOR = (0, 13, 5)
+PRERELEASE = re.compile(r"[._-]?(a|b|c|rc|pre|dev)", re.IGNORECASE)
 
 
 class Failure(Exception):
@@ -83,7 +85,7 @@ def uv_package(lock: dict[str, Any]) -> dict[str, Any]:
         floor = ".".join(map(str, UV_FLOOR))
         raise Failure(
             f"uv.lock pins uv {version}, below devkit's minimum {floor}; require uv>={floor} in the dev group, "
-            "then uv lock and make install."
+            f"then uv lock with uv {floor} or later and make install."
         )
     return found[0]
 

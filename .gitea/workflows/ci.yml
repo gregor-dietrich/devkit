@@ -8,7 +8,7 @@
 # runs make audit on every change, so a required ci check covers it: a new
 # advisory against a closure fails every pull request until a bump or an
 # audit-ignore entry lands (#58). The shell job's floor part bootstraps the
-# pinned uv, hash-verified, and has it use an installed CPython 3.11 and 3.14
+# pinned uv, hash-verified, and has it use an installed CPython 3.11 and 3.15
 # or download them. Every job runs as root, which a file mode does not stop, so
 # the shell and python jobs' unprivileged legs run their parts as a user
 # created for the leg, which takes the sealed caches' non-root paths that root

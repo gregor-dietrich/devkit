@@ -1441,10 +1441,13 @@ run the tools from `.venv`.
   records, when the root `pyproject.toml` sets no `[tool.vulture] paths`,
   when `uv.lock` pins no single usable uv version, lists a uv wheel
   without a sha256 hash, or records no wheel for uv at all (an sdist, git
-  or path source), when that uv is older than devkit's minimum, 0.12.23
+  or path source), when that uv is older than devkit's minimum, 0.13.5
   (a pre-release of it counts as older; it is the oldest uv devkit tests
-  its `uv sync` and `uv export` flags with), when devkit's copy of the uv
-  `uv.lock` pins is not installed, when `.venv` is
+  its `uv sync` and `uv export` flags with, and the security floor for the
+  eMudhra emSign CA incident: 0.13.4 drops the affected emSign root from
+  uv's embedded CA bundle, GHSA-hq85-5cpj-mr62, and 0.13.5 also rejects a
+  chain through the compromised intermediate keys),
+  when devkit's copy of the uv `uv.lock` pins is not installed, when `.venv` is
   missing, when its Python's version differs from the pin (`major.minor`,
   or the patch too when the pin names one), when `uv sync --check --frozen
   --offline` cannot confirm `.venv` matches `uv.lock` (drift: run `make
@@ -1464,11 +1467,18 @@ run the tools from `.venv`.
   `shasum`), so projects
   that lock the same uv by the same hashes share one copy and a lock with
   other hashes gets its own. devkit never runs a `uv` on `PATH`, nor the
-  one inside `.venv`. Every target that sources it (`check`, `install`,
-  `test`, `audit`) fails first on a uv older than devkit's minimum (see
-  `make check`). Only `make install` creates the copy, read-only, when
-  it is missing, and
-  `check`, `test` and `audit` fail until then: pip, in a throwaway venv of
+  one inside `.venv`, but the uv that writes `uv.lock` (`uv lock`, `uv
+  add`) is the project's own, which devkit does not check: run it at
+  devkit's minimum or later, since an older one resolves without the
+  protections the minimum adds. The minimum covers uv's own downloads only,
+  and only while uv uses its embedded bundle (not a system store or
+  `SSL_CERT_FILE`): pip, which installs the copy below, and `make audit`'s
+  pip-audit, through the `certifi` `uv.lock` pins, use their own trust
+  stores. Every target that
+  sources it (`check`, `install`, `test`, `audit`) fails first on a uv
+  older than devkit's minimum (see `make check`). Only `make install`
+  creates the copy, read-only, when it is missing, and `check`, `test` and
+  `audit` fail until then: pip, in a throwaway venv of
   `python3`, installs the machine's uv wheel from the index pip's own
   configuration names (PyPI unless `pip.conf` or a `PIP_*` variable such as
   `PIP_INDEX_URL` names another), and only a wheel whose sha256 `uv.lock`
@@ -1582,7 +1592,7 @@ run the tools from `.venv`.
   `--locked`, `--format json` and `--aliases`; a project pinning one
   without one of them fails both runs with exit status 2 and upgrades it
   (the fixtures pin 2.10.1), and a uv whose `uv export` has
-  `--format pylock.toml`, as devkit's minimum uv, 0.12.23, does. An entry
+  `--format pylock.toml`, as devkit's minimum uv does. An entry
   has no expiry, and keeps passing when a fixed release appears: a passing
   run lists each accepted finding with its fix versions and reason, so a
   fix does not go unseen.

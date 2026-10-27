@@ -110,7 +110,7 @@ GNU make, ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3
 (3.11 or later); fetching a devkit release on a cache miss also needs the
 running UID to have a passwd entry, which ssh-keygen requires (a container run
 with an arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or
-later in `.python-version` and uv 0.12.23 or later in `uv.lock`, needs
+later in `.python-version` and uv 0.13.5 or later in `uv.lock`, needs
 `sha256sum` or `shasum`, and, for the first
 `make install` of each uv `uv.lock` pins, python3's venv and pip and the
 index pip is configured for (PyPI by default). `make lint` also needs node
@@ -208,11 +208,14 @@ deleted and regenerated with
 nothing. A fixture's `uv.lock` is regenerated with `uv lock --upgrade
 --exclude-newer <cutoff>`, then a plain `uv lock`, which keeps the versions
 and drops the cutoff the first one records (`uv sync --locked` fails while it
-is there). Either way the transitive versions are as old. uv itself stays
-at devkit's minimum: the fixtures' dev groups pin it exactly (`uv==0.12.23`),
-so a relock keeps it, and raising the minimum (`UV_FLOOR` in
-`scripts/python/uv_project.py`) raises both pins with it. `version_check.py`
-reports a newer release whatever its age; a younger one waits.
+is there), both with a uv at devkit's minimum or later. Either way the
+transitive versions are as old. uv itself stays at devkit's minimum: the
+fixtures' dev groups pin it exactly, so a relock keeps it, and raising the
+minimum (`UV_FLOOR` in `scripts/python/uv_project.py`) raises both pins and
+the `uv_build` ranges (the workspace fixture's and `tests/run.sh`'s
+packaged-root case) with it, which `tests/uv_project_test.sh` checks.
+`version_check.py` reports a newer release whatever its age; a younger one
+waits.
 
 A bump of the `jscpd/` closure can change the tokens jscpd counts for a
 clone, and so push a consumer's accepted pair past its `max-tokens` without
@@ -567,6 +570,23 @@ such an entry moves to `checkstyle-suppressions.xml`.
 `SuppressWarningsNullAway` keeps its id and its `src/test` exemption (its
 pattern now also catches the alias, wrapped arrays, a qualified name and an `@`
 followed by a space).
+
+In a uv project, devkit now requires uv 0.13.5 or later, the security floor for
+the eMudhra emSign CA incident
+([PSF advisory](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)):
+uv embeds its own CA bundle, which certifi does not reach; 0.13.4 drops the
+affected root, emSign ECC Root CA - G3, from it (GHSA-hq85-5cpj-mr62), and
+0.13.5 also rejects a chain through the compromised intermediate keys. `make
+check`, `make install`, `make test` and `make audit` fail, naming that minimum,
+on a `uv.lock` pinning an older uv or a pre-release of it. The floor covers
+uv's own downloads only, and only while uv uses its embedded bundle (not a
+system store or `SSL_CERT_FILE`): `make audit`'s pip-audit trusts the `certifi`
+`uv.lock` pins, and certifi 2026.10.18 and later lack that root. First, raise a
+`[build-system]` cap of `uv_build` below 0.13, which now warns, to `<0.14`.
+Then require `uv>=0.13.5` in the dev group (a later uv where `.python-version`
+names a CPython uv 0.13.5 cannot download: 3.14.10 needs 0.13.6) and run `uv
+lock --upgrade-package certifi` and `make install`, with that uv or later (`uv
+--version`): an older one lacks the protections above.
 
 ### Upgrading from v0.7.x
 

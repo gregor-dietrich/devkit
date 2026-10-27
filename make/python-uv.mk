@@ -8,7 +8,7 @@
 #                   empty = a single package at the root
 #   COVERAGE_FLOOR  percent (0-100) of combined statement and branch coverage (--cov-branch)
 #                   each package's tests must reach; required
-# The CPython version comes from .python-version, the uv version (0.12.23 or later) from the uv
+# The CPython version comes from .python-version, the uv version (0.13.5 or later) from the uv
 # package in uv.lock.
 #
 # Copy-paste gate: lint runs jscpd over devkit.toml's [python.duplication] paths, failing on a

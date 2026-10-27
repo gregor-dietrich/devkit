@@ -65,7 +65,7 @@
 #          first use.
 #   floor  install the uv the python-uv-single fixture's uv.lock pins (the
 #          python part's copy, when it ran first), have it create venvs of
-#          CPython 3.11 (the helpers' floor) and 3.14 (newest_python, the
+#          CPython 3.11 (the helpers' floor) and 3.15 (newest_python, the
 #          newest stable, for the anchored-match gate that runs on the
 #          project's Python; a check fails when the pinned uv lists a newer
 #          stable minor), check each version, compile every scripts/**/*.py
@@ -240,7 +240,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 fails=0
 # Set by prepare and publish, which skip when they are set, so none may come from the caller's environment.
 work='' label_prefix='' tag='' bare='' commit=''
-newest_python=3.14 # the newest stable CPython; floor_newest_stable fails when the pinned uv offers a newer one
+newest_python=3.15 # the newest stable CPython; floor_newest_stable fails when the pinned uv offers a newer one
 # shellcheck source=SCRIPTDIR/../scripts/lib/tree.sh
 . "$root/scripts/lib/tree.sh"
 
@@ -2131,7 +2131,7 @@ python_negatives() {
     py_touched workspace packages/core/pyproject.toml
   check "python-uv-single: a touched packaged root's pyproject.toml fails make test until make install" \
     py_touched single pyproject.toml \
-    's/^package = false/package = true\n\n[build-system]\nrequires = ["uv_build>=0.12.23,<0.13"]\nbuild-backend = "uv_build"/'
+    's/^package = false/package = true\n\n[build-system]\nrequires = ["uv_build>=0.13.5,<0.14"]\nbuild-backend = "uv_build"/'
   check "python-uv-single: a missing pinned uv copy fails make test, saying make install" py_no_uv
   check "python-uv-single: make test clears pytest's cache, so --lf in addopts runs every test" py_cache_cleared
   check "python-uv-single: make test ignores a stale .coverage under --cov-append and leaves it alone" \
