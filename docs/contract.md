@@ -1086,11 +1086,12 @@ inherit it, and Maven reads it through the link:
   sources) appends `-Xlint:-serial` or `-Xlint:-this-escape` to its
   `<compilerArgs combine.children="append">`), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
-  PMD (with CPD), Checkstyle (the shared config and the execution
-  `project`), JaCoCo (agent, report and coverage check) and Spotless (the
-  Eclipse formatter, with static imports first, then java, javax, jakarta, org,
-  com, then the rest), whose checks run at `verify`, and resources, whose
-  execution `pmd-ruleset` (the copy PMD reads) runs at `initialize`.
+  PMD (with CPD; `printFailingErrors` logs each failing violation), Checkstyle
+  (the shared config and the execution `project`), JaCoCo (agent, report and
+  coverage check) and Spotless (the Eclipse formatter, with static imports
+  first, then java, javax, jakarta, org, com, then the rest), whose checks
+  run at `verify`, and resources, whose execution `pmd-ruleset` (the copy PMD
+  reads) runs at `initialize`.
   dependency-check is configured but not activated; `make audit` runs it by its
   coordinates.
   License skips every artifact whose groupId is exactly the module's own: a
@@ -1280,7 +1281,18 @@ altered in the local repository, fails the build with
   code inside Maven still can, below). A command-line key beats
   `MAVEN_ARGS` and `.mvn/maven.config`, so for these keys those calls ignore a
   project's own setting. The wrapper fails closed when the file is missing or
-  empty.
+  empty. It also puts
+  `org.slf4j.simpleLogger.log.org.apache.maven.plugin.compiler` and
+  `org.slf4j.simpleLogger.log.org.apache.maven.plugins.pmd` at `warn` on the
+  command line: `-q` alone keeps ERROR only, so a failing build would name
+  neither the javac warning `-Werror` fails on nor the PMD and CPD violations,
+  and only per-logger keys survive `-q`. These two keys go on every call
+  except one asking for debug output (`-X` or `--debug` as a whole word of
+  `MAVEN_ARGS` or of the call's arguments; one in `.mvn/maven.config` does not
+  count), where they are left out so that the debug output is complete. A
+  non-quiet call therefore also sees those two loggers at `warn`, and a
+  project's own setting of these keys in `MAVEN_ARGS` or `.mvn/maven.config`
+  is overridden.
 - `failIfMissing` is off: an artifact the file does not list passes
   unchecked. That is:
   - a project's own artifact, unless it shares a recorded coordinate;

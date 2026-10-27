@@ -82,7 +82,8 @@
 #          java/parent/pom.xml> in a temp bare repo and run every
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
 #          and committed as a git repository of its own, through make help,
-#          check, lint, test, coverage and format; then make install
+#          check, lint, test, coverage and format, the passing lint, test
+#          and coverage logs without a [WARNING] line; then make install
 #          java-multimodule into a local repository of its own, which reads
 #          through to ~/.m2, and expect its installed poms to name neither
 #          devkit's parent nor an unresolved ${...}, and make test ONLY=app
@@ -122,15 +123,16 @@
 #          pre-push screen, hooks_test.sh tests and clean_env clears, and
 #          the check to fail on a Maven other than the one the lists were
 #          reviewed against.
+#          Expect lint to fail on a duplicated block, CPD naming each place.
 #          Expect lint to fail on a test whose only check is an assertion
-#          helper PMD does not know, until the pom's pmd.extraAssertMethodNames
-#          names it, and then to pass whatever plugin-level resources
-#          configuration the pom carries. Expect the monolith to resolve
-#          spotbugs-annotations, provided, at the parent's spotbugs.version,
-#          SpotBugs to report that analyzer, the parent's UTF-8 encoding to
-#          reach it, jars under the common license spellings to pass,
-#          checkstyle-xpath-suppressions.xml to suppress a violation from
-#          another working directory and another
+#          helper PMD does not know, naming the PMD violation, until the
+#          pom's pmd.extraAssertMethodNames names it, and then to pass
+#          whatever plugin-level resources configuration the pom carries.
+#          Expect the monolith to resolve spotbugs-annotations, provided, at
+#          the parent's spotbugs.version, SpotBugs to report that analyzer,
+#          the parent's UTF-8 encoding to reach it, jars under the common
+#          license spellings to pass, checkstyle-xpath-suppressions.xml to
+#          suppress a violation from another working directory and another
 #          maven.multiModuleProjectDirectory too, a NullAway suppression to
 #          fail lint in main sources, also in a checkout below a src/test
 #          directory, and pass in tests, make test with the integration tests
@@ -139,14 +141,15 @@
 #          and find-sec-bugs to run: an XML parser open to external entities
 #          and a JBoss Logging call of an untrusted value to fail lint, the
 #          JAX-RS endpoint marker excluded, with no analysis error. Expect
-#          javac's serial and this-escape lint to fail lint under -Werror;
-#          once the module appends -Xlint:-serial or -Xlint:-this-escape,
-#          SpotBugs' matching pattern to fail it where SpotBugs reports the
-#          construct, and lint to pass once that pattern is excluded, or at
-#          once for a constructor handing this out, which SpotBugs does not
-#          report. Expect imports of java, org and jakarta in the order from
-#          before jakarta joined the import order to fail lint, and make
-#          format to put jakarta after java and before org. Expect the
+#          javac's serial and this-escape lint to fail lint under -Werror,
+#          naming the file and position; once the module appends
+#          -Xlint:-serial or -Xlint:-this-escape, SpotBugs' matching pattern
+#          to fail it where SpotBugs reports the construct, and lint to pass
+#          once that pattern is excluded, or at once for a constructor
+#          handing this out, which SpotBugs does not report. Expect imports
+#          of java, org and jakarta in the order from before jakarta joined
+#          the import order to fail lint, and make format to put jakarta
+#          after java and before org. Expect the
 #          committed java/checksums/checksums.sha256 to list every artifact
 #          of the formatter version the parent pins, whose lockfile
 #          spotless-lib-extra (from ~/.m2, after the fixtures ran) embeds
@@ -684,12 +687,60 @@ class HelperTest {
 }
 JAVA
   check "java-monolith: an unknown assertion helper fails make lint, PMD finding one violation" \
-    make_says fail "$dir" lint "has found 1 violation"
+    make_says fail "$dir" lint "has found 1 violation" "PMD Failure: devkit.fixture.HelperTest:8 Rule:UnitTestShouldIncludeAssert"
   sed_into "$dir/pom.xml" 's|<maven.compiler.release>|<pmd.extraAssertMethodNames>statusCode,greetingIs</pmd.extraAssertMethodNames>\n    &|'
   # A project's own resources configuration that would copy XML unfiltered must not reach the ruleset.
   sed_into "$dir/pom.xml" 's|</project>|  <build><plugins><plugin><artifactId>maven-resources-plugin</artifactId><configuration><nonFilteredFileExtensions><nonFilteredFileExtension>xml</nonFilteredFileExtension></nonFilteredFileExtensions></configuration></plugin></plugins></build>\n&|'
   check "java-monolith: pmd.extraAssertMethodNames makes make lint accept it, whatever the project's plugin-level resources configuration" \
     make_says pass "$dir" lint
+}
+
+cpd_duplicate() { # a class holding one block twice fails lint, CPD naming the file and line of each copy
+  local dir=$work/negative-cpd
+  setup "$root/tests/fixtures/java-monolith" "$dir"
+  cat >"$dir/src/main/java/devkit/fixture/Dup.java" <<'JAVA'
+package devkit.fixture;
+
+/** Holds two copies of one block. */
+public final class Dup {
+
+    private Dup() {
+    }
+
+    /** First copy. */
+    public static int first(int a, int b) {
+        int sum = 0;
+        for (int i = a; i < b; i++) {
+            if (i % 2 == 0) {
+                sum += i * 3;
+            } else {
+                sum -= i * 5;
+            }
+            if (sum > 1000) {
+                sum = sum / 2 + i;
+            }
+        }
+        return sum + a * b - (a + b) * 7;
+    }
+
+    /** Second copy. */
+    public static int second(int a, int b) {
+        int sum = 0;
+        for (int i = a; i < b; i++) {
+            if (i % 2 == 0) {
+                sum += i * 3;
+            } else {
+                sum -= i * 5;
+            }
+            if (sum > 1000) {
+                sum = sum / 2 + i;
+            }
+        }
+        return sum + a * b - (a + b) * 7;
+    }
+}
+JAVA
+  make_says fail "$dir" lint "CPD Failure: Found" "Dup.java line 10" "Dup.java line 26"
 }
 
 # A violation the shared config reports on an AST node (an abbreviation in a method name) fails lint
@@ -904,14 +955,15 @@ nullaway_in_tests() {
 }
 
 # javac_lint LINT SED PATTERN [NAME]: SED's break of Greeter in a monolith copy fails make lint on
-# javac's LINT under -Werror, the only part of javac's message -q keeps. Once the copy appends
-# -Xlint:-LINT to its compilerArgs, as a module whose framework needs that does, javac is silent: a
-# non-empty PATTERN makes lint fail on SpotBugs' PATTERN for the same construct, and it passes once
-# the class excludes PATTERN; an empty one is a construct only javac reports, which then passes.
+# javac's LINT under -Werror, naming the file and position of the warning (mvn_checked.sh's logger
+# keys keep it under -q). Once the copy appends -Xlint:-LINT to its compilerArgs, as a module whose
+# framework needs that does, javac is silent: a non-empty PATTERN makes lint fail on SpotBugs'
+# PATTERN for the same construct, and it passes once the class excludes PATTERN; an empty one is a
+# construct only javac reports, which then passes.
 # NAME (default LINT) keeps the copies of one LINT's cases apart.
 javac_lint() {
   local dir=$work/javac-${4:-$1}
-  edited "$dir" src/main/java/devkit/fixture/Greeter.java "$2" && make_says fail "$dir" lint "-Werror" || return
+  edited "$dir" src/main/java/devkit/fixture/Greeter.java "$2" && make_says fail "$dir" lint "-Werror" "Greeter.java:[" || return
   sed_into "$dir/pom.xml" "s|^</project>|  <build>\\n    <plugins>\\n      <plugin>\\n        <artifactId>maven-compiler-plugin</artifactId>\\n        <configuration>\\n          <compilerArgs combine.children=\"append\">\\n            <arg>-Xlint:-$1</arg>\\n          </compilerArgs>\\n        </configuration>\\n      </plugin>\\n    </plugins>\\n  </build>\\n&|" || return
   [[ -z $3 ]] || {
     make_says fail "$dir" lint "$3" &&
@@ -958,6 +1010,8 @@ JAVA
 
 negatives() {
   assert_helper_checks
+  check "java-monolith: a duplicated block fails make lint, CPD naming each place" \
+    cpd_duplicate
   check "java-monolith: a Serializable class without a serialVersionUID fails make lint, until the module appends -Xlint:-serial and excludes SpotBugs' SE_NO_SERIALVERSIONID" \
     javac_lint serial 's/^import edu/import java.io.Serializable;\n\nimport edu/; s/^public final class Greeter {/public final class Greeter implements Serializable {/' \
     SE_NO_SERIALVERSIONID
@@ -1352,11 +1406,27 @@ sys.exit(f"{sys.argv[1]}: {errors} analysis errors") if errors != "0" else None'
   done
 }
 
+# no_warning_lines DIR TARGET...: none of the logs of DIR's passing TARGETs holds a [WARNING] line.
+# Under -q such a line is a finding the two loggers mvn_checked.sh raises let through, or noise to fix.
+no_warning_lines() {
+  local target log
+  for target in "${@:2}"; do
+    log=$1.$target.log
+    [[ -s $log ]] || {
+      echo "$log is missing or empty"
+      return 1
+    }
+    ! grep -n '^\[WARNING\]' "$log" || return
+  done
+}
+
 java_part() {
   prepare
   publish
   for fixture in "$root"/tests/fixtures/java-*/; do
     run_fixture "${fixture%/}" "check lint test coverage format"
+    check "$(basename "$fixture"): passing Maven targets print no [WARNING] line" \
+      no_warning_lines "$work/$(basename "$fixture")" lint test coverage
     unchanged "${fixture%/}" target .coverage.md
   done
   check "java-monolith: the first make target downloads devkit's Maven" \

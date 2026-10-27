@@ -530,6 +530,9 @@
               <ruleset>${project.build.directory}/devkit/pmd-ruleset.xml</ruleset>
             </rulesets>
             <failOnViolation>true</failOnViolation>
+            <!-- Logs each failing violation, at WARN, which devkit's targets keep under -q
+                 (scripts/lib/mvn_checked.sh). -->
+            <printFailingErrors>true</printFailingErrors>
           </configuration>
           <executions>
             <execution>

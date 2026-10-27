@@ -405,10 +405,14 @@ Under `-Werror`, javac reports `serial` before `this-escape`: a class with both
 fails on `serial` alone, and `this-escape` shows once that is clean, so expect
 another round. The compiler does not recompile up-to-date classes for a changed
 argument, so a `make lint` on an existing `target/` passes until `make clean`
-runs once after the bump. The targets run Maven with `-q`, which hides the
-warning itself: the failure says only that warnings were found with `-Werror`
-set. An IDE build, or `mvn test-compile` without `-q` (`compile` alone misses
-test sources), names it.
+runs once after the bump. The targets now print javac's warning with its file
+and line.
+
+A failing PMD or CPD check now prints each violation (rule, class and line;
+each place of a duplicate) instead of a count and the report path. No consumer
+action; a project script that calls `MVN_CMD` without `-q` now sees those two
+plugins at WARN, which [Plugin checksums](docs/contract.md#plugin-checksums)
+describes.
 
 `make rebase` no longer pushes: after it, review the rebase (and run the gates)
 and push with `git push --force-with-lease --force-if-includes` (if git

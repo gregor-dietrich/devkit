@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic tests for scripts/lib/mvn_checked.sh's JAVA_VERSION handling: a stub
-# MVN_LAUNCHER logs its arguments. No Maven, no network. Prints PASS/FAIL per case.
+# Hermetic tests for scripts/lib/mvn_checked.sh's JAVA_VERSION handling and logger keys: a
+# stub MVN_LAUNCHER logs its arguments. No Maven, no network. Prints PASS/FAIL per case.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,6 +49,37 @@ t "3 25.0 fails, launcher not run" rejects '25.0'
 t "4 025 fails, launcher not run" rejects '025'
 t "5 an unstripped '25 ' fails, quoted in the message" rejects '25 '
 t "6 a trailing comment on the Makefile's JAVA_VERSION line reaches the script as 25" strips_comment
+
+# logger_call EXPECT MAVEN_ARGS ARG...: with MAVEN_ARGS set for the call, the launcher gets exactly
+# the resolver keys and the JDK range in their order, then the logger keys (yes) or none (no), then
+# ARG..., which the call's own arguments may thus override.
+logger_call() {
+  local expect=$1 margs=$2 expected
+  shift 2
+  expected=(
+    -Daether.trustedChecksumsSource.summaryFile=true
+    "-Daether.trustedChecksumsSource.summaryFile.basedir=$root/java/checksums"
+    -Daether.trustedChecksumsSource.summaryFile.originAware=false
+    -Daether.artifactResolver.postProcessor.trustedChecksums=true
+    -Daether.artifactResolver.postProcessor.trustedChecksums.checksumAlgorithms=SHA-256
+    -Daether.artifactResolver.postProcessor.trustedChecksums.failIfMissing=false
+    -Daether.artifactResolver.postProcessor.trustedChecksums.record=false
+    -Daether.artifactResolver.postProcessor.trustedChecksums.scope=all
+    '-Ddevkit.jdk.range=[25,26)'
+  )
+  [[ $expect == no ]] || expected+=(
+    -Dorg.slf4j.simpleLogger.log.org.apache.maven.plugin.compiler=warn
+    -Dorg.slf4j.simpleLogger.log.org.apache.maven.plugins.pmd=warn
+  )
+  MAVEN_ARGS=$margs run 25 "$script" "$@"
+  [[ $rc == 0 ]] && diff <(printf '%s\n' "${expected[@]}" "$@") "$LOG"
+}
+t "7 a plain call passes the resolver keys, the JDK range, both logger keys and its arguments, in that order" logger_call yes '' compile
+t "8 -X in the arguments passes neither logger key" logger_call no '' -X compile
+t "9 --debug in the arguments passes neither logger key" logger_call no '' --debug compile
+t "10 MAVEN_ARGS='-B -X' passes neither logger key" logger_call no '-B -X' compile
+t "11 -Xmx1g in MAVEN_ARGS is not -X: both logger keys passed" logger_call yes '-Xmx1g' compile
+t "12 -XX and -Xfoo arguments are not -X: both logger keys passed" logger_call yes '' -XX -Xfoo compile
 
 [[ $fails == 0 ]] || {
   echo "$fails case(s) failed"
