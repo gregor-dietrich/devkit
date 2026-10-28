@@ -6,7 +6,8 @@
 # install must bootstrap uv. floor, java and python share one temp dir (TMPDIR
 # is honoured); java and python also share the tree under test, published once
 # by whichever runs first.
-#   shell  shellcheck every script, then tests/devkitw_test.sh,
+#   shell  that PARENTS (scripts/java/parent_check.py) lists two or more
+#          existing files, shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/make_test.sh,
 #          tests/kill_test.sh, tests/check_frontend_deps_test.sh,
 #          tests/parent_check_test.sh, tests/check_pins_test.sh,
@@ -29,12 +30,24 @@
 #          break, a tab, a double space or edge whitespace, that no name is
 #          listed twice and that the allowlist names the licenses devkit's
 #          own tests rely on, and that each of those failures is reported,
-#          and that docs/contract.md lists the parent's *.version properties
-#          and execution ids, no more and no fewer, and that each way of
-#          drifting is reported, that spotbugs-plugin.version is
-#          spotbugs.version plus a fourth component, and that the parent's
-#          SpotBugs analyzer dependency excludes log4j-core, as the plugin's
-#          own declaration does, and that the parent itself declares UTF-8
+#          and that docs/contract.md lists the *.version properties and
+#          execution ids of every parent POM (PARENTS in
+#          scripts/java/parent_check.py), no more and no fewer, and that each
+#          way of drifting is reported (a property only a derived parent
+#          declares included), that no parent POM declares
+#          <repositories> or <pluginRepositories> (a repository there would
+#          apply to every consumer), in the project or in a profile, and that
+#          the check rejects each of the four, that every parent POM's root is
+#          in the POM namespace the checks match (one without would pass them
+#          unread) and that the check rejects one without, that no derived
+#          parent declares spotless-maven-plugin, spotbugs-maven-plugin or
+#          license-maven-plugin (the checks of their configuration read the
+#          base parent only) and that the check rejects each, in the build,
+#          its pluginManagement and a profile, that
+#          spotbugs-plugin.version is spotbugs.version plus a fourth
+#          component, and that the parent's SpotBugs analyzer dependency
+#          excludes log4j-core, as the plugin's own declaration does, and
+#          that the parent itself declares UTF-8
 #          as its source and report encoding, and that each of those three
 #          checks rejects a copy of the parent that breaks it (a plugin
 #          bumped alone, a log4j exclusion of another groupId, no report
@@ -47,9 +60,17 @@
 #          rejects a raised complexity threshold and an extra property,
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin (find-sec-bugs' detector included), plugin dependency and
-#          annotation processor the parent pins and of the plugins
-#          check_frontend_deps.py runs, and that a file without one is
-#          rejected, naming it and make maven-checksums, that the
+#          annotation processor the parents pin, the .pom of every imported
+#          BOM (scope import, type pom), the jar of every build extension
+#          and the jars of the plugins check_frontend_deps.py runs, and that
+#          a file without one is rejected, naming it and make
+#          maven-checksums, that a derived parent redefining an earlier
+#          parent's property is rejected (its ${...} resolve against the
+#          properties before them), that a profile setting a property a
+#          collected coordinate references or one a parent sets at top level
+#          (skipITs aside) is rejected (the check reads top-level properties
+#          only), that a
+#          <build><extensions> extension without a line is rejected, that the
 #          enforcer's jar, find-sec-bugs' jar and the pinned Maven
 #          distribution's own line are among them (the last needs the
 #          line of the pin in scripts/lib/pinned_maven.sh, so a Maven
@@ -86,9 +107,10 @@
 #          and committed as a git repository of its own, through make help,
 #          check, lint, test, coverage and format, the passing lint, test
 #          and coverage logs without a [WARNING] line; then make install
-#          java-multimodule into a local repository of its own, which reads
-#          through to ~/.m2, and expect its installed poms to name neither
-#          devkit's parent nor an unresolved ${...}, and make test ONLY=app
+#          java-multimodule (and java-quarkus) into a local repository of
+#          its own, which reads through to ~/.m2, and expect its installed
+#          poms to name neither a devkit parent nor an unresolved ${...},
+#          and make test ONLY=app
 #          to resolve core from them offline, and make test of a copy whose
 #          app depends on a jar without a license to fail twice in a row,
 #          without a clean between, and to pass once the module's
@@ -149,11 +171,13 @@
 #          and a JBoss Logging call of an untrusted value to fail lint, the
 #          JAX-RS endpoint marker excluded, with no analysis error. Expect
 #          javac's serial and this-escape lint to fail lint under -Werror,
-#          naming the file and position; once the module appends
-#          -Xlint:-serial or -Xlint:-this-escape, SpotBugs' matching pattern
-#          to fail it where SpotBugs reports the construct, and lint to pass
-#          once that pattern is excluded, or at once for a constructor
-#          handing this out, which SpotBugs does not report; and PMD's
+#          naming the file and position (the serial one also in java-quarkus'
+#          api, as the Quarkus parent keeps the lints on); once the module
+#          appends -Xlint:-serial or -Xlint:-this-escape, SpotBugs' matching
+#          pattern to fail it where SpotBugs reports the construct, and lint
+#          to pass once that pattern is excluded, or at once for a
+#          constructor handing this out, which SpotBugs does not report; and
+#          PMD's
 #          ConstructorCallsOverridableMethod to fail it too, until the
 #          module's own pmd-ruleset.xml references the kit's filtered copy and
 #          excludes that rule (docs/contract.md), which still leaves PMD's
@@ -301,6 +325,9 @@ shell_tests() { # every test file of the shell part, run again by the floor part
 }
 
 shell_part() {
+  local poms
+  check "parent: PARENTS in parent_check.py parses to two or more existing parent POMs" parent_poms_parse
+  mapfile -t poms < <(parent_poms)
   check "shellcheck" shellcheck_all
   shell_tests
   check "parent: no includedLicense entry is empty or holds a line break, a tab, a double space or edge whitespace, none is listed twice, and the allowlist names the required licenses" \
@@ -338,10 +365,12 @@ shell_part() {
     sink_file_valid "$root/java/config/findsecbugs-crlf-jboss-logging.txt"
   check "parent: the sink file check rejects a long overload whose indices are the long's slots, naming the line" \
     sink_file_reject 's|^\(org/jboss/logging/Logger.tracef(Ljava/lang/String;J)V:\).*|\10,1|' "Logger.tracef(Ljava/lang/String;J)V:0,1"
-  check "parent: docs/contract.md lists the parent's version properties and execution ids, no more and no fewer" \
-    contract_lists_match "$root/java/parent/pom.xml" "$root/docs/contract.md"
+  check "parent: docs/contract.md lists the parents' version properties and execution ids, no more and no fewer" \
+    contract_lists_match "$root/docs/contract.md" "${poms[@]}"
   check "parent: the contract lists check rejects a version property the contract does not list" \
     contract_lists_reject pom 's|<jacoco-plugin.version>|<extra-plugin.version>1</extra-plugin.version>&|' "lacks the parent's version propert(ies): extra-plugin.version"
+  check "parent: the contract lists check rejects a version property only a derived parent declares" \
+    contract_lists_reject java/quarkus/pom.xml 's|<quarkus.platform.version>|<extra-derived.version>1</extra-derived.version>&|' "extra-derived.version"
   check "parent: the contract lists check rejects a listed version property the parent lacks" \
     contract_lists_reject pom 's|jacoco-plugin.version>|jacoco-gone.version>|g' "has no version propert(ies) the contract lists: jacoco-plugin.version"
   check "parent: the contract lists check rejects an execution id the contract does not list" \
@@ -355,7 +384,7 @@ shell_part() {
   check "parent: the contract lists check rejects a contract whose pin list is reworded" \
     contract_lists_reject contract 's|^- It pins every gate tool|- It sets every gate tool|' "no bullet starts with"
   check "parent: the contract lists check rejects a list too short to be the real one" \
-    contract_lists_reject pom '/<properties>/,/<\/properties>/d' "parsed 0 properties"
+    contract_lists_reject pom '/<properties>/,/<\/properties>/d' "contract lists: parsed"
   check "parent: the contract lists check rejects a parent without a non-override execution id" \
     contract_lists_reject pom 's|<id>flatten</id>|<id>flatten-x</id>|' "has lost the non-override execution id(s): flatten"
   # shellcheck disable=SC2016 # backticks of the sed pattern are literal
@@ -366,8 +395,8 @@ shell_part() {
     contract_lists_reject contract 's|`pmd-ruleset`|`pmd-ruleset`, `flatten`|' "lists execution id(s) that are no override point: flatten"
   check "parent: the contract lists check rejects an execution id the contract places in another plugin" \
     contract_lists_reject contract 's|(JaCoCo)|(SpotBugs)|' "names another plugin than the parent's for the execution id(s): check, prepare-agent, report"
-  check "parent: java/checksums lists the jar of every plugin and annotation processor the parent pins" \
-    checksums_cover "$root/java/parent/pom.xml" "$root/java/checksums/checksums.sha256" "$(frontend_plugins "$root")" "$(maven_pin "$root")"
+  check "parent: java/checksums lists the jar of every plugin and annotation processor the parents pin, the .pom of every imported BOM and the jar of every build extension" \
+    checksums_cover "$root/java/checksums/checksums.sha256" "$(frontend_plugins "$root")" "$(maven_pin "$root")" "${poms[@]}"
   check "parent: the checksums check rejects a file without a pinned plugin's jar, naming it and make maven-checksums" \
     checksums_reject '/\/maven-compiler-plugin\/.*\.jar$/d' "maven-compiler-plugin-" "make maven-checksums"
   check "parent: the checksums check rejects a file without a pinned annotation processor's jar" \
@@ -380,53 +409,128 @@ shell_part() {
     checksums_reject '/\/maven-enforcer-plugin\/.*\.jar$/d' "maven-enforcer-plugin-" "make maven-checksums"
   check "parent: the checksums check rejects a file without find-sec-bugs' jar" \
     checksums_reject '/\/findsecbugs-plugin\/.*\.jar$/d' "com/h3xstream/findsecbugs/findsecbugs-plugin/" "make maven-checksums"
+  check "parent: the checksums check rejects a file without an imported BOM's .pom, naming it" \
+    checksums_reject '/\/platform\/quarkus-bom\/.*\.pom$/d' "io/quarkus/platform/quarkus-bom/3.40.1.1/quarkus-bom-3.40.1.1.pom" "make maven-checksums"
+  check "parent: the checksums check rejects a file without a build extension's jar, naming it" \
+    checksums_reject '/\/quarkus-maven-plugin\/.*\.jar$/d' "io/quarkus/platform/quarkus-maven-plugin/3.40.1.1/quarkus-maven-plugin-3.40.1.1.jar" "make maven-checksums"
   check "scripts: MVN_LAUNCHER, which skips the checksums check, is used only by get_maven.sh, mvn_checked.sh and maven_checksums.sh" \
     launcher_uses scripts/lib/get_maven.sh scripts/lib/mvn_checked.sh scripts/maven_checksums.sh
   check "parent: the checksums check rejects a file without the plugins check_frontend_deps.py runs" \
     checksums_reject '/\/maven-help-plugin\/.*\.jar$/d;/\/maven-dependency-plugin\/.*\.jar$/d' \
     "maven-help-plugin-" "maven-dependency-plugin-" "make maven-checksums"
+  check "parent: the checksums check rejects a derived parent that redefines an earlier parent's property" \
+    checksums_cover_reject 's|<quarkus.platform.version>|<eclipse-formatter.version>1</eclipse-formatter.version>&|' "redefines the property eclipse-formatter.version"
+  check "parent: the checksums check rejects a profile that sets a property a parent sets at top level, naming the profile and the property" \
+    checksums_cover_reject 's|<skipITs>false</skipITs>|&<eclipse-formatter.version>1</eclipse-formatter.version>|' "profile native sets eclipse-formatter.version"
+  # shellcheck disable=SC2016 # ${ext.v} is a Maven property, not a shell expansion
+  check "parent: the checksums check rejects a profile that sets a property a collected coordinate references" \
+    checksums_cover_reject 's|<skipITs>false</skipITs>|&<ext.v>1</ext.v>|;s|<build>|&<extensions><extension><groupId>org.example</groupId><artifactId>ext</artifactId><version>${ext.v}</version></extension></extensions>|' "profile native sets ext.v"
+  check "parent: the checksums check rejects a <build><extensions> extension without a line, naming its jar" \
+    checksums_cover_reject 's|<build>|&<extensions><extension><groupId>org.example</groupId><artifactId>ext</artifactId><version>9</version></extension></extensions>|' "org/example/ext/9/ext-9.jar"
+  check "parent: no parent POM declares <repositories> or <pluginRepositories>, which would apply to every consumer" \
+    no_repositories "${poms[@]}"
+  check "parent: the repositories check rejects a parent POM that declares <pluginRepositories>" \
+    no_repositories_reject 's|<build>|<pluginRepositories></pluginRepositories>&|' pluginRepositories
+  check "parent: the repositories check rejects a parent POM that declares <repositories>" \
+    no_repositories_reject 's|<build>|<repositories></repositories>&|' repositories
+  check "parent: the repositories check rejects a parent POM that declares <repositories> in a profile" \
+    no_repositories_reject 's|<profile>|&<repositories></repositories>|' repositories
+  check "parent: the repositories check rejects a parent POM that declares <pluginRepositories> in a profile" \
+    no_repositories_reject 's|<profile>|&<pluginRepositories></pluginRepositories>|' pluginRepositories
+  check "parent: every parent POM's root is in the POM namespace the checks match" \
+    parent_namespaces "${poms[@]}"
+  check "parent: the namespace check rejects a parent POM without the POM namespace, naming it" \
+    quarkus_reject 's| xmlns="http://maven.apache.org/POM/4.0.0"||' "/dev/stdin: the root element is not in the POM namespace" parent_namespaces
+  check "parent: no derived parent POM declares a plugin whose configuration the checks read from java/parent/pom.xml only" \
+    derived_plugins "${poms[@]}"
+  check "parent: the derived-plugin check rejects a derived parent that declares spotless-maven-plugin, naming it" \
+    quarkus_reject 's|<build>|&<plugins><plugin><artifactId>spotless-maven-plugin</artifactId></plugin></plugins>|' "/dev/stdin declares spotless-maven-plugin" derived_plugins
+  check "parent: the derived-plugin check rejects spotbugs-maven-plugin in <pluginManagement>" \
+    quarkus_reject 's|<build>|&<pluginManagement><plugins><plugin><groupId>com.github.spotbugs</groupId><artifactId>spotbugs-maven-plugin</artifactId></plugin></plugins></pluginManagement>|' "/dev/stdin declares spotbugs-maven-plugin" derived_plugins
+  check "parent: the derived-plugin check rejects license-maven-plugin in a profile" \
+    quarkus_reject 's|<profile>|&<build><plugins><plugin><groupId>org.codehaus.mojo</groupId><artifactId>license-maven-plugin</artifactId></plugin></plugins></build>|' "/dev/stdin declares license-maven-plugin" derived_plugins
 }
 
-# checksums_cover POM FILE FRONTEND DIST: FILE, a trusted checksums file (scripts/lib/mvn_checked.sh),
-# lists the jar of every plugin POM declares with a version (a SpotBugs detector under the plugin's
-# configuration/plugins included), of the dependencies of those plugins, of the
-# annotationProcessorPaths and of the plugins FRONTEND (frontend_plugins of
+# parent_poms: devkit's parent POMs, one path per line, in the order of PARENTS in
+# scripts/java/parent_check.py (it fails on an entry that is no file, or on fewer than 2 entries), the
+# one list of them (the checks that take every parent need no edit when one joins): the base parent
+# first, each derived one after the one it inherits, which is also the order its ${...} properties
+# resolve in. Read as frontend_plugins (scripts/lib/tree.sh) reads its script's constants.
+parent_poms() {
+  local entry n=0
+  while IFS= read -r entry; do
+    [[ -f $root/$entry ]] || { echo "parent_poms: PARENTS in scripts/java/parent_check.py names $entry, which is no file" >&2; return 1; }
+    printf '%s/%s\n' "$root" "$entry"
+    n=$((n + 1))
+  done < <(sed -nE 's/^PARENTS = \((.*)\)$/\1/p' "$root/scripts/java/parent_check.py" | grep -oE '"[^"]+"' | tr -d '"')
+  ((n >= 2)) || { echo "parent_poms: PARENTS in scripts/java/parent_check.py parsed to $n paths, not the 2 or more it lists" >&2; return 1; }
+}
+
+# parent_poms_parse: parent_poms succeeds (its callers read it through a process substitution, which hides its status).
+parent_poms_parse() { parent_poms >/dev/null; }
+
+# checksums_cover FILE FRONTEND DIST POM...: FILE, a trusted checksums file (scripts/lib/mvn_checked.sh),
+# lists the jar of every plugin the POMs (parent_poms) declare with a version (a SpotBugs detector under the
+# plugin's configuration/plugins included), of every versioned dependency of any plugin (whether or not
+# the plugin itself is pinned), of the annotationProcessorPaths and of the plugins FRONTEND (frontend_plugins of
 # scripts/lib/tree.sh: groupId:artifactId:version, one per line) names, at the path the local
-# repository gives it, and holds the line DIST (maven_pin of tree.sh: the pinned Maven, whose
-# default lifecycle plugins the file records). Only top-level jars are checked, not their transitive
-# closure. A bump of a plugin, plugin dependency, processor or Maven version without
+# repository gives it, the jar of every plugin that declares <extensions>true</extensions> (Maven loads
+# it into the build before any gate runs), the jar of every <build><extensions><extension> and the .pom of every scope=import, type=pom dependency (a BOM,
+# which Maven reads as a descriptor), and holds the line DIST (maven_pin of tree.sh: the pinned Maven, whose
+# default lifecycle plugins the file records). A ${...} resolves against the POM's own properties and those
+# of the POMs before it (a POM that redefines a property of an earlier one is refused: the effective version
+# would go unrequired; so is a profile that sets a property a collected coordinate references or one a parent
+# sets at top level, skipITs aside, since profile properties are not resolved). Only top-level artifacts are checked, not their transitive
+# closure. A bump of a plugin, plugin dependency, processor, BOM or Maven version without
 # scripts/maven_checksums.sh leaves an entry out and fails; the formatter's artifacts are not in the
-# POM's declarations, and formatter_lockfile.py covers them (the java part's check of the committed file).
+# POMs' declarations, and formatter_lockfile.py covers them (the java part's check of the committed file).
 checksums_cover() {
   # shellcheck disable=SC2016 # the program's ${...} is a Maven property, not a shell expansion
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
-root = ET.parse(sys.argv[1]).getroot()
-props = {p.tag.split("}")[1]: (p.text or "").strip() for p in root.find("m:properties", ns)}
-def coordinate(e, group):
+props = {}
+used = set()
+profiled = []
+def coordinate(e, group, ext="jar"):
     version = e.findtext("m:version", "", ns).strip()
+    used.update(re.findall(r"\$\{([^}]+)\}", version))
     version = re.sub(r"\$\{([^}]+)\}", lambda m: props.get(m[1], m[0]), version)
     group = e.findtext("m:groupId", group, ns).strip().replace(".", "/")
     artifact = e.findtext("m:artifactId", "", ns).strip()
-    return f"{group}/{artifact}/{version}/{artifact}-{version}.jar"
+    return f"{group}/{artifact}/{version}/{artifact}-{version}.{ext}"
 pinned = set()
-for plugin in root.iterfind(".//m:plugin", ns):
-    if plugin.findtext("m:version", "", ns).strip():
-        pinned.add(coordinate(plugin, "org.apache.maven.plugins"))
+for path in sys.argv[4:]:
+    root = ET.parse(path).getroot()
+    own = {p.tag.split("}")[1]: (p.text or "").strip() for p in root.iterfind("m:properties/*", ns)}
+    sys.exit(path + " redefines the property " + ", ".join(sorted(props.keys() & own.keys())) + " of an earlier parent POM: this check resolves ${...} against the earlier value, so rename it or teach this check") if props.keys() & own.keys() else None
+    props.update(own)
+    profiled += [(path, profile.findtext("m:id", "", ns).strip(), p.tag.split("}")[1])
+                 for profile in root.iterfind("m:profiles/m:profile", ns) for p in profile.iterfind("m:properties/*", ns)]
+    for plugin in root.iterfind(".//m:plugin", ns):
+        if plugin.findtext("m:version", "", ns).strip() or plugin.findtext("m:extensions", "", ns).strip() == "true":
+            pinned.add(coordinate(plugin, "org.apache.maven.plugins"))
         pinned.update(coordinate(d, "") for d in plugin.iterfind("m:dependencies/m:dependency", ns) if d.findtext("m:version", "", ns).strip())
-pinned.update(coordinate(p, "") for p in root.iterfind(".//m:annotationProcessorPaths/m:path", ns))
-frontend = sys.argv[3].split()
+    pinned.update(coordinate(p, "") for p in root.iterfind(".//m:annotationProcessorPaths/m:path", ns))
+    pinned.update(coordinate(e, "") for e in root.iterfind(".//m:build/m:extensions/m:extension", ns))
+    pinned.update(coordinate(d, "", "pom") for d in root.iterfind(".//m:dependency", ns)
+                  if d.findtext("m:scope", "", ns).strip() == "import" and d.findtext("m:type", "", ns).strip() == "pom")
+# A profile may not set a property a parent sets at top level either, skipITs aside (the switch of the native
+# profile, which a module overrides with its own): the gates read top-level values only.
+bad = [f"{path} profile {pid} sets {name}: this check resolves ${{...}} against top-level properties only, so the effective version or gate setting would go unrequired; teach this check"
+       for path, pid, name in profiled if name in used or (name in props and name != "skipITs")]
+sys.exit("; ".join(bad)) if bad else None
+frontend = sys.argv[2].split()
 for coordinates in frontend:
     group, artifact, version = coordinates.split(":")
     pinned.add("/".join((group.replace(".", "/"), artifact, version, f"{artifact}-{version}.jar")))
-lines = open(sys.argv[2]).read().splitlines()
+lines = open(sys.argv[1]).read().splitlines()
 listed = {line.split("  ", 1)[1] for line in lines if "  " in line}
-missing = sorted(pinned - listed) + ([] if sys.argv[4] in lines else [sys.argv[4].split("  ", 1)[1]])
-# The parent pins well over 12 jars (plugins, their dependencies, processors) and FRONTEND two plugins:
+missing = sorted(pinned - listed) + ([] if sys.argv[3] in lines else [sys.argv[3].split("  ", 1)[1]])
+# The parents pin well over 12 jars (plugins, their dependencies, processors) and FRONTEND two plugins:
 # fewer means this parse stopped matching the files, which no re-record fixes.
-sys.exit("maven_pin printed no distribution line (scripts/lib/pinned_maven.sh pins no version or sha256)") if "  " not in sys.argv[4].strip() else None
-sys.exit("the parent POM or check_frontend_deps.py was not parsed as expected (" + str(len(pinned)) + " jars, " + str(len(frontend)) + " frontend plugins): update this check, not the checksums file") if len(pinned) < 12 or len(frontend) != 2 else None
-sys.exit("java/checksums/checksums.sha256 lacks " + ", ".join(missing) + ": run make maven-checksums and commit the result") if missing else None' "$1" "$2" "$3" "$4"
+sys.exit("maven_pin printed no distribution line (scripts/lib/pinned_maven.sh pins no version or sha256)") if "  " not in sys.argv[3].strip() else None
+sys.exit("the parent POMs or check_frontend_deps.py were not parsed as expected (" + str(len(pinned)) + " artifacts, " + str(len(frontend)) + " frontend plugins): update this check, not the checksums file") if len(pinned) < 12 or len(frontend) != 2 else None
+sys.exit("java/checksums/checksums.sha256 lacks " + ", ".join(missing) + ": run make maven-checksums and commit the result") if missing else None' "$@"
 }
 
 # launcher_uses FILE...: no file of scripts/ and make/ but FILE... (relative to the root) names
@@ -445,10 +549,71 @@ launcher_uses() {
 }
 
 checksums_reject() { # checksums_reject SED TEXT...: the check fails on the checksums file run through SED (which must change it), saying each TEXT
-  local file=$root/java/checksums/checksums.sha256 edited err text
+  local file=$root/java/checksums/checksums.sha256 edited err text poms
+  mapfile -t poms < <(parent_poms)
   edited=$(sed "$1" "$file") && [[ $edited != "$(<"$file")" ]] &&
-    ! err=$(checksums_cover "$root/java/parent/pom.xml" /dev/stdin "$(frontend_plugins "$root")" "$(maven_pin "$root")" <<<"$edited" 2>&1) || return
+    ! err=$(checksums_cover /dev/stdin "$(frontend_plugins "$root")" "$(maven_pin "$root")" "${poms[@]}" <<<"$edited" 2>&1) || return
   for text in "${@:2}"; do [[ $err == *"$text"* ]] || return; done
+}
+
+# quarkus_copy SED COMMAND...: runs COMMAND with the parent POMs appended (parent_poms), java/quarkus/pom.xml
+# replaced by /dev/stdin, which holds it run through SED (which must change it); prints COMMAND's output.
+quarkus_copy() {
+  local file=$root/java/quarkus/pom.xml edited poms
+  edited=$(sed "$1" "$file") && [[ $edited != "$(<"$file")" ]] || return
+  mapfile -t poms < <(poms_with java/quarkus/pom.xml /dev/stdin)
+  "${@:2}" "${poms[@]}" <<<"$edited" 2>&1
+}
+
+quarkus_reject() { # quarkus_reject SED TEXT COMMAND...: quarkus_copy SED COMMAND... fails, saying TEXT
+  local err
+  ! err=$(quarkus_copy "$1" "${@:3}") && [[ $err == *"$2"* ]]
+}
+
+checksums_cover_reject() { # checksums_cover_reject SED TEXT: checksums_cover fails on a copy of java/quarkus/pom.xml run through SED, saying TEXT
+  quarkus_reject "$1" "$2" checksums_cover "$root/java/checksums/checksums.sha256" "$(frontend_plugins "$root")" "$(maven_pin "$root")"
+}
+
+# no_repositories POM...: none of POM... (parent_poms) declares <repositories> or <pluginRepositories>, in
+# the project or in a profile (a plugin's configuration of the same name is not one).
+no_repositories() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+sys.exit("no_repositories: fewer than 2 parent POMs given") if len(sys.argv) < 3 else None
+found = []
+for path in sys.argv[1:]:
+    root = ET.parse(path).getroot()
+    found += [path + ": <" + tag + ">" for tag in ("repositories", "pluginRepositories")
+              if root.find("m:" + tag, ns) is not None or root.find("m:profiles/m:profile/m:" + tag, ns) is not None]
+sys.exit("\n".join(found)) if found else None' "$@"
+}
+
+no_repositories_reject() { # no_repositories_reject SED TAG: no_repositories fails on a copy of java/quarkus/pom.xml run through SED (which must change it), reporting <TAG> in it
+  quarkus_reject "$1" "/dev/stdin: <$2>" no_repositories
+}
+
+# derived_plugins POM...: no POM after the first (parent_poms: the derived parents) declares, anywhere (its
+# plugins, its pluginManagement, a profile), spotless-maven-plugin, spotbugs-maven-plugin or
+# license-maven-plugin. formatter_lockfile.py, spotbugs_log4j_excluded, spotbugs_exclusions_match and
+# license_lists_whole read java/parent/pom.xml only, so a derived parent's own configuration of them would
+# pass unread.
+derived_plugins() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+sys.exit("derived_plugins: fewer than 2 parent POMs given") if len(sys.argv) < 3 else None
+plugins = ("spotless-maven-plugin", "spotbugs-maven-plugin", "license-maven-plugin")
+bad = [f"{path} declares {a}, whose configuration the checks read from java/parent/pom.xml only: teach them the parent chain first"
+       for path in sys.argv[2:] for p in ET.parse(path).getroot().iter("{http://maven.apache.org/POM/4.0.0}plugin")
+       if (a := p.findtext("{http://maven.apache.org/POM/4.0.0}artifactId", "").strip()) in plugins]
+sys.exit("\n".join(bad)) if bad else None' "$@"
+}
+
+# parent_namespaces POM...: the root of each POM is {http://maven.apache.org/POM/4.0.0}project, the
+# namespace the POM checks match: a POM without it would contribute nothing to them and pass.
+parent_namespaces() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+sys.exit("parent_namespaces: fewer than 2 parent POMs given") if len(sys.argv) < 3 else None
+bad = [path for path in sys.argv[1:] if ET.parse(path).getroot().tag != "{http://maven.apache.org/POM/4.0.0}project"]
+sys.exit("\n".join(path + ": the root element is not in the POM namespace, so the checks matching it would read nothing" for path in bad)) if bad else None' "$@"
 }
 
 # license_lists_whole POM: each includedLicense is one name, compared to a license name exactly as
@@ -530,10 +695,10 @@ sink_file_reject() {
   return $status
 }
 
-# contract_lists_match POM CONTRACT: docs/contract.md lists, by hand, the parent's version properties
+# contract_lists_match CONTRACT POM...: docs/contract.md lists, by hand, the parents' (parent_poms) version properties
 # (the bullet "It pins every gate tool's version") and its execution ids (after "The ids are"): a
 # consumer's override of either silently stops working when the name drifts. Both lists must equal
-# the POM's: every project property ending in .version, and every execution id (an execution
+# the POMs' union: every project property ending in .version, and every execution id (an execution
 # without one has Maven's implicit id, default). Two executions must not share an id even across
 # plugins, which Maven allows: the contract's list is flat, so a shared id would hide one plugin's
 # rename behind another's. Each id must sit in the plugin the contract names after it: the name,
@@ -546,13 +711,13 @@ contract_lists_match() {
   python3 -c 'import re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 not_override = {"flatten"}
-root = ET.parse(sys.argv[1]).getroot()
-props = {e.tag.split("}")[1] for e in root.iterfind("m:properties/*", ns) if e.tag.endswith(".version")}
+roots = [ET.parse(path).getroot() for path in sys.argv[2:]]
+props = {e.tag.split("}")[1] for root in roots for e in root.iterfind("m:properties/*", ns) if e.tag.endswith(".version")}
 execs = [(p.findtext("m:artifactId", "", ns), e.findtext("m:id", "default", ns))
-         for p in root.iterfind(".//m:plugin", ns) for e in p.iterfind("m:executions/m:execution", ns)]
+         for root in roots for p in root.iterfind(".//m:plugin", ns) for e in p.iterfind("m:executions/m:execution", ns)]
 all_ids = [i for _, i in execs]
 ids = set(all_ids) - not_override
-lines = open(sys.argv[2]).read().split("\n")
+lines = open(sys.argv[1]).read().split("\n")
 def bullet(start):
     first = [i for i, l in enumerate(lines) if l.startswith(start)]
     if not first:
@@ -572,25 +737,37 @@ if min(len(props), len(ids), len(c_props), len(c_ids)) < 10:
 sep = ", "
 msgs = [f"{who} {what}: {sep.join(sorted(d))}" for who, what, d in (
     ("docs/contract.md", "lacks the parent\x27s version propert(ies)", props - c_props),
-    ("java/parent/pom.xml", "has no version propert(ies) the contract lists", c_props - props),
+    ("the parent POM set", "has no version propert(ies) the contract lists", c_props - props),
     ("docs/contract.md", "lacks the parent\x27s execution id(s)", ids - c_ids),
-    ("java/parent/pom.xml", "has no execution with the id(s) the contract lists", c_ids - set(all_ids)),
+    ("the parent POM set", "has no execution with the id(s) the contract lists", c_ids - set(all_ids)),
     ("docs/contract.md", "lists execution id(s) that are no override point", c_ids & not_override),
     ("docs/contract.md", "names another plugin than the parent\x27s for the execution id(s)",
      {i for a, i in execs if i in c_ids and owner.get(i, "(none)") not in a}),
-    ("java/parent/pom.xml", "has more than one execution with the id(s)", {i for i in all_ids if all_ids.count(i) > 1}),
-    ("java/parent/pom.xml", "has lost the non-override execution id(s)", not_override - set(all_ids))) if d]
-sys.exit("\n".join(msgs)) if msgs else None' "$1" "$2"
+    ("the parent POM set", "has more than one execution with the id(s)", {i for i in all_ids if all_ids.count(i) > 1}),
+    ("the parent POM set", "has lost the non-override execution id(s)", not_override - set(all_ids))) if d]
+sys.exit("\n".join(msgs)) if msgs else None' "$@"
 }
 
-contract_lists_reject() { # contract_lists_reject pom|contract SED TEXT: the check fails on that file run through SED (which must change it), saying TEXT
-  local pom=$root/java/parent/pom.xml contract=$root/docs/contract.md edited err
-  case $1 in
-    pom) edited=$(sed "$2" "$pom") && [[ $edited != "$(<"$pom")" ]] &&
-      ! err=$(contract_lists_match /dev/stdin "$contract" <<<"$edited" 2>&1) ;;
-    *) edited=$(sed "$2" "$contract") && [[ $edited != "$(<"$contract")" ]] &&
-      ! err=$(contract_lists_match "$pom" /dev/stdin <<<"$edited" 2>&1) ;;
-  esac && [[ $err == *"$3"* ]]
+# poms_with TARGET FILE: parent_poms, one per line, with TARGET's path (relative to the root) replaced by FILE.
+poms_with() {
+  local pom
+  while IFS= read -r pom; do
+    [[ $pom == "$root/$1" ]] && printf '%s\n' "$2" || printf '%s\n' "$pom"
+  done < <(parent_poms)
+}
+
+contract_lists_reject() { # contract_lists_reject contract|pom|POM SED TEXT: the check fails on that file (pom: java/parent/pom.xml; POM: another parent's path, relative to the root) run through SED (which must change it), saying TEXT
+  local contract=$root/docs/contract.md target=$1 file edited err poms
+  [[ $target == pom ]] && target=java/parent/pom.xml
+  [[ $target == contract ]] && file=$contract || file=$root/$target
+  edited=$(sed "$2" "$file") && [[ $edited != "$(<"$file")" ]] || return
+  if [[ $target == contract ]]; then
+    mapfile -t poms < <(parent_poms)
+    ! err=$(contract_lists_match /dev/stdin "${poms[@]}" <<<"$edited" 2>&1)
+  else
+    mapfile -t poms < <(poms_with "$target" /dev/stdin)
+    ! err=$(contract_lists_match "$contract" "${poms[@]}" <<<"$edited" 2>&1)
+  fi && [[ $err == *"$3"* ]]
 }
 
 # swap_signers FILE KEY.pub: replace the key type and blob of the signers= line
@@ -1034,6 +1211,16 @@ javac_lint() {
   make_says pass "$dir" lint "Lint checks completed."
 }
 
+# quarkus_serial: a Serializable class without a serialVersionUID in java-quarkus' api fails make lint on
+# javac's serial lint under -Werror, naming the file and position: the Quarkus parent leaves the base
+# parent's lints on.
+quarkus_serial() {
+  local dir=$work/quarkus-serial
+  setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    sed_into "$dir/api/src/main/java/devkit/fixture/api/Parity.java" 's/^package devkit.fixture.api;/&\n\nimport java.io.Serializable;/; s/^public final class Parity {/public final class Parity implements Serializable {/' &&
+    make_says fail "$dir" lint "-Werror" "Parity.java:["
+}
+
 # pmd_without DIR RULE [REF]: the project or module DIR drops RULE of devkit's PMD ruleset, as
 # docs/contract.md teaches: its pom redeclares PMD's <rulesets> with its own pmd-ruleset.xml, which
 # references the filtered copy of the kit's at REF (default target/devkit/pmd-ruleset.xml, relative
@@ -1288,6 +1475,8 @@ negatives() {
   check "java-monolith: a Serializable class without a serialVersionUID fails make lint, until the module appends -Xlint:-serial and excludes SpotBugs' SE_NO_SERIALVERSIONID" \
     javac_lint serial 's/^import edu/import java.io.Serializable;\n\nimport edu/; s/^public final class Greeter {/public final class Greeter implements Serializable {/' \
     SE_NO_SERIALVERSIONID
+  check "java-quarkus: a Serializable class without a serialVersionUID in api fails make lint, the Quarkus parent keeping the lints on" \
+    quarkus_serial
   check "java-monolith: a constructor calling an overridable method fails make lint, until the module appends -Xlint:-this-escape, excludes SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR and drops PMD's ConstructorCallsOverridableMethod through its own pmd-ruleset.xml" \
     javac_lint this-escape 's/^public final class Greeter {/public class Greeter {\n\n    \/** Greets once on construction. *\/\n    public Greeter() {\n        greet("x");\n    }/' \
     MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR "" ConstructorCallsOverridableMethod
@@ -1735,9 +1924,9 @@ java_part() {
   negatives
 }
 
-flattened() { # flattened DIR: DIR holds installed poms, none naming devkit's parent or an unresolved ${...}
+flattened() { # flattened DIR: DIR holds installed poms, none naming a devkit parent (groupId de.vptr.devkit) or an unresolved ${...}
   [[ -n $(find "$1" -name '*.pom') ]] || return
-  grep -rE --include='*.pom' 'devkit-parent|\$\{' "$1"
+  grep -rE --include='*.pom' 'de\.vptr\.devkit|\$\{' "$1"
   (($? == 1)) # no match; 2, an error, fails too
 }
 
@@ -1750,7 +1939,9 @@ out_of_reactor() {
   local -x MAVEN_ARGS="-Dmaven.repo.local=$m2 -Dmaven.repo.local.tail=$HOME/.m2/repository"
   setup "$root/tests/fixtures/java-multimodule" "$proj"
   check "java-multimodule: make install" make_says pass "$proj" install "Install completed."
-  check "java-multimodule: installed poms name neither devkit's parent nor an unresolved \${...}" \
+  setup "$root/tests/fixtures/java-quarkus" "$work/quarkus-install"
+  check "java-quarkus: make install" make_says pass "$work/quarkus-install" install "Install completed."
+  check "java-multimodule and java-quarkus: installed poms name neither a devkit parent nor an unresolved \${...}" \
     flattened "$m2/devkit/fixture"
   MAVEN_ARGS="$MAVEN_ARGS -o" ONLY=app check "java-multimodule: make test ONLY=app resolves core offline" \
     make_says pass "$proj" test "Starting tests for app..." "Tests completed."

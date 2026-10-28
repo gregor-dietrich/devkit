@@ -5,8 +5,8 @@
      gate tool's version, and the resources plugin that makes PMD's filtered ruleset. A consumer's
      root pom declares it as its <parent> with
      <relativePath>.devkit/java/parent/pom.xml</relativePath>, so Maven reads it through the link
-     devkitw creates. Its version is the devkit release tag without the "v"; it is published
-     to no repository. The interface is docs/contract.md ("Parent POM").
+     devkitw creates, or declares java/quarkus/pom.xml, which derives from it. Its version is the
+     devkit release tag without the "v"; it is published to no repository. The interface is docs/contract.md ("Parent POM").
 
      The version stays literal, never ${revision}: devkit's build scripts pass -Drevision for the
      consumer's own version. No description, url, licenses, scm, organization or developers:
@@ -84,10 +84,10 @@
   <dependencyManagement>
     <dependencies>
       <!-- Align the org.jacoco artifacts of io.quarkus:quarkus-jacoco with jacoco-maven-plugin.
-      quarkus-jacoco offline-instruments the app classes with its own org.jacoco, which is what
-      records @QuarkusTest coverage; if that version differs from the plugin's, the plugin cannot
-      map the exec data and coverage collapses. Managing them here lets JaCoCo update
-      independently of the version the Quarkus BOM bundles. -->
+      quarkus-jacoco offline-instruments the app classes with its own org.jacoco, which is meant
+      to record @QuarkusTest coverage (unmeasured, #214); if that version differs from the
+      plugin's, the plugin cannot map the exec data and coverage collapses. Managing them here
+      lets JaCoCo update independently of the version the Quarkus BOM bundles. -->
       <dependency>
         <groupId>org.jacoco</groupId>
         <artifactId>org.jacoco.core</artifactId>

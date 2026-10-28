@@ -4,7 +4,8 @@ devkit is the build and quality-gate tooling that Maven and uv (Python)
 projects would otherwise copy between each other: shared Make targets
 (`make/`), the scripts behind them (`scripts/`), the shared Maven gate
 configurations (`java/config/`) and a parent POM that applies them
-(`java/parent/`).
+(`java/parent/`), with a parent derived from it for Quarkus projects
+(`java/quarkus/`).
 A project consumes one pinned release of it through a small committed
 wrapper, `devkitw`, on the pattern of the Maven wrapper: the wrapper fetches
 the pinned commit once per machine into a cache and links it into the
@@ -43,6 +44,13 @@ touches it. Once consumers adopt it, some things are hard to change: its
 coordinates, its path, the tag-to-version mapping, and the property names
 and execution ids consumers override, since a renamed one silently
 ignores the override.
+Its derivative, `java/quarkus/pom.xml`, also carries the framework version,
+Quarkus' platform: in one place, a version moves with a devkit release under
+the same 24-hour rule as the tools, and the Quarkus build extension and the
+BOM are checked against the plugin checksums at the pinned version. The cost
+is accepted: a framework patch reaches a consumer through a devkit release
+and a bump, ahead of one only through the unchecked command-line hatch
+([Quarkus parent](docs/contract.md#quarkus-parent)).
 
 **Rejected options:**
 
@@ -87,7 +95,8 @@ written against it. In short, a project:
    `.devkit/make/java-maven.mk` or `.devkit/make/python-uv.mk`, then its
    own targets; a rule line ending in `## description` is listed by
    `make help`;
-5. for Maven, inherits devkit's parent POM in its root pom, as
+5. for Maven, inherits devkit's parent POM (or the Quarkus parent) in its
+   root pom, as
    [the contract](docs/contract.md#parent-pom) shows, with a `<groupId>` of
    its own, and keeps only its own values there: overrides of the parent's
    properties, exclusions and its own plugins. The parent runs every gate,
@@ -128,8 +137,9 @@ targeted.
 On a fresh clone, run any `make` target once: a bare `mvn`, an optional
 `./mvnw` or an IDE's Maven import fails until the wrapper has created
 `.devkit`.
-"Non-resolvable parent POM … devkit-parent" means `.devkit` is missing or
-points at another pin: run `make check`.
+"Non-resolvable parent POM … devkit-parent" (a Quarkus consumer's message
+names `devkit-quarkus-parent`) means `.devkit` is missing or points at
+another pin: run `make check`.
 
 ## Gating devkit itself
 
@@ -170,15 +180,18 @@ without a package or a reason fails, and so does one that matches no
 advisory, so a bump that fixes it forces its removal. Otherwise the fix is a
 bump of the closure.
 
-When a plugin's version, `eclipse-formatter.version`, or parent configuration
-that changes what a plugin resolves, changes in `java/parent/pom.xml`, run
+When a plugin's version, `eclipse-formatter.version`,
+`quarkus.platform.version`, or parent configuration that changes what a
+plugin resolves, changes in `java/parent/pom.xml` or `java/quarkus/pom.xml`,
+run
 `make maven-checksums` and commit `java/checksums/checksums.sha256` with the
 change; so does a bump of the Maven `scripts/lib/pinned_maven.sh` pins, and a
 change to a `java-*` fixture's dependencies. It records under that Maven, so it
 needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
 Maven Central, but no Maven on `PATH`.
-`tests/run.sh shell` fails on a pinned jar, or the pinned Maven
-distribution's line, that the file lacks, but not on a changed transitive
+`tests/run.sh shell` fails on a pinned jar, the imported BOM's `.pom` or a
+build extension jar, or the pinned Maven distribution's line, that the file
+lacks, but not on a changed transitive
 closure, which only the re-record catches. The hashes are
 trust on first use: whatever Central served over https when the target ran.
 They detect a later substitution by a mirror, a proxy or the local
@@ -199,7 +212,8 @@ without a re-record cannot land.
 A dependency pin bump in devkit takes only a release published at least 24
 hours before the bump's commit (the cutoff), so a compromised release is
 likelier to be caught and withdrawn before it ships: a plugin or tool version in
-`java/parent/pom.xml`, the Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
+`java/parent/pom.xml`, `quarkus.platform.version` in `java/quarkus/pom.xml`, the
+Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
 in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
 commit in `.gitea/workflows/`, and a fixture's `junit.version`,
 `assertj.version` or `uv.lock` in `tests/fixtures/`. A closure's lockfile is
@@ -219,6 +233,11 @@ fixtures also lock certifi at or above `CERTIFI_FLOOR`, which that test checks.
 `version_check.py` reports a newer release whatever its age; a younger one
 waits.
 
+A bump of `quarkus.platform.version` also regenerates
+`java/config/findsecbugs-crlf-jboss-logging.txt`, as the comment in
+`java/parent/pom.xml` beside the sinks property describes, whenever the log
+types gained methods.
+
 A bump of the `jscpd/` closure can change the tokens jscpd counts for a
 clone, and so push a consumer's accepted pair past its `max-tokens` without
 a code change: the release that ships it says so in its upgrade steps, so
@@ -232,19 +251,22 @@ that key did not sign, one named other than the pinned version, and one whose
 commit is not on `main`. The last check relies on every commit on `main` having
 been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
 protected, and pull requests squash-merged. The release commit sets the
-version in `java/parent/pom.xml`, the `<parent>` versions of the fixtures in
+version in `java/parent/pom.xml`, the `<parent><version>` of
+`java/quarkus/pom.xml`, the `<parent>` versions of the fixtures in
 `tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
-`version`, the `<parent>` snippet's version and the tag-to-version example
+`version`, the version of both `<parent>` snippets and the tag-to-version
+example
 below it; the tag is `v` + that version, and `tests/run.sh` tags the tree
 under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
 Before tagging, review the parent's pins against the repositories
 `DEVKIT_MAVEN_MIRROR` lists, devkit's default list when it is unset, empty or
-blank (advisory, needs the network):
+blank (advisory, needs the network), and the Quarkus parent's the same way:
 
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
+PROJECT_ROOT=java/quarkus python3 scripts/java/version_check.py
 ```
 
 Run `make audit` as well; unlike that check, it must pass: a release ships
@@ -325,6 +347,36 @@ If the release changed `devkitw`, the consumer also copies the new wrapper;
 `make lint` fails until it does.
 
 ### Upgrading from v0.8.x
+
+A Quarkus project can now inherit `devkit-quarkus-parent` instead of
+`devkit-parent` ([Quarkus parent](docs/contract.md#quarkus-parent)): set the
+root pom's `<parent>` artifactId and `<relativePath>`
+(`.devkit/java/quarkus/pom.xml`), and keep the `<version>` in step with
+`devkit.toml` as before. A module whose `<parent>` is the root then inherits
+the Quarkus parent too; one that must not names `devkit-parent` itself
+(contract, Quarkus parent). Before pinning a release older than this one,
+move the project's poms back to `devkit-parent`: an older release's parent
+check ignores a module on the Quarkus parent, and Maven would look it up
+remotely. Adopting it, delete from the project:
+
+- `quarkus.platform.version`, and the other `quarkus.platform.*` properties
+  once nothing references them, and the import of `quarkus-bom`; a module on
+  `devkit-parent` that needs the BOM moves to the Quarkus parent instead
+  (contract, Quarkus parent);
+- the quarkus-maven-plugin block, its `<executions>` included, and the
+  `native` profile. Each application module sets
+  `<packaging>quarkus</packaging>`, which binds the goals: a `jar` module that
+  deleted its executions would silently lose the Quarkus build, so it keeps
+  them. Aggregator roots stay `pom`;
+- a pom-level `<skipITs>`: a module's own `<skipITs>true</skipITs>` beats the
+  parent profile's `false`, so `-Dnative` would silently skip the integration
+  tests.
+
+Move the quarkus-maven-plugin's app-specific `<jvmArgs>` into the property
+`jvm.args`, drop a module's own `quarkus-junit` test dependency (the parent
+declares it), and remove the Quarkus entries from the project's dependency
+update bot, which would propose a version the parent owns. Run `make clean`
+once after the bump.
 
 `DEVKIT_MAVEN_MIRROR` is now an ordered list of base URLs, tried in turn
 ([Parent POM](docs/contract.md#parent-pom)). Unset, empty or blank, it no longer

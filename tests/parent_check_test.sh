@@ -2,7 +2,8 @@
 # Tests for scripts/java/parent_check.py: per case, a fresh temp project
 # (pom.xml, devkit.toml pinned to devkit's parent version, optionally a
 # module) checked against this checkout's java/parent/pom.xml, or against a
-# copy declaring another version. No Maven, no network. Prints PASS/FAIL per
+# copy declaring another version, or against a fake devkit tree with derived
+# parent POMs. No Maven, no network. Prints PASS/FAIL per
 # case.
 set -euo pipefail
 
@@ -16,6 +17,7 @@ work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 proj=$work/proj
+dk=$work/dk
 version=$(parent_version "$root")
 fails=0
 
@@ -35,6 +37,23 @@ project() {
   mkdir -p "$proj"
   printf '<project%s>%s</project>\n' "${2- xmlns=\"http://maven.apache.org/POM/4.0.0\"}" "$1" >"$proj/pom.xml"
   printf '[devkit]\nversion = "v%s"\n' "$version" >"$proj/devkit.toml"
+}
+
+# derived NAME ARTIFACT UP-COORD VERSION RELATIVE-PATH PROPERTY: the fake devkit tree's java/NAME/pom.xml,
+# artifact ARTIFACT, inheriting UP-COORD; its <properties> hold PROPERTY (an XML element) when given
+derived() {
+  mkdir -p "$dk/java/$1"
+  printf '<project xmlns="http://maven.apache.org/POM/4.0.0">%s<groupId>de.vptr.devkit</groupId>' \
+    "$(parent "$4" "$5" "$3")" >"$dk/java/$1/pom.xml"
+  printf '<artifactId>%s</artifactId><properties>%s</properties></project>\n' "$2" "${6-}" >>"$dk/java/$1/pom.xml"
+}
+# fake_release: the fake devkit tree $dk with this checkout's parent and a Quarkus parent, consistent
+fake_release() {
+  rm -rf "$dk"
+  mkdir -p "$dk/java/parent"
+  cp "$root/java/parent/pom.xml" "$dk/java/parent/pom.xml"
+  derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent "$version" ../parent/pom.xml \
+    '<quarkus.platform.version>1</quarkus.platform.version>'
 }
 
 # module BODY: add module app-api, whose pom is BODY
@@ -71,7 +90,7 @@ expect() {
   fi
 }
 passed="devkit parent version check passed. ($version == v$version)"
-required="does not inherit de.vptr.devkit:devkit-parent, which devkit requires since v0.2.0"
+required="does not inherit a devkit parent (de.vptr.devkit:devkit-parent or devkit-quarkus-parent), which devkit requires since v0.2.0"
 
 project "$(parent)$own"
 expect "devkit's parent at the pinned version passes" 0 "$passed"
@@ -94,6 +113,7 @@ expect "a \${revision} parent version fails" 14 "set <parent><version>$version</
 mkdir -p "$work/devkit/java/parent"
 sed "s|^  <version>$version</version>$|  <version>0.0.0</version>|" "$root/java/parent/pom.xml" \
   >"$work/devkit/java/parent/pom.xml"
+dk=$work/devkit derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent 0.0.0 ../parent/pom.xml
 project "$(parent)$own"
 expect "a pin whose parent POM declares another version fails" 14 \
   "the pinned tag does not match its parent POM" "$work/devkit"
@@ -172,24 +192,126 @@ expect "SpotBugs <systemPropertyVariables> sinks entry without the parent's valu
   "app-api/pom.xml sets spotbugs-maven-plugin <$key> without the parent's $sinks"
 in_module "$(sysprops '' "<$key></$key>")"
 expect "SpotBugs <systemPropertyVariables> with an empty sinks entry fails" 14 \
-  "sets spotbugs-maven-plugin <$key> without the parent's $sinks"
+  "sets spotbugs-maven-plugin <$key> without the parent's $sinks; it replaces the parent's value and drops find-sec-bugs' \
+JBoss Logging sinks, so keep that entry in the ':'-joined value."
 in_module "$(sysprops ' combine.self="override"' '<foo>bar</foo>')"
 expect "SpotBugs <systemPropertyVariables> override without a sinks entry fails" 14 \
-  'app-api/pom.xml sets spotbugs-maven-plugin <systemPropertyVariables> with combine.self="override" and without <findsecbugs'
+  "app-api/pom.xml sets spotbugs-maven-plugin <systemPropertyVariables> with combine.self=\"override\" and without <$key>, \
+which drops find-sec-bugs' JBoss Logging sinks; drop the override, or keep $sinks in the ':'-joined value of <$key>."
 in_module "$(spotbugs '<jvmArgs>-Xss4m -Xmx1g</jvmArgs>')"
 expect "SpotBugs <jvmArgs> with other flags passes" 0 "$passed"
 in_module "$(spotbugs "<jvmArgs>-Xss4m -D$key=own.txt|CRLF_INJECTION_LOGS</jvmArgs>")"
 expect "SpotBugs <jvmArgs> setting the sinks property fails" 14 \
-  "app-api/pom.xml sets -D$key in spotbugs-maven-plugin <jvmArgs>"
+  "app-api/pom.xml sets -D$key in spotbugs-maven-plugin <jvmArgs>, which the parent's <systemPropertyVariables> entry defeats; \
+move a sink file into the value of <systemPropertyVariables><$key>, joined to the parent's with ':'."
 project "$(parent)$own$(spotbugs '<jvmArgs>-Xmx1g</jvmArgs>' | sed 's|<configuration>|<configuration combine.self="override">|')"
 expect "SpotBugs <configuration> with combine.self=override fails" 14 \
-  'pom.xml sets spotbugs-maven-plugin <configuration> with combine.self="override"'
+  "pom.xml sets spotbugs-maven-plugin <configuration> with combine.self=\"override\"; it drops the parent's whole configuration \
+(find-sec-bugs, its JBoss Logging sinks, the baseline), so drop the override."
 project "$(parent)$own$(compiler_args ' combine.self="override" combine.children="append"')"
 expect "<compilerArgs> with combine.self=override fails" 14 \
-  'pom.xml sets maven-compiler-plugin <compilerArgs> with combine.self="override"'
+  "pom.xml sets maven-compiler-plugin <compilerArgs> with combine.self=\"override\"; it drops the parent's list whatever \
+combine.children says; drop the override and use combine.children=\"append\"."
 project "$(parent)$own$(spotbugs "<plugins combine.self=\"override\" combine.children=\"append\">$plugins</plugins>")"
 expect "SpotBugs <plugins> with combine.self=override fails" 14 \
   'pom.xml sets spotbugs-maven-plugin <plugins> with combine.self="override"'
+fake_release
+q=de.vptr.devkit:devkit-quarkus-parent
+qpath=.devkit/java/quarkus/pom.xml
+unknown="which is none of devkit's parents; Maven would look it up remotely."
+project "$(parent "$version" "$qpath" $q)$own"
+expect "a root inheriting the Quarkus parent passes" 0 "$passed" "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "../$qpath" $q)$own"
+expect "a module inheriting the Quarkus parent by its own path passes" 0 "$passed" "$dk"
+project "$(parent "$version" .devkit/java/parent/pom.xml $q)$own"
+expect "a root inheriting the Quarkus parent by the base parent's path fails" 14 \
+  "pom.xml's <parent><relativePath> must be $qpath, not .devkit/java/parent/pom.xml" "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "$mpath" $q)$own"
+expect "a module inheriting the Quarkus parent by the base parent's path fails" 14 \
+  "app-api/pom.xml's <parent><relativePath> must be ../$qpath, not $mpath" "$dk"
+project "$(parent 0.0.0 "$qpath" $q)$own"
+expect "a root inheriting the Quarkus parent off the pin fails" 14 \
+  "pom.xml inherits $q 0.0.0, but devkit.toml pins v$version" "$dk"
+project "$(parent)$own"
+module "$(parent 0.0.0 "../$qpath" $q)$own"
+expect "a module inheriting the Quarkus parent off the pin fails" 14 \
+  "app-api/pom.xml inherits $q 0.0.0, but devkit.toml pins v$version" "$dk"
+project "$(parent "$version" "$qpath" $q)<artifactId>my-app</artifactId>"
+expect "a root inheriting the Quarkus parent without its own groupId fails" 14 "has no <groupId> of its own" "$dk"
+project "$(parent "$version" "$qpath" de.vptr.devkit:devkit-nope)$own"
+expect "a root inheriting an unknown de.vptr.devkit artifact fails" 14 \
+  "pom.xml's <parent> names de.vptr.devkit:devkit-nope, $unknown" "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "../$qpath" de.vptr.devkit:devkit-nope)$own"
+expect "a module inheriting an unknown de.vptr.devkit artifact fails" 14 \
+  "app-api/pom.xml's <parent> names de.vptr.devkit:devkit-nope, $unknown" "$dk"
+project "$own"
+expect "a root without <parent> fails, naming the shipped parents" 14 \
+  "does not inherit a devkit parent (de.vptr.devkit:devkit-parent or devkit-quarkus-parent)" "$dk"
+rm "$dk/java/quarkus/pom.xml"
+expect "a release without its Quarkus parent fails" 14 \
+  "devkit's java/quarkus/pom.xml is missing: a defective devkit release; pin another one." "$dk"
+rm "$dk/java/parent/pom.xml"
+expect "a release without its base parent fails" 14 "devkit's java/parent/pom.xml is missing: a defective devkit release" "$dk"
+
+defective() { # CASE-LABEL WANT-TEXT: the project inherits the base parent, checked against the tree fake_release left
+  project "$(parent)$own"
+  expect "$1" 14 "devkit v$version's $2: a defective devkit release; pin another one." "$dk"
+}
+fake_release
+derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent 0.0.0 ../parent/pom.xml
+defective "a Quarkus parent off the pin fails" \
+  "java/quarkus/pom.xml does not inherit de.vptr.devkit:devkit-parent $version through ../parent/pom.xml"
+fake_release
+derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent "$version" ../../parent/pom.xml
+defective "a Quarkus parent with another relativePath fails" \
+  "java/quarkus/pom.xml does not inherit de.vptr.devkit:devkit-parent $version through ../parent/pom.xml"
+fake_release
+derived quarkus devkit-quarkus-parent org.example:other "$version" ../parent/pom.xml
+defective "a Quarkus parent that inherits another parent fails" \
+  "java/quarkus/pom.xml does not inherit de.vptr.devkit:devkit-parent $version through ../parent/pom.xml"
+fake_release
+sed 's|</parent>|</parent><version>1</version>|' "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+defective "a Quarkus parent declaring its own <version> fails" "java/quarkus/pom.xml declares a <version> of its own"
+fake_release
+sed 's|</parent><groupId>de.vptr.devkit</groupId>|</parent>|' "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+defective "a Quarkus parent without its own <groupId> fails" "java/quarkus/pom.xml declares no <groupId> of its own"
+fake_release
+sed 's|<parent>.*</parent>||' "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+defective "a Quarkus parent without a <parent> fails" \
+  "java/quarkus/pom.xml does not inherit de.vptr.devkit:devkit-parent $version through ../parent/pom.xml"
+fake_release
+sed "s|</project>|$(compiler_args '')</project>|" "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+project "$(parent)$own"
+expect "a Quarkus parent setting <compilerArgs> without append fails" 14 \
+  'java/quarkus/pom.xml sets maven-compiler-plugin <compilerArgs> without combine.children="append"; Maven merges it with the parent'"'"'s by position and drops the inherited -Werror, Error Prone or NullAway; devkit'"'"'s own java/quarkus/pom.xml: a defective devkit release; pin another one.' "$dk"
+sed "s|<compilerArgs>|<compilerArgs combine.children=\"append\">|" "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+expect "a Quarkus parent setting <compilerArgs> with append passes" 0 "$passed" "$dk"
+fake_release
+sed "s|</project>|$(spotbugs '<jvmArgs>-Xss4m</jvmArgs>' | sed 's|<configuration>|<configuration combine.self="override">|')</project>|" \
+  "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
+mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
+expect "a Quarkus parent overriding SpotBugs' <configuration> fails" 14 \
+  'java/quarkus/pom.xml sets spotbugs-maven-plugin <configuration> with combine.self="override"; it drops the parent'"'"'s whole configuration (find-sec-bugs, its JBoss Logging sinks, the baseline); devkit'"'"'s own java/quarkus/pom.xml: a defective devkit release; pin another one.' "$dk"
+
+fake_release
+owned_qv='<quarkus.platform.version>2</quarkus.platform.version>'
+project "$(parent)$own<properties>$owned_qv</properties>"
+expect "a project on the base parent alone may define quarkus.platform.version" 0 "$passed" "$dk"
+project "$(parent "$version" "$qpath" $q)$own<properties>$owned_qv</properties>"
+expect "a root inheriting the Quarkus parent defining quarkus.platform.version fails" 14 \
+  "partial migration: remove <quarkus.platform.version> from pom.xml; the parent owns it" "$dk"
+project "$(parent)$own<properties>$owned_qv</properties>"
+module "$(parent "$version" "../$qpath" $q)$own"
+expect "a base root defining quarkus.platform.version beside a Quarkus module fails" 14 \
+  "partial migration: remove <quarkus.platform.version> from pom.xml" "$dk"
 proj=$work/co:lon project "$(parent)$own"
 proj=$work/co:lon expect "a project path with ':' fails, as find-sec-bugs would silently not load" 14 \
   "the project path $work/co:lon contains ':'"

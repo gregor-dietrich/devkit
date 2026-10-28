@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Required: the parent POM runs SpotBugs with ${project.basedir}/spotbugs-exclude.xml. -->
+<FindBugsFilter xmlns="http://findbugs.sourceforge.net/filter/3.0.0" />

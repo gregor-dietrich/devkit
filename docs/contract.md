@@ -10,7 +10,7 @@ devkit is written against this page; change it here first.
 | `devkitw` | Verbatim copy of devkit's `devkitw`; never edited in the project |
 | `devkit.toml` | The pin (`[devkit]`) and the project values devkit's scripts read (below) |
 | `Makefile` | Profile variables, the two includes, project-only targets |
-| `pom.xml` | Maven: the root pom inherits devkit's parent POM, with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
+| `pom.xml` | Maven: the root pom inherits devkit's parent POM or its Quarkus parent, with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
 | `.mvn/jvm.config` | Maven: the `jdk.compiler` exports and opens Error Prone needs |
 | `mvnw`, `.mvn/wrapper/maven-wrapper.properties` | Maven, optional: the Maven wrapper, of any distribution type, for an IDE or a bare build; no devkit target runs it (see Parent POM) |
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
@@ -939,7 +939,8 @@ when the file is missing.
 
 `java/parent/pom.xml` is `de.vptr.devkit:devkit-parent`, the shared gate
 configuration as a Maven parent. Since v0.2.0 a consumer's root pom must
-inherit it, and Maven reads it through the link:
+inherit it, or a parent derived from it ([Quarkus parent](#quarkus-parent)),
+and Maven reads it through the link:
 
 ```xml
 <parent>
@@ -1016,23 +1017,33 @@ inherit it, and Maven reads it through the link:
   when
   - the project's path contains `:`, on which SpotBugs splits its plugin list,
     so find-sec-bugs would silently not load;
-  - the root pom's `<parent>` is not devkit's;
+  - the root pom's `<parent>` is none of devkit's parents;
   - the `<relativePath>` of the root pom, or of any module pom
     (`<modules>`, recursively, profiles included) whose `<parent>` is
-    devkit's, is not exactly the path from that pom's directory to
-    `.devkit/java/parent/pom.xml`: `.devkit/java/parent/pom.xml` for the
-    root pom, `../.devkit/java/parent/pom.xml` for `app-api/pom.xml`;
+    one of devkit's parents, is not exactly the path from that pom's directory
+    to that parent's file: `.devkit/java/parent/pom.xml` or
+    `.devkit/java/quarkus/pom.xml` for the root pom,
+    `../.devkit/java/quarkus/pom.xml` for an `api/pom.xml` that inherits
+    `devkit-quarkus-parent`;
+  - the root's or any module pom's `<parent>` has the groupId `de.vptr.devkit`
+    and an artifactId none of devkit's parents has: Maven would look it up
+    remotely;
   - the `<version>` of any of those poms is not `devkit.toml`'s `version`
-    without the `v`, or the pinned checkout's parent POM declares another
-    version (a defective release);
+    without the `v`;
+  - the pinned checkout is a defective release: its parent POM declares
+    another version, one of its parent files is missing, a derived parent
+    does not inherit the one before it at the pinned version through its
+    explicit `<relativePath>`, or declares a `<version>` of its own or no
+    `<groupId>` of its own;
   - any of those poms has no `<groupId>` of its own: it would inherit
     `de.vptr.devkit`, for its artifacts and for NullAway's default
     packages;
   - the root pom or any module pom (`<modules>`, recursively, profiles
-    included) defines one of the parent's `*.version` properties: a
-    partial migration. To try another tool version, pass it on the command
-    line (`mvn -Dcheckstyle.version=… verify`) instead, which is
-    unchecked as a bare build is; through `MAVEN_ARGS` or
+    included) defines one of the parent's `*.version` properties, or one of
+    the derived parents' the project inherits: a partial migration. To try
+    another tool version, pass it on the command line
+    (`mvn -Dcheckstyle.version=… verify`) instead, which is unchecked as a
+    bare build is; through `MAVEN_ARGS` or
     `.mvn/maven.config` the targets run it too, but the version is
     unrecorded and so unchecked ([Plugin checksums](#plugin-checksums));
   - any of those poms sets `maven-compiler-plugin`'s `<compilerArgs>` or
@@ -1043,7 +1054,9 @@ inherit it, and Maven reads it through the link:
     property `findsecbugs.injection.customconfigfile.CrlfLogInjectionDetector`
     to a value that does not keep the parent's entry among its `:`-separated
     parts, overrides `<systemPropertyVariables>` without keeping it, or sets
-    that property in `<jvmArgs>`.
+    that property in `<jvmArgs>`;
+  - the append and sinks rules above fail for a derived parent itself (a
+    defective release, reported as such).
 - maven-enforcer-plugin (execution `environment`, goal `enforce`, at `validate`)
   checks the environment with two rules. `requireJavaVersion` holds the JDK
   Maven runs on to `devkit.jdk.range`, default `[0,)`, any JDK; make passes
@@ -1073,7 +1086,8 @@ inherit it, and Maven reads it through the link:
   `jacoco-plugin.version`, `license-plugin.version`, `nullaway.version`,
   `pmd-plugin.version`, `resources-plugin.version`,
   `spotbugs-plugin.version`, `spotbugs.version`, `spotless-plugin.version`,
-  `surefire-plugin.version`), and manages the
+  `surefire-plugin.version`; and the Quarkus parent's
+  `quarkus.platform.version`), and manages the
   `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
   JaCoCo matches the plugin's. `spotbugs.version` is the analyzer
   `spotbugs-plugin.version` runs, which SpotBugs is told to use as a plugin
@@ -1190,6 +1204,7 @@ inherit it, and Maven reads it through the link:
   | `pmd-cpd.minTokens` | `65` |
   | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
+  | `jvm.args` | empty; Quarkus parent only: Quarkus' own property, appended, space-separated, to the quarkus-maven-plugin's `<jvmArgs>` after the shared ones (see [Quarkus parent](#quarkus-parent)) |
   | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
   | `nullaway.annotated.packages` | `${project.groupId}`; comma-separated, without spaces |
   | `nullaway.excluded.field.annotations` | `io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy`; comma-separated, without spaces, added to NullAway's own `ExcludedFieldAnnotations`, which an override keeps; an override replaces this whole value, these two included, so a project adding a name repeats them |
@@ -1315,8 +1330,80 @@ inherit it, and Maven reads it through the link:
   (resources).
 - Never add a repository whose namespace ownership is unverified to the
   root pom or to Maven's settings. Maven must find the parent only through
-  the link; a remote lookup of `de.vptr.devkit:devkit-parent` is the
-  failure mode, and whatever serves it would configure the build.
+  the link; a remote lookup of one of devkit's parents
+  (`de.vptr.devkit:devkit-parent`, `de.vptr.devkit:devkit-quarkus-parent`) is
+  the failure mode, and whatever serves it would configure the build.
+
+### Quarkus parent
+
+`java/quarkus/pom.xml` is `de.vptr.devkit:devkit-quarkus-parent`, devkit's
+parent plus what every Quarkus application module shares. The root pom of a
+Quarkus project, or of a multi-module one, inherits it in place of
+`devkit-parent`:
+
+```xml
+<parent>
+  <groupId>de.vptr.devkit</groupId>
+  <artifactId>devkit-quarkus-parent</artifactId>
+  <version>0.8.0</version>
+  <relativePath>.devkit/java/quarkus/pom.xml</relativePath>
+</parent>
+```
+
+Its version is `devkit-parent`'s, which it inherits through an explicit
+`<relativePath>`: the release tag without the `v`, literal, and the parent is
+published to no repository. Everything under Parent POM applies to a project
+that inherits it. It adds:
+
+- `quarkus.platform.version` and the import of `io.quarkus.platform:quarkus-bom`
+  at it, so a Quarkus artifact is declared without a `<version>`. The
+  `org.jacoco` management of `devkit-parent` wins over the BOM's. It adds no
+  runtime extension: what a module runs on is its own choice.
+- `io.quarkus:quarkus-junit` in test scope, for `@QuarkusTest`.
+- `io.quarkus.platform:quarkus-maven-plugin` at `quarkus.platform.version`,
+  with `<extensions>true</extensions>` and no explicit `<executions>`:
+  packaging `quarkus` binds `generate-code`, `generate-code-tests`, `build`,
+  `native-image-agent` and `build-enhanced-artifact` itself, so a project
+  adopting the parent sets `<packaging>quarkus</packaging>` in each
+  application module and deletes its own quarkus-maven-plugin executions. A
+  `jar` module that deleted them would silently lose the Quarkus build, so it
+  keeps them; aggregator roots stay `pom`. Its `<jvmArgs>` are the dev-mode
+  JVM's shared `--add-opens`, `--add-exports` and other flags, followed by
+  Quarkus' own `jvm.args`, which the plugin's `<jvmArgs>` default to and the
+  parent declares empty: a project sets its own flags there, in its
+  `<properties>` or as `-Djvm.args=…`.
+- the `native` profile, activated by the property `native`, which sets
+  `skipITs` to `false` and `quarkus.native.enabled` to `true`. A module's own
+  `<skipITs>` in its `<properties>` beats the profile's, so a module that sets
+  `skipITs` to `true` runs no integration test under `-Dnative` either:
+  delete it.
+- `io.quarkus:quarkus-jacoco` in test scope, meant to record `@QuarkusTest`
+  coverage for jacoco-maven-plugin's report; that coverage is unmeasured
+  (#214; the property `quarkus.jacoco.report` is `false`, see above).
+
+A module that is not a Quarkus application, a library or a client that needs
+no Quarkus BOM, inherits `devkit-parent` directly. Once any pom of the project
+inherits the Quarkus parent, no pom may define `quarkus.platform.version` (the
+partial-migration rule above): a library that needs the Quarkus BOM inherits
+the Quarkus parent rather than importing the BOM itself. A root that only
+aggregates may inherit the Quarkus parent: a module whose `<parent>` is the
+root inherits it through the root, and with it everything listed above.
+
+A module inherits one parent. One that inherits `devkit-parent` directly, as a
+module that is not a Quarkus application in a multi-module project whose root
+inherits the Quarkus parent does, inherits nothing from the project's root
+pom: it declares its own `<groupId>` and restates the root's properties and
+plugin configuration it needs.
+
+`quarkus.platform.version` moves with a devkit release, so that the build
+extension and the BOM are checked against the plugin checksums at the pinned
+version (the deployment modules of a Quarkus extension a module uses are
+listed only if devkit's fixtures use them, see Plugin checksums). A Quarkus
+patch reaches a project through a release and a bump; ahead of one only
+through the command-line hatch described under Parent POM
+(`mvn -Dquarkus.platform.version=… verify`, or through `MAVEN_ARGS`): it is
+unrecorded and so unchecked, and defining the property in a pom is a partial
+migration.
 
 ### Plugin checksums
 
@@ -1324,10 +1411,12 @@ inherit it, and Maven reads it through the link:
 building devkit's `java-*` test fixtures through `make lint`, `test`,
 `coverage`, `install` and `format` resolves: the parent's plugins and their
 dependencies, the annotation processors (Error Prone, NullAway), find-sec-bugs'
-jar, which SpotBugs resolves through Maven's resolver, and the fixtures'
-dependencies, plus the closure of dependency-check's goals (recorded without an
-NVD key through the plugin's `help` goal; the closure its analysis downloads at
-run time, not through Maven, is not) and of the help and dependency plugins that
+jar, which SpotBugs resolves through Maven's resolver, the Quarkus parent's
+build extension and BOM at its pinned `quarkus.platform.version` (a version
+passed through `-D` is unchecked), and the fixtures' dependencies, plus the
+closure of dependency-check's goals (recorded without an NVD key through the
+plugin's `help` goal; the closure its analysis downloads at run time, not
+through Maven, is not) and of the help and dependency plugins that
 `check_frontend_deps.py` runs. Each line is `<sha256>  <repository path>`.
 Maven's resolver checks every artifact it resolves against the file, from a
 download or from the local repository, and fails the build on a mismatch, so a
@@ -1375,7 +1464,10 @@ altered in the local repository, fails the build with
     spotless-lib-extra): Spotless can then provision the formatter from P2,
     outside Maven;
   - a version resolved through repository metadata (a version range,
-    `LATEST`, `RELEASE`); none is in devkit's closure.
+    `LATEST`, `RELEASE`); none is in devkit's closure;
+  - the deployment modules of a Quarkus extension a module uses, which run in
+    Maven's JVM during `quarkus:build` and `quarkus:generate-code`: the file
+    lists only those devkit's fixtures use.
 
   The file protects devkit's gate tooling at its pinned versions, not the
   project's dependency graph, and only while no unlisted code runs inside
@@ -1392,7 +1484,8 @@ altered in the local repository, fails the build with
   already malicious on Central. A re-record refuses to change the hash of a
   path already in the file.
 - A plain `mvn` outside the targets is not checked, and neither is anything
-  downloaded outside Maven (dependency-check's vulnerability data). At the
+  downloaded outside Maven (dependency-check's vulnerability data, and
+  `-Dnative`'s native-image toolchain or builder image). At the
   parent's `eclipse-formatter.version` and `spotless-plugin.version`, once
   `make maven-checksums` has recorded them (devkit's java tests fail when it
   has not), the Eclipse formatter's artifacts come through Maven and are
@@ -1413,10 +1506,11 @@ altered in the local repository, fails the build with
   and is recorded under that Maven, so the default lifecycle plugins it
   binds are checked.
 - The file is devkit's, regenerated by `make maven-checksums` in devkit
-  when a plugin version or `eclipse-formatter.version` in the parent, or the
-  pinned Maven, changes; devkit's
+  when a plugin version in either parent POM, `eclipse-formatter.version`,
+  `quarkus.platform.version`, or the pinned Maven, changes; devkit's
   shell tests fail otherwise, but only for the top-level jar of every
-  plugin, plugin dependency and annotation processor the parent pins, for
+  plugin, plugin dependency and annotation processor the parents pin, the
+  imported BOM's `.pom` and the build extension jars, for
   the two plugins of `check_frontend_deps.py` and for the pinned Maven. It
   is no consumer's to edit.
 

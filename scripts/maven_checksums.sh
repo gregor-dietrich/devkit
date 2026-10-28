@@ -2,10 +2,10 @@
 
 # devkit's own `make maven-checksums`, which no consumer target runs: regenerate
 # java/checksums/checksums.sha256, the SHA-256 of every artifact the Maven plugin closure of
-# devkit's parent POM resolves (scripts/lib/mvn_checked.sh verifies a build against it). Each
-# java-* fixture of tests/fixtures is copied, .devkit linked to this tree, and put through the
-# Maven goals of lint, test, coverage, install and format against a fresh, empty local
-# repository (no read-through), with the resolver recording what it resolves; so is the
+# devkit's parent POMs (PARENTS in scripts/java/parent_check.py) resolves (scripts/lib/mvn_checked.sh verifies a build
+# against it). Each java-* fixture of tests/fixtures is copied, .devkit linked to this tree,
+# and put through the Maven goals of lint, test, coverage, install and format against a fresh,
+# empty local repository (no read-through), with the resolver recording what it resolves; so is the
 # dependency-check plugin's help goal, which resolves its closure without an NVD key, and so are
 # the help and dependency plugins check_frontend_deps.py pins (read from it). The result replaces
 # the file, sorted by path, and nothing else stays behind; one path recorded with two hashes
@@ -101,7 +101,10 @@ done
 }
 # A file of its own: the resolver ends its file without a line break.
 maven_pin "$root" >"$tmp/dist"
-LC_ALL=C sort -u "$tmp/basedir/checksums.sha256" "$tmp/dist" | LC_ALL=C sort -s -k2,2 >"$tmp/sorted"
+# A fixture's own pom (every fixture's groupId is devkit.fixture) changes every release, and
+# failIfMissing=false lets it pass unlisted, as the other fixtures' own artifacts do.
+LC_ALL=C sort -u "$tmp/basedir/checksums.sha256" "$tmp/dist" | LC_ALL=C sort -s -k2,2 |
+    awk '$2 !~ /^devkit\/fixture\//' >"$tmp/sorted"
 conflicts=$(cut -d' ' -f3 "$tmp/sorted" | uniq -d)
 [[ -z $conflicts ]] || {
     echo "ERROR: recorded with two different hashes: $conflicts" >&2

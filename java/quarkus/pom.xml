@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- devkit's Quarkus parent POM: devkit's parent POM plus what every Quarkus application module
+     shares: the Quarkus platform version and BOM, the quarkus-maven-plugin (its packaging
+     "quarkus" binds the goals) with the shared dev-mode JVM arguments, the native profile,
+     quarkus-junit and quarkus-jacoco. A project root or a Quarkus application module declares it
+     as its <parent> with <relativePath>.devkit/java/quarkus/pom.xml</relativePath> (the path from
+     that pom's directory), so Maven reads it through the link devkitw creates. It is published to
+     no repository and has no <version> of its own: it takes devkit-parent's, which is the devkit
+     release tag without the "v" and stays literal here. The interface is docs/contract.md ("Quarkus parent").
+
+     quarkus.platform.version moves with a devkit release, so the Quarkus build extension
+     and the BOM are checked against the plugin checksums at the pinned version.
+     No <repositories>, and no runtime extension: what a module runs on is its own choice. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>de.vptr.devkit</groupId>
+    <artifactId>devkit-parent</artifactId>
+    <version>0.8.0</version>
+    <relativePath>../parent/pom.xml</relativePath>
+  </parent>
+
+  <groupId>de.vptr.devkit</groupId>
+  <artifactId>devkit-quarkus-parent</artifactId>
+  <packaging>pom</packaging>
+
+  <properties>
+    <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
+    <!-- Quarkus' own property for a project's dev-mode JVM flags, which the plugin's jvmArgs
+         default to: the configuration below replaces that default, so it appends the property
+         after the shared flags, and a project's <jvm.args> or -Djvm.args still applies. -->
+    <jvm.args></jvm.args>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.quarkus.platform</groupId>
+        <artifactId>quarkus-bom</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-junit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Meant for @QuarkusTest coverage (unmeasured, #214); the org.jacoco artifacts it uses
+         are managed by devkit-parent. -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-jacoco</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.quarkus.platform</groupId>
+        <artifactId>quarkus-maven-plugin</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <extensions>true</extensions>
+        <configuration>
+          <jvmArgs>--add-opens java.base/java.lang=ALL-UNNAMED
+            --add-opens java.base/jdk.internal.ref=ALL-UNNAMED
+            --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+            --add-opens java.base/java.nio=ALL-UNNAMED
+            --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+            --enable-native-access=ALL-UNNAMED
+            --sun-misc-unsafe-memory-access=allow
+            -XX:+EnableDynamicAgentLoading
+            -Xshare:off
+            --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED
+            --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED
+            --add-opens jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
+            ${jvm.args}</jvmArgs>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>native</id>
+      <activation>
+        <property>
+          <name>native</name>
+        </property>
+      </activation>
+      <properties>
+        <skipITs>false</skipITs>
+        <quarkus.native.enabled>true</quarkus.native.enabled>
+      </properties>
+    </profile>
+  </profiles>
+</project>
