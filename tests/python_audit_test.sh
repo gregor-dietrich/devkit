@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Tests for scripts/python/audit.sh: a stand-in devkit (get_uv.sh names a stub uv that logs its
 # arguments and writes the pylock.toml in $UV_LOCK, else one pinning six 1.16.0, to its
-# --output-file; audit.py and its helpers are the real ones) and a temp project whose .venv holds
-# a stub pip-audit. The stub logs its arguments, writes $PYPI_JSON or $OSV_JSON to its -o path
-# and exits per service. Asserts both runs happen, in order, with their flags, that either
-# failing fails the target while the other still runs, that a report leaving out a locked package
-# fails, that devkit.toml's accepted advisories are judged (and validated before pip-audit runs).
-# No network. Prints PASS/FAIL per case.
+# --output-file, and exits $UV_SYNC_RC on uv sync without logging it; audit.py, uv_project.py and
+# their helpers are the real ones) and a temp project whose uv.lock pins certifi and whose .venv
+# holds a stub pip-audit, run through a .venv/bin/python that accepts only -I -m pip_audit (any
+# other call exits 97). The stub logs its arguments (the --cache-dir path as CACHE), writes
+# $PYPI_JSON or $OSV_JSON to its -o path and exits per service. Asserts both runs happen, in order,
+# with their flags, that either failing fails the target while the other still runs, that a report
+# leaving out a locked package fails, that devkit.toml's accepted advisories are judged (and
+# validated before pip-audit runs), and that a certifi below devkit's minimum or a drifted .venv
+# fails before pip-audit runs. No network. Prints PASS/FAIL per case.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,15 +18,20 @@ trap 'rm -rf -- "${work:?}"' EXIT
 proj=$work/proj fake=$work/devkit log=$work/log uvlog=$work/uvlog fails=0
 mkdir -p "$proj/.venv/bin" "$fake/scripts/lib" "$fake/scripts/python"
 cp "$root/scripts/lib/get_venv.sh" "$fake/scripts/lib/"
-cp "$root/scripts/python/audit.py" "$root/scripts/python/project_files.py" "$fake/scripts/python/"
+cp "$root/scripts/python/audit.py" "$root/scripts/python/project_files.py" "$root/scripts/python/uv_project.py" \
+  "$fake/scripts/python/"
 # shellcheck disable=SC2016 # expands when the stub runs
 {
-  printf '#!/bin/sh\necho "$*" | sed "s|--output-file .*|--output-file OUT|" >%q\nwhile [ $# -gt 0 ]; do [ "$1" = --output-file ] && printf "%%s\\n" "${UV_LOCK-$SIX_LOCK}" >"$2"; shift; done\n' "$uvlog" >"$work/uv"
+  printf '#!/bin/sh\n[ "$1" = sync ] && exit "${UV_SYNC_RC:-0}"\necho "$*" | sed "s|--output-file .*|--output-file OUT|" >%q\nwhile [ $# -gt 0 ]; do [ "$1" = --output-file ] && printf "%%s\\n" "${UV_LOCK-$SIX_LOCK}" >"$2"; shift; done\n' "$uvlog" >"$work/uv"
   printf 'UV_CMD=%q\n' "$work/uv" >"$fake/scripts/lib/get_uv.sh"
   cat >"$proj/.venv/bin/pip-audit" <<STUB
 #!/bin/sh
-echo "\$*" | sed "s|-o [^ ]*|-o OUT|; s| [^ ]*\$| LOCK|" >>"$log"
 for last; do :; done
+cache=\$(echo "\$*" | sed -n "s|.*--cache-dir \([^ ]*\).*|\1|p")
+# a fresh cache: a sibling of the export's directory in audit.sh's temp dir, not there yet
+fresh=BADCACHE
+[ -n "\$cache" ] && [ "\$(dirname "\$cache")" = "\$(dirname "\$last")" ] && [ ! -e "\$cache" ] && fresh=CACHE
+echo "\$*" | sed "s|--cache-dir [^ ]*|--cache-dir \$fresh|; s|-o [^ ]*|-o OUT|; s| [^ ]*\$| LOCK|" >>"$log"
 [ -f "\$last/pylock.toml" ] || exit 98
 while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out=\$2; [ "\$1" = -s ] && service=\$2; shift; done
 [ "\$service" = pypi ] && { printf '%s' "\$PYPI_JSON" >"\$out"; exit "\${PYPI_RC:-0}"; }
@@ -31,7 +39,11 @@ while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out=\$2; [ "\$1" = -s ] && service=\$2
 exit 99
 STUB
 }
-printf '#!/bin/sh\nexit 0\n' >"$proj/.venv/bin/python"
+# shellcheck disable=SC2016 # expands when the stub runs
+printf '#!/bin/sh\n[ "$1 $2 $3" = "-I -m pip_audit" ] || exit 97\nshift 3\nexec "$(dirname "$0")/pip-audit" "$@"\n' >"$proj/.venv/bin/python"
+# certifi_lock VERSION: the project's uv.lock, pinning certifi at VERSION
+certifi_lock() { printf 'version = 1\nrevision = 3\n\n[[package]]\nname = "certifi"\nversion = "%s"\n' "$1" >"$proj/uv.lock"; }
+certifi_lock 2026.10.23
 chmod +x "$work/uv" "$proj/.venv/bin/pip-audit" "$proj/.venv/bin/python"
 
 # lock NAME==VERSION...: a pylock.toml pinning those packages
@@ -76,7 +88,7 @@ expect() {
 }
 
 flags='--strict --locked -f json --aliases on --desc off -o OUT LOCK'
-both="-s pypi $flags|-s osv $flags"
+both="-s pypi --cache-dir CACHE $flags|-s osv --cache-dir CACHE $flags"
 expect "both services pass: the target passes, pypi then osv, with their flags" 0 "$both" 0 0
 expect "the PyPI run alone fails: the target fails and osv still runs" 1 "$both" 1 0
 expect "the OSV run alone fails: the target fails" 1 "$both" 0 1
@@ -118,5 +130,12 @@ printf '[python.duplication]\npaths = ["src"]\n[[python.audit.accepted]]\npackag
 expect "an invalid entry fails before pip-audit runs" 1 "" 0 0 "needs a reason"
 printf '[python.duplication]\npaths = ["src"]\n' >"$proj/devkit.toml"
 UV_LOCK=$(lock) expect "no runtime dependencies and no entry: the target passes without pip-audit" 0 "" 0 0 "nothing to audit"
+certifi_lock 2026.7.22
+expect "a certifi below devkit's minimum fails before pip-audit runs" 1 "" 0 0 "uv.lock pins certifi (2026.7.22) below devkit's minimum 2026.10.18"
+certifi_lock 2026.10.23
+UV_SYNC_RC=1 expect "a .venv uv cannot confirm matches uv.lock fails before pip-audit runs" 1 "" 0 0 "uv cannot confirm .venv matches uv.lock"
+mv "$proj/.venv/bin/pip-audit" "$work/pip-audit"
+expect "a .venv without pip-audit fails before it runs, naming the remedy" 1 "" 0 0 ".venv has no pip-audit; add pip-audit to the dev dependency group"
+mv "$work/pip-audit" "$proj/.venv/bin/pip-audit"
 
 [[ $fails == 0 ]]

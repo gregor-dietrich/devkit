@@ -10,6 +10,7 @@ Usage: uv_project.py COMMAND, for the project at $PROJECT_ROOT (else the working
   members          the project's packages as directories, sorted, one per line: each uv
                    workspace member as uv.lock records it, or "." for a single package
   vulture-paths    the root pyproject.toml's [tool.vulture] paths, one per line
+  certifi-versions every certifi version uv.lock pins, each at least devkit's minimum
 Every failure is one ERROR line on stderr; exit 1.
 """
 
@@ -29,11 +30,17 @@ ROOT: Path = Path(os.environ.get("PROJECT_ROOT", ".")).resolve()
 VERSION = re.compile(r"(?!.{65})(?:([0-9]+)!)?([0-9]+(?:\.[0-9]+)*)[0-9A-Za-z.+!-]*")
 HASH = re.compile(r"sha256:[0-9a-f]{64}")
 RELOCK = "add uv to the dev dependency group, then uv lock"
-# The oldest uv devkit's flags are tested with and the security floor for the eMudhra emSign CA
-# incident (GHSA-hq85-5cpj-mr62 and the intermediate-key rejection after it); the fixtures' dev groups
+# The oldest uv devkit's flags are tested with. It includes the security floor for the eMudhra emSign CA
+# incident, 0.13.5 (GHSA-hq85-5cpj-mr62 and the intermediate-key rejection after it), and is the first that
+# downloads CPython 3.14.10, 3.15.2, 3.13.18, 3.12.16 and 3.11.18; the fixtures' dev groups
 # pin it exactly, so a relock keeps it, which tests/uv_project_test.sh checks; docs/contract.md
 # ("Pins and drift") states it.
-UV_FLOOR = (0, 13, 5)
+UV_FLOOR = (0, 13, 6)
+# The first certifi without the compromised emSign ECC Root CA - G3, whose bundle make audit's pip-audit
+# trusts through requests; later releases restored only emSign roots the PSF advisory calls
+# unaffected (certifi #440). The fixtures lock it or later, which tests/uv_project_test.sh checks;
+# docs/contract.md ("make audit") states it.
+CERTIFI_FLOOR = (2026, 10, 18)
 PRERELEASE = re.compile(r"[._-]?(a|b|c|rc|pre|dev)", re.IGNORECASE)
 
 
@@ -59,14 +66,14 @@ def packages(lock: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
-def below_floor(version: str, match: re.Match[str]) -> bool:
-    """Whether a VERSION, matched, is older than UV_FLOOR: a pre-release of the floor is, a post-release or local one is not."""
+def below_floor(version: str, match: re.Match[str], floor: tuple[int, ...]) -> bool:
+    """Whether a VERSION, matched, is older than FLOOR: a pre-release of the floor is, a post-release or local one is not."""
     if int(match[1] or 0) > 0:  # any epoch outranks the floor's (PEP 440)
         return False
     numbers = tuple(int(number) for number in match[2].split("."))
-    width = max(len(numbers), len(UV_FLOOR))
-    padded, floor = (n + (0,) * (width - len(n)) for n in (numbers, UV_FLOOR))
-    return padded < floor or (padded == floor and PRERELEASE.match(version, match.end(2)) is not None)
+    width = max(len(numbers), len(floor))
+    padded, minimum = (n + (0,) * (width - len(n)) for n in (numbers, floor))
+    return padded < minimum or (padded == minimum and PRERELEASE.match(version, match.end(2)) is not None)
 
 
 def uv_package(lock: dict[str, Any]) -> dict[str, Any]:
@@ -81,13 +88,37 @@ def uv_package(lock: dict[str, Any]) -> dict[str, Any]:
     match = VERSION.fullmatch(version) if isinstance(version, str) else None
     if not match:
         raise Failure(f"uv.lock's uv package has no usable version ({version!r}); {RELOCK}.")
-    if below_floor(version, match):
+    if below_floor(version, match, UV_FLOOR):
         floor = ".".join(map(str, UV_FLOOR))
         raise Failure(
             f"uv.lock pins uv {version}, below devkit's minimum {floor}; require uv>={floor} in the dev group, "
             f"then uv lock with uv {floor} or later and make install."
         )
     return found[0]
+
+
+def certifi_versions() -> list[str]:
+    """Every version of the [[package]] entries named certifi, in lock order, each at least CERTIFI_FLOOR; a fork pins several."""
+    versions = []
+    below = []
+    for package in packages(load("uv.lock")):
+        if not isinstance(name := package.get("name"), str) or name.lower() != "certifi":
+            continue
+        version = package.get("version")
+        match = VERSION.fullmatch(version) if isinstance(version, str) else None
+        if not match:
+            raise Failure(f"uv.lock's certifi package has no usable version ({version!r}); relock it with uv lock --upgrade-package certifi.")
+        versions.append(version)
+        if below_floor(version, match, CERTIFI_FLOOR):
+            below.append(version)
+    if below:
+        floor = ".".join(map(str, CERTIFI_FLOOR))
+        raise Failure(
+            f"uv.lock pins certifi ({', '.join(below)}) below devkit's minimum {floor}: make audit's pip-audit trusts the "
+            "locked certifi's CA bundle, and older ones carry the compromised emSign ECC Root CA - G3; lift any certifi "
+            f"constraint below {floor}, then uv lock --upgrade-package certifi and make install."
+        )
+    return versions
 
 
 def uv_version() -> list[str]:
@@ -165,6 +196,7 @@ COMMANDS = {
     "uv-platform": uv_platform,
     "members": members,
     "vulture-paths": vulture_paths,
+    "certifi-versions": certifi_versions,
 }
 
 

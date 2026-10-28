@@ -5,9 +5,13 @@ set -euo pipefail
 cd "$PROJECT_ROOT"
 # shellcheck source=SCRIPTDIR/../lib/get_uv.sh
 UV_BOOTSTRAP=false . "$DEVKIT/scripts/lib/get_uv.sh"
+# pip-audit trusts the lock's certifi, not uv's bundle.
+python3 -I "$DEVKIT/scripts/python/uv_project.py" certifi-versions >/dev/null
 # shellcheck source=SCRIPTDIR/../lib/get_venv.sh
 . "$DEVKIT/scripts/lib/get_venv.sh"
-pip_audit=$(venv_tool pip-audit)
+# For its remedy message only: pip-audit runs as python -m pip_audit below.
+venv_tool pip-audit >/dev/null
+venv_synced
 tmp=$(mktemp -d)
 trap 'rm -rf -- "${tmp:?}"' EXIT
 
@@ -46,11 +50,15 @@ echo "Running pip-audit over the $pins pinned package$([[ $pins == 1 ]] || echo 
 # --strict: a dependency pip-audit could not audit fails the run instead of passing with a warning.
 # audit.py fails a report that leaves out a package of the export, in case a pip-audit evaluated
 # markers after all.
+# -I: no PYTHON* variable and no working directory reaches pip-audit's imports, so a PYTHONPATH
+# certifi cannot shadow the one certifi-versions judged. A fresh --cache-dir: pip-audit's default
+# cache is per user, shared across projects, and keeps PyPI responses (permanent redirects too)
+# fetched under an older trust store.
 reports=()
 for service in pypi osv; do
     echo "Auditing against $service..."
     rc=0
-    "$pip_audit" -s "$service" --strict --locked -f json --aliases on --desc off \
+    "$VENV/bin/python" -I -m pip_audit -s "$service" --cache-dir "$tmp/cache" --strict --locked -f json --aliases on --desc off \
         -o "$tmp/$service.json" "$tmp/lock" || rc=$?
     reports+=("$service" "$rc" "$tmp/$service.json")
 done

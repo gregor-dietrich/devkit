@@ -8,7 +8,7 @@
 #                   empty = a single package at the root
 #   COVERAGE_FLOOR  percent (0-100) of combined statement and branch coverage (--cov-branch)
 #                   each package's tests must reach; required
-# The CPython version comes from .python-version, the uv version (0.13.5 or later) from the uv
+# The CPython version comes from .python-version, the uv version (0.13.6 or later) from the uv
 # package in uv.lock.
 #
 # Copy-paste gate: lint runs jscpd over devkit.toml's [python.duplication] paths, failing on a
@@ -55,7 +55,7 @@ format: ## Run format-md, then apply ruff's fixes and format with ruff
 test: ## Check that .venv matches uv.lock, then run each package's pytest suite and hold its statement and branch coverage to COVERAGE_FLOOR
 	@"$(DEVKIT)/scripts/python/test.sh"
 
-audit: ## Run pip-audit on the runtime dependencies uv.lock pins (needs the network)
+audit: ## Check that .venv matches uv.lock and uv.lock's certifi meets devkit's minimum, then run pip-audit on the runtime dependencies uv.lock pins (needs the network)
 	@"$(DEVKIT)/scripts/python/audit.sh"
 
 clean: ## Remove Python caches, build output and coverage data

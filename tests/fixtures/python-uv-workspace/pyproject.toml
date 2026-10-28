@@ -2,7 +2,7 @@
 members = ["packages/*"]
 
 [dependency-groups]
-dev = ["ruff", "pytest", "pytest-cov", "vulture", "pip-audit", "uv==0.13.5"]
+dev = ["ruff", "pytest", "pytest-cov", "vulture", "pip-audit", "uv==0.13.6"]
 
 [tool.ruff]
 # The members' sources, so isort knows their packages as first-party.

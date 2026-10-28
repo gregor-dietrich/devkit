@@ -212,11 +212,14 @@
 #          .python-version, COVERAGE_FLOOR unset or not a percent, no install,
 #          MODULES against the workspace or as a glob, no [python.duplication] or
 #          [tool.vulture] paths) and audit (a vulnerable dependency, one only
-#          OSV lists, one only win32 installs) to fail for that reason. Expect
-#          make format to fix a format and an unused-import break so that lint
-#          passes, and audit to pass on current runtime dependencies, one of
-#          them through a local path dependency, on runtime dependencies only
-#          win32 installs, and on a name locked at two versions. In the
+#          OSV lists, one only win32 installs, a certifi below devkit's
+#          minimum, a uv.lock changed without make install) to fail for that
+#          reason. Expect make format to fix a format and an unused-import
+#          break so that lint passes, and audit to pass on current runtime
+#          dependencies, one of them through a local path dependency (and with
+#          a certifi on PYTHONPATH that must not reach pip-audit), on runtime
+#          dependencies only win32 installs, and on a name locked at two
+#          versions. In the
 #          workspace, whose core is a package and app a virtual member: test
 #          ONLY=packages/app tests app alone, lint
 #          ONLY=packages/app passes over a format break in core that lint
@@ -1911,15 +1914,15 @@ py_uninstalled() { # a dev tool removed from .venv behind uv's back is drift
     make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock"
 }
 
-py_drifted() { # py_drifted NAME: a package installed behind uv's back (extra), or a uv.lock changed without make install (lock), fails make test
-  local dir=$work/py-drift-$1
-  py_copy single "drift-$1" installed || return
+py_drifted() { # py_drifted NAME [TARGET]: a package installed behind uv's back (extra), or a uv.lock changed without make install (lock), fails make TARGET (default test)
+  local dir=$work/py-drift-$1${2:+-$2}
+  py_copy single "drift-$1${2:+-$2}" installed || return
   # Under devkit's 24-hour pin cutoff (README, Gating devkit itself), and the lock change drops a dependency, so nothing resolves anew.
   if [[ $1 == extra ]]; then
     "$uv" pip install -q --exclude-newer "24 hours" --python "$dir/.venv/bin/python" six
   else
     sed_into "$dir/pyproject.toml" 's/"vulture", //' && (cd "$dir" && "$uv" lock -q)
-  fi && make_says fail "$dir" test "uv cannot confirm .venv matches uv.lock" "make install"
+  fi && make_says fail "$dir" "${2:-test}" "uv cannot confirm .venv matches uv.lock" "make install"
 }
 
 py_cache_cleared() { # --lf in addopts, a planted lastfailed naming one test: make test still runs both and passes
@@ -2021,7 +2024,11 @@ py_audited() {
     mkdir -p "$helper/src/helper" && touch "$helper/src/helper/__init__.py" &&
     sed 's/"devkit-core"/"helper"/; s/^dependencies = \[\]/dependencies = ["attrs"]/' \
       "$root/tests/fixtures/python-uv-workspace/packages/core/pyproject.toml" >"$helper/pyproject.toml" &&
-    relocked "$dir" && make_says pass "$dir" audit "Audit completed"
+    relocked "$dir" && make_says pass "$dir" audit "Audit completed" &&
+    mkdir -p "$work/shadow/certifi" &&
+    printf 'raise SystemExit("a PYTHONPATH certifi shadowed .venv'"'"'s")\n' >"$work/shadow/certifi/__init__.py" &&
+    # -I keeps the shadowing certifi out of pip-audit's imports, so the audit still passes.
+    PYTHONPATH=$work/shadow make_says pass "$dir" audit "Audit completed"
 }
 
 # A dependency only win32 installs, with live advisories: audited on Linux too, so audit fails on it.
@@ -2120,6 +2127,8 @@ python_negatives() {
   py_negative coverage-floor check "COVERAGE_FLOOR is not set" single "" Makefile '/^COVERAGE_FLOOR/d'
   py_negative coverage-floor-range check "COVERAGE_FLOOR '101' is not a percent" single "" Makefile 's/:= 100$/:= 101/'
   py_negative never-installed check "no .venv; run make install" single ""
+  py_negative certifi-floor audit "below devkit's minimum 2026.10.18" single "" uv.lock \
+    '/^name = "certifi"$/{n;s/^version = .*/version = "2026.7.22"/;}'
   py_negative pytest-cov check "has no pytest_cov" single relocked pyproject.toml 's/"pytest-cov", //'
   py_negative modules check "differs from the packages uv.lock records" workspace "" Makefile \
     's|packages/core packages/app|packages/core|'
@@ -2127,11 +2136,12 @@ python_negatives() {
   check "python-uv-single: a tool removed from .venv fails make check" py_uninstalled
   check "python-uv-single: a package installed behind uv's back fails make test" py_drifted extra
   check "python-uv-single: a uv.lock changed without make install fails make test" py_drifted lock
+  check "python-uv-single: a uv.lock changed without make install fails make audit" py_drifted lock audit
   check "python-uv-workspace: a touched member pyproject.toml fails make test until make install" \
     py_touched workspace packages/core/pyproject.toml
   check "python-uv-single: a touched packaged root's pyproject.toml fails make test until make install" \
     py_touched single pyproject.toml \
-    's/^package = false/package = true\n\n[build-system]\nrequires = ["uv_build>=0.13.5,<0.14"]\nbuild-backend = "uv_build"/'
+    's/^package = false/package = true\n\n[build-system]\nrequires = ["uv_build>=0.13.6,<0.14"]\nbuild-backend = "uv_build"/'
   check "python-uv-single: a missing pinned uv copy fails make test, saying make install" py_no_uv
   check "python-uv-single: make test clears pytest's cache, so --lf in addopts runs every test" py_cache_cleared
   check "python-uv-single: make test ignores a stale .coverage under --cov-append and leaves it alone" \
@@ -2147,7 +2157,7 @@ python_negatives() {
   check "python-uv-workspace: JUNIT_DIR=reports writes one report per member into the project" py_junit
   check "python-uv-single: a vulnerable dependency fails make audit" py_vulnerable
   check "python-uv-single: a dependency with an OSV-only advisory fails make audit" py_osv_only
-  check "python-uv-single: make audit passes on current dependencies, leaving a path one out" py_audited
+  check "python-uv-single: make audit passes on current dependencies, leaving a path one out, and with a certifi on PYTHONPATH" py_audited
   check "python-uv-single: a dependency only win32 installs is audited, failing make audit on its advisory" py_marker_false
   check "python-uv-single: make audit passes when every runtime dependency is one only win32 installs" py_marker_only
   check "python-uv-single: make audit passes a name locked at two versions, one per platform" py_forked

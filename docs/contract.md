@@ -1441,12 +1441,14 @@ run the tools from `.venv`.
   records, when the root `pyproject.toml` sets no `[tool.vulture] paths`,
   when `uv.lock` pins no single usable uv version, lists a uv wheel
   without a sha256 hash, or records no wheel for uv at all (an sdist, git
-  or path source), when that uv is older than devkit's minimum, 0.13.5
+  or path source), when that uv is older than devkit's minimum, 0.13.6
   (a pre-release of it counts as older; it is the oldest uv devkit tests
-  its `uv sync` and `uv export` flags with, and the security floor for the
-  eMudhra emSign CA incident: 0.13.4 drops the affected emSign root from
-  uv's embedded CA bundle, GHSA-hq85-5cpj-mr62, and 0.13.5 also rejects a
-  chain through the compromised intermediate keys),
+  its `uv sync` and `uv export` flags with; it includes the security floor
+  for the eMudhra emSign CA incident, 0.13.5: 0.13.4 drops the affected
+  emSign root from uv's embedded CA bundle, GHSA-hq85-5cpj-mr62, and 0.13.5
+  also rejects a chain through the compromised intermediate keys; and it is
+  the first uv that downloads CPython 3.14.10, 3.15.2, 3.13.18, 3.12.16 and
+  3.11.18),
   when devkit's copy of the uv `uv.lock` pins is not installed, when `.venv` is
   missing, when its Python's version differs from the pin (`major.minor`,
   or the patch too when the pin names one), when `uv sync --check --frozen
@@ -1469,12 +1471,13 @@ run the tools from `.venv`.
   other hashes gets its own. devkit never runs a `uv` on `PATH`, nor the
   one inside `.venv`, but the uv that writes `uv.lock` (`uv lock`, `uv
   add`) is the project's own, which devkit does not check: run it at
-  devkit's minimum or later, since an older one resolves without the
-  protections the minimum adds. The minimum covers uv's own downloads only,
-  and only while uv uses its embedded bundle (not a system store or
-  `SSL_CERT_FILE`): pip, which installs the copy below, and `make audit`'s
-  pip-audit, through the `certifi` `uv.lock` pins, use their own trust
-  stores. Every target that
+  devkit's minimum or later, since one older than 0.13.5 lacks some or all
+  of the CA protections the minimum includes. The minimum covers uv's own
+  downloads only, and only while uv uses its embedded bundle (not a system
+  store or `SSL_CERT_FILE`): pip, which installs the copy below, uses its own
+  trust store, while `make audit`'s pip-audit, through the `certifi`
+  `uv.lock` pins, is held to that target's certifi minimum, within the
+  limits `make audit` (below) names. Every target that
   sources it (`check`, `install`, `test`, `audit`) fails first on a uv
   older than devkit's minimum (see `make check`). Only `make install`
   creates the copy, read-only, when it is missing, and `check`, `test` and
@@ -1515,8 +1518,9 @@ run the tools from `.venv`.
   `pyproject.toml`: `make install`'s `--locked` does, and CI's install step
   catches a stale lock. A project whose `[tool.uv] cache-keys` name a git
   commit or a source-file glob makes uv treat it as needing a rebuild after
-  every new commit or matching edit, so `make test`, `make gate` (which
-  runs on the commit) and CI's test step fail until `make install`: run it
+  every new commit or matching edit, so `make check`, `make test`, `make
+  audit`, `make gate` (which runs on the commit), CI's test step and CI's
+  audit step fail until `make install`: run it
   after each commit or edit, or drop the cache key. It then runs one
   pytest session per member of the selection, in the member's directory,
   with branch coverage (`--cov-branch`), `--cache-clear` (it empties
@@ -1545,7 +1549,21 @@ run the tools from `.venv`.
   reads the export with `--locked`, which ignores environment markers, so
   a dependency only another platform or Python installs
   (`sys_platform == "win32"`) is audited too, and one `devkit.toml` is
-  judged alike everywhere. Before pip-audit runs, an export that is not a
+  judged alike everywhere. Before pip-audit runs, and before any network
+  call, `make audit` fails when `.venv` does not match `uv.lock`, as `make
+  check` and `make test` do, and when any `certifi` entry in `uv.lock` is
+  older than 2026.10.18 (a pre-release of it counts as older) or has
+  no usable version: pip-audit reaches PyPI and OSV through requests, which
+  trusts certifi's CA bundle, and older releases carry the compromised emSign
+  ECC Root CA - G3. A lock with no certifi passes, and a fork is judged entry
+  by entry. The certifi minimum protects only while requests uses the
+  bundle of a PyPI certifi: not while the environment sets
+  `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE`, while a package the lock pins
+  moves requests' trust elsewhere (a `.pth` such as pip-system-certs
+  installs), or while the certifi comes from another source (its version is
+  judged, not its bundle). pip-audit runs as `.venv`'s Python with `-I`, so
+  no `PYTHON*` variable or working directory reaches its imports, and with a
+  fresh cache each run. Also before pip-audit runs, an export that is not a
   pylock 1.x file naming each package and its version fails, and so does
   a package it pins from a git, URL or local file or directory source,
   which pip-audit cannot audit against an index (a git or URL one it

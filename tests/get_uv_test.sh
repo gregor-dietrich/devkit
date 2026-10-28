@@ -13,7 +13,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 . "$root/scripts/lib/sha256.sh"
 work=$(mktemp -d)
 trap 'uncache "$work"' EXIT
-proj=$work/proj pin=0.13.5+devkit.test
+proj=$work/proj pin=0.13.6+devkit.test
 mkdir "$proj"
 hash=$(printf '1%.0s' {1..64}) other_hash=$(printf '2%.0s' {1..64})
 lock() { # lock [HASH]: proj/uv.lock, whose uv wheel lists HASH (none when empty)
@@ -272,10 +272,10 @@ case_lock_without_hash() {
 }
 case_lock_below_floor() { # fails before pip is ever run
   rm -f "$work/pip-args"
-  pin=0.13.4 lock "$hash"
+  pin=0.13.5 lock "$hash"
   run "$work/python" -- UV_BOOTSTRAP=true
-  pin=0.13.5+devkit.test lock "$hash"
-  failed_saying "uv.lock pins uv 0.13.4, below devkit's minimum 0.13.5" && [[ ! -e $work/pip-args && ! -e $(tools_of) ]]
+  pin=0.13.6+devkit.test lock "$hash"
+  failed_saying "uv.lock pins uv 0.13.5, below devkit's minimum 0.13.6" && [[ ! -e $work/pip-args && ! -e $(tools_of) ]]
 }
 
 t "1 the cached uv at the pin is chosen" case_cache_hit

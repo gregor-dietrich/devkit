@@ -110,7 +110,8 @@ GNU make, ssh-keygen (OpenSSH 8.1 or later), bash as `/bin/bash`, and python3
 (3.11 or later); fetching a devkit release on a cache miss also needs the
 running UID to have a passwd entry, which ssh-keygen requires (a container run
 with an arbitrary `-u` UID needs one added); a uv project pins CPython 3.11 or
-later in `.python-version` and uv 0.13.5 or later in `uv.lock`, needs
+later in `.python-version` and uv 0.13.6 or later in `uv.lock` (and, for `make
+audit`, certifi 2026.10.18 or later), needs
 `sha256sum` or `shasum`, and, for the first
 `make install` of each uv `uv.lock` pins, python3's venv and pip and the
 index pip is configured for (PyPI by default). `make lint` also needs node
@@ -213,7 +214,8 @@ transitive versions are as old. uv itself stays at devkit's minimum: the
 fixtures' dev groups pin it exactly, so a relock keeps it, and raising the
 minimum (`UV_FLOOR` in `scripts/python/uv_project.py`) raises both pins and
 the `uv_build` ranges (the workspace fixture's and `tests/run.sh`'s
-packaged-root case) with it, which `tests/uv_project_test.sh` checks.
+packaged-root case) with it, which `tests/uv_project_test.sh` checks. The
+fixtures also lock certifi at or above `CERTIFI_FLOOR`, which that test checks.
 `version_check.py` reports a newer release whatever its age; a younger one
 waits.
 
@@ -571,8 +573,8 @@ such an entry moves to `checkstyle-suppressions.xml`.
 pattern now also catches the alias, wrapped arrays, a qualified name and an `@`
 followed by a space).
 
-In a uv project, devkit now requires uv 0.13.5 or later, the security floor for
-the eMudhra emSign CA incident
+In a uv project, devkit now requires uv 0.13.6 or later, which includes the
+security floor for the eMudhra emSign CA incident
 ([PSF advisory](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)):
 uv embeds its own CA bundle, which certifi does not reach; 0.13.4 drops the
 affected root, emSign ECC Root CA - G3, from it (GHSA-hq85-5cpj-mr62), and
@@ -581,12 +583,18 @@ check`, `make install`, `make test` and `make audit` fail, naming that minimum,
 on a `uv.lock` pinning an older uv or a pre-release of it. The floor covers
 uv's own downloads only, and only while uv uses its embedded bundle (not a
 system store or `SSL_CERT_FILE`): `make audit`'s pip-audit trusts the `certifi`
-`uv.lock` pins, and certifi 2026.10.18 and later lack that root. First, raise a
+`uv.lock` pins, and certifi 2026.10.18 and later lack that root, so `make audit`
+now also fails on a `uv.lock` pinning an older certifi (or a pre-release of
+2026.10.18), and on a `.venv` that does not match `uv.lock`. The certifi floor
+protects only while neither `REQUESTS_CA_BUNDLE` nor `CURL_CA_BUNDLE` is set
+(either replaces certifi's bundle; `docs/contract.md`, "make audit", names the
+other limits). First, raise a
 `[build-system]` cap of `uv_build` below 0.13, which now warns, to `<0.14`.
-Then require `uv>=0.13.5` in the dev group (a later uv where `.python-version`
-names a CPython uv 0.13.5 cannot download: 3.14.10 needs 0.13.6) and run `uv
+Then require `uv>=0.13.6` in the dev group (0.13.6 is also the first uv that
+downloads CPython 3.14.10, 3.15.2, 3.13.18, 3.12.16 and 3.11.18) and run `uv
 lock --upgrade-package certifi` and `make install`, with that uv or later (`uv
---version`): an older one lacks the protections above.
+--version`): one older than 0.13.5 lacks some or all of uv's CA protections
+above, and that one relock answers both the uv floor and the certifi floor.
 
 ### Upgrading from v0.7.x
 
