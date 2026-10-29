@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Tests for scripts/java/coverage.py, run as scripts/java/coverage.sh runs it
-# (python3 -I, from the project root, the report path first, then one JaCoCo CSV
-# path per selected module): per case, small CSV fixtures made in a temp dir, a
+# (python3 -I, from the project root, the report path first, then the JaCoCo CSV
+# path of each selected module that wrote one this run; the missing-CSV cases
+# call it directly): per case, small CSV fixtures made in a temp dir, a
 # monolith (module ".") and a multi-module build, and the whole report
-# compared with the expected one. No Maven, no network. Prints PASS/FAIL per
-# case.
+# compared with the expected one; then scripts/java/failed_tests.py over small
+# test reports. No Maven, no network. Prints PASS/FAIL per case.
 set -euo pipefail
 
 script=$(cd "$(dirname "$0")/.." && pwd)/scripts/java/coverage.py
@@ -14,10 +15,10 @@ fails=0
 csv=target/site/jacoco/jacoco.csv
 header=GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
 
-# module DIR ROW...: DIR/target/site/jacoco/jacoco.csv, holding the header and ROWs
+# module DIR ROW...: DIR/target/site/jacoco/jacoco.csv, holding the header (or $hdr, if set) and ROWs
 module() {
   mkdir -p "$work/$1/${csv%/*}"
-  printf '%s\n' "$header" "${@:2}" >"$work/$1/$csv"
+  printf '%s\n' "${hdr-$header}" "${@:2}" >"$work/$1/$csv"
 }
 
 # expect LABEL WANT-STATUS WANT-TEXT MODULE...: coverage.py over the CSV of each MODULE ("." for a
@@ -126,8 +127,41 @@ expect "a CSV with no line or branch counts as 100%" 0 "Overall: 100.0% lines, 1
 module empty
 expect "a header-only CSV fails, saying there is no data" 1 "Error: No coverage data found." empty
 no_report "a header-only CSV writes no report"
+hdr=${header/LINE_COVERED,/} module nocol 'p,com.a,Foo,4,16,1,3,2,1,3,0,2'
+expect "a CSV without a column the report uses fails, naming the CSV and the column" 1 \
+  "Error: nocol/$csv is missing expected JaCoCo columns: LINE_COVERED" nocol
+no_report "a CSV without a column writes no report"
+module blank && : >"$work/blank/$csv"
+expect "a 0-byte CSV fails, listing every column" 1 \
+  "Error: blank/$csv is missing expected JaCoCo columns: PACKAGE, CLASS, LINE_MISSED, LINE_COVERED, BRANCH_MISSED, BRANCH_COVERED" blank
+no_report "a 0-byte CSV writes no report"
 expect "no CSV at all fails the same way" 1 "Error: No coverage data found." missing
 no_report "no CSV at all writes no report"
+
+# failed_tests.py over report paths on stdin: a failure, an error and an unreadable or missing
+# report each name their class, once, sorted; a passing report does not.
+reports=$work/reports
+mkdir -p "$reports"
+printf '<testsuite name="a.Ok" failures="0" errors="0"/>' >"$reports/TEST-a.Ok.xml"
+printf '<testsuite name="a.Bad" failures="1" errors="0"/>' >"$reports/TEST-a.Bad.xml"
+printf '<testsuite name="a.Err" failures="0" errors="2"/>' >"$reports/TEST-a.Err.xml"
+printf 'not xml' >"$reports/TEST-a.Junk.xml"
+want='a.Bad, a.Err, a.Gone (unreadable report), a.Junk (unreadable report)'
+out=$(printf '%s\n' "$reports"/TEST-a.{Ok,Err,Bad,Junk,Gone,Bad}.xml | python3 -I "${script%/*}/failed_tests.py" 2>&1) || out="exit $?: $out"
+if [[ $out == "$want" ]]; then
+  echo "PASS failed_tests.py names each failing, erroring or unreadable report's class once"
+else
+  echo "FAIL failed_tests.py names each failing, erroring or unreadable report's class once: got $out"
+  fails=$((fails + 1))
+fi
+out=$(python3 -I "${script%/*}/failed_tests.py" </dev/null 2>&1) || out="exit $?: $out"
+if [[ -z $out ]]; then
+  echo "PASS failed_tests.py prints nothing for no reports"
+else
+  echo "FAIL failed_tests.py prints nothing for no reports: got $out"
+  fails=$((fails + 1))
+fi
+
 rc=0
 out=$(cd "$work" && python3 -I "$script" .coverage.md 2>&1) || rc=$?
 if [[ $rc == 1 && $out == "Usage: coverage.py"* ]]; then

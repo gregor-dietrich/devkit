@@ -120,17 +120,22 @@
 #          same way, and to pass once the module appends that license to
 #          includedLicenses, and then, in that copy, two more jars each
 #          under an allowed and a commercial license to pass;
-#          then alter the compiler plugin's jar in a copy's local repository
-#          (read-through to ~/.m2 otherwise) and expect lint to fail on a
-#          checksum mismatch (java/checksums), and
+#          then make coverage of a monolith whose source does not compile,
+#          and of java-multimodule with that break in app, each over the CSV
+#          of an earlier run, to ignore it and say so (the monolith leaving
+#          no earlier .coverage.md, the multimodule copy reporting core alone
+#          and ignoring an earlier failing test report); then alter the compiler plugin's jar in a copy's local
+#          repository (read-through to ~/.m2 otherwise) and expect lint to
+#          fail on a checksum mismatch (java/checksums), and
 #          break copies of the monolith
 #          (format, a shared and a project checkstyle rule, the project
-#          rule's suppression, coverage, an image digest, Markdown, a secret
+#          rule's suppression, coverage, a failing test under make coverage,
+#          an image digest, Markdown, a secret
 #          committed, staged or unstaged, behind a -diff attribute, in a
 #          conflict resolution, a change a clean merge adds or behind a
 #          textconv driver, a missing git object, a devkitw without its
-#          revision line) and expect lint or test to fail for that reason
-#          (and the conflict resolution's fingerprint in .gitleaksignore to
+#          revision line) and expect lint, test or coverage to fail for
+#          that reason (and the conflict resolution's fingerprint in .gitleaksignore to
 #          pass lint), and make format to
 #          fix the format break so that lint passes; expect check to fail
 #          without checkstyle-project.xml, on a FRONTEND_DIR that is neither
@@ -1518,6 +1523,12 @@ negatives() {
   # The blank-name branch goes untested; the test itself still passes.
   negative coverage test "Coverage checks have not been met" "$test" \
     's/greet(" ")/greet("world")/'
+  # A failing test fails make coverage, which names its class.
+  negative red-test coverage "failing tests: devkit.fixture.GreeterTest" "$test" 's/"Hello, Ada"/"Hello, Bob"/'
+  check "java-monolith: a module the build did not reach contributes no earlier coverage report: none written fails make coverage and writes no .coverage.md" \
+    stale_none
+  check "java-multimodule: a module the build did not reach contributes no earlier coverage report: the reached core alone is reported, with a warning" \
+    stale_partial
   negative digest lint "it carries no digest" compose.yaml 's/@sha256:[0-9a-f]*//'
   # Built here, so this file holds no token; edited() leaves the change unstaged.
   secret_negatives
@@ -1827,8 +1838,45 @@ annotations_managed() {
     grep -qF "com.github.spotbugs:spotbugs-annotations:jar:$want:provided" "$1.deps"
 }
 
+# stale_csv DIR FIXTURE SED SRC: a copy of FIXTURE in DIR, its main source SRC (in a module, or at the
+# root) run through SED, and the CSV of an earlier run, a class StaleOnly dated 2000, planted in
+# SRC's module.
+stale_csv() {
+  setup "$2" "$1" && sed_into "$1/$4" "$3" && mkdir -p "$1/${4%%src/*}target/site/jacoco" &&
+    printf '%s\n' 'GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED' \
+      'p,stale,StaleOnly,9,1,0,0,9,1,1,0,1,0' >"$1/${4%%src/*}target/site/jacoco/jacoco.csv" &&
+    touch -t 200001010000 "$1/${4%%src/*}target/site/jacoco/jacoco.csv"
+}
+
+# stale_none: in a monolith whose main source does not compile, make coverage fails, says no module
+# wrote a report, and leaves no .coverage.md, though the module holds the CSV of an earlier run and
+# the project the report of one.
+stale_none() {
+  local dir=$work/stale-none
+  stale_csv "$dir" "$root/tests/fixtures/java-monolith" 's/^package .*/&\n\nnot java/' src/main/java/devkit/fixture/Greeter.java &&
+    echo StaleOnly >"$dir/.coverage.md" &&
+    make_says fail "$dir" coverage "no module wrote a coverage report" && [[ ! -e $dir/.coverage.md ]]
+}
+
+# stale_partial: in java-multimodule with a compile break in app, make coverage fails, warns that app
+# wrote no report and that the report covers only the modules the build reached, and reports core
+# alone: not app's earlier CSV, nor a failing test report core holds from an earlier run.
+stale_partial() {
+  local dir=$work/stale-partial out
+  stale_csv "$dir" "$root/tests/fixtures/java-multimodule" 's/^package .*/&\n\nnot java/' app/src/main/java/devkit/fixture/app/Parity.java &&
+    mkdir -p "$dir/core/target/surefire-reports" &&
+    printf '<testsuite name="devkit.fixture.Gone" failures="1" errors="0"/>' >"$dir/core/target/surefire-reports/TEST-devkit.fixture.Gone.xml" &&
+    touch -t 200001010000 "$dir/core/target/surefire-reports/TEST-devkit.fixture.Gone.xml" || return
+  if out=$(make --no-print-directory -C "$dir" coverage 2>&1) ||
+    [[ $out != *"module app wrote no coverage report"* || $out != *"covers only the modules the build reached"* || $out == *Gone* ]]; then
+    printf '%s\n' "$out"
+    return 1
+  fi
+  grep -q devkit.fixture.core "$dir/.coverage.md" && ! grep -q StaleOnly "$dir/.coverage.md"
+}
+
 # integration_tests DIR: make test in DIR with the integration tests on passes, and failsafe ran GreeterIT
-# (make coverage, which also runs them, ignores test failures).
+# (make coverage runs them too, and fails on a failing one).
 integration_tests() {
   local -x MAVEN_ARGS=-DskipITs=false
   make_says pass "$1" test "Tests completed." && [[ -f $1/target/failsafe-reports/devkit.fixture.GreeterIT.txt ]]

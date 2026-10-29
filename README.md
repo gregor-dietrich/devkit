@@ -378,6 +378,11 @@ declares it), and remove the Quarkus entries from the project's dependency
 update bot, which would propose a version the parent owns. Run `make clean`
 once after the bump.
 
+`make coverage` now fails on a failing or erroring test, which it used to pass,
+and reports only what the run measured: a module the build did not reach is
+left out, with a warning, instead of contributing its last report
+([Scripts](docs/contract.md#scripts)).
+
 `DEVKIT_MAVEN_MIRROR` is now an ordered list of base URLs, tried in turn
 ([Parent POM](docs/contract.md#parent-pom)). Unset, empty or blank, it no longer
 means Maven Central only: the pinned Maven's download and `make check`'s pin

@@ -5,6 +5,8 @@ import csv
 import sys
 from typing import Dict, List, Tuple
 
+COLUMNS = ["PACKAGE", "CLASS", "LINE_MISSED", "LINE_COVERED", "BRANCH_MISSED", "BRANCH_COVERED"]
+
 
 def get_module_from_path(csv_path: str) -> str:
     """Extract the module directory from a <module>/target/site/jacoco/jacoco.csv path."""
@@ -91,7 +93,12 @@ def main() -> None:
             module_rows[module] = []
         try:
             with open(csv_path, "r") as file:
-                csv_data = list(csv.DictReader(file))
+                reader = csv.DictReader(file)
+                missing = [c for c in COLUMNS if c not in (reader.fieldnames or [])]
+                if missing:
+                    print(f"Error: {csv_path} is missing expected JaCoCo columns: {', '.join(missing)}")
+                    sys.exit(1)
+                csv_data = list(reader)
                 rows.extend(csv_data)
                 module_rows[module].extend(csv_data)
         except FileNotFoundError:

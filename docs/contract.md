@@ -340,6 +340,16 @@ include .devkit/make/python-uv.mk
   `FRONTEND_DIR`'s `node_modules` and `src/main/frontend/generated`. devkit
   never removes `package.json` or `package-lock.json`; what a clean goal
   bound in the project's own POM removes is the project's.
+- A Maven project's `make coverage` runs `mvn verify` on the selection with
+  the integration tests on, under `--fail-at-end`, and fails, naming the
+  classes, even when Maven passes, on a failing or erroring test that a
+  surefire or failsafe report this run wrote below the project root
+  (`target/*-reports/TEST-*.xml`, the default report directories) records, or
+  on such a report it cannot read. It removes `.coverage.md` first and builds
+  it only from the `jacoco.csv` each selected module wrote this run: an
+  earlier run's is ignored, with a warning per module without one, and the
+  target fails when none wrote one. When Maven failed, it still reports the
+  modules Maven reached, says so, and exits with Maven's status.
 
 ## Repository gates
 
