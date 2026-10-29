@@ -1387,9 +1387,11 @@ that inherits it. It adds:
   `<skipITs>` in its `<properties>` beats the profile's, so a module that sets
   `skipITs` to `true` runs no integration test under `-Dnative` either:
   delete it.
-- `io.quarkus:quarkus-jacoco` in test scope, meant to record `@QuarkusTest`
-  coverage for jacoco-maven-plugin's report; that coverage is unmeasured
-  (#214; the property `quarkus.jacoco.report` is `false`, see above).
+- `io.quarkus:quarkus-jacoco` in test scope, for `@QuarkusTest` coverage: a
+  module's code that only its `@QuarkusTest`s exercise counts in that
+  module's jacoco-maven-plugin report and coverage minimum (`tests/run.sh
+  java` checks it on a `final` `@ApplicationScoped` bean, which Quarkus
+  rewrites; the property `quarkus.jacoco.report` is `false`, see above).
 
 A module that is not a Quarkus application, a library or a client that needs
 no Quarkus BOM, inherits `devkit-parent` directly. Once any pom of the project

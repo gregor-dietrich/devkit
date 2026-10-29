@@ -106,7 +106,9 @@
 #          tests/fixtures/java-* consumer, pinned to that tag over file://
 #          and committed as a git repository of its own, through make help,
 #          check, lint, test, coverage and format, the passing lint, test
-#          and coverage logs without a [WARNING] line; then make install
+#          and coverage logs without a [WARNING] line, java-quarkus' make
+#          coverage missing no instruction, branch or line of the bean only
+#          its @QuarkusTest exercises; then make install
 #          java-multimodule (and java-quarkus) into a local repository of
 #          its own, which reads through to ~/.m2, and expect its installed
 #          poms to name neither a devkit parent nor an unresolved ${...},
@@ -1875,6 +1877,16 @@ stale_partial() {
   grep -q devkit.fixture.core "$dir/.coverage.md" && ! grep -q StaleOnly "$dir/.coverage.md"
 }
 
+# quarkus_test_covered DIR: the JaCoCo CSV make coverage left in DIR's api has Greeting's instructions,
+# branches and lines covered and none missed, while Greeting is still final (ArC rewrites it) and no
+# test but GreetingTest, the @QuarkusTest, names it.
+quarkus_test_covered() {
+  local api=$1/api
+  grep -qx 'public final class Greeting {' "$api/src/main/java/devkit/fixture/api/Greeting.java" &&
+    ! grep -rqw --exclude=GreetingTest.java Greeting "$api/src/test" &&
+    grep -qx '[^,]*,devkit\.fixture\.api,Greeting,0,[1-9][0-9]*,0,[1-9][0-9]*,0,[1-9][0-9]*,.*' "$api/target/site/jacoco/jacoco.csv"
+}
+
 # integration_tests DIR: make test in DIR with the integration tests on passes, and failsafe ran GreeterIT
 # (make coverage runs them too, and fails on a failing one).
 integration_tests() {
@@ -1957,6 +1969,8 @@ java_part() {
     source_encoding "$work/java-monolith"
   check "java-monolith: make test with the integration tests on passes, the parent's quarkus.jacoco.report=false reaching failsafe too" \
     integration_tests "$work/java-monolith"
+  check "java-quarkus: make coverage's report misses no instruction, branch or line of api's Greeting, a final bean ArC rewrites, which only a @QuarkusTest exercises" \
+    quarkus_test_covered "$work/java-quarkus"
   check "parent: the SpotBugs analyzer dependency excludes what the plugin's own declaration of it excludes" \
     spotbugs_exclusions_match "$root/java/parent/pom.xml" "$HOME/.m2/repository"
   check "parent: the committed checksums list the artifacts of the formatter version Spotless runs, whose lockfile spotless-lib-extra embeds" \

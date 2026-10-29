@@ -98,9 +98,7 @@ break a gate silently.
   tagged only after it passes. A new closure joins its list in the
   `Makefile`.
 - `make maven-checksums` regenerates `java/checksums/checksums.sha256`
-  after a plugin version in a parent POM, `quarkus.platform.version`,
-  `eclipse-formatter.version`, or the Maven version `pinned_maven.sh` pins,
-  changes (network; `tests/run.sh shell` fails without it).
+  (network); README, "Gating devkit itself", lists the changes that need it.
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
   run `make gate`, then push.

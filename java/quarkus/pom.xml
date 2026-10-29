@@ -53,8 +53,10 @@
       <artifactId>quarkus-junit</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- Meant for @QuarkusTest coverage (unmeasured, #214); the org.jacoco artifacts it uses
-         are managed by devkit-parent. -->
+    <!-- For @QuarkusTest coverage: a module's code that only its @QuarkusTests exercise counts in
+         that module's jacoco-maven-plugin report and coverage minimum (tests/run.sh's
+         quarkus_test_covered checks it). The org.jacoco artifacts it uses are managed by
+         devkit-parent. -->
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-jacoco</artifactId>

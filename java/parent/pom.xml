@@ -84,8 +84,9 @@
   <dependencyManagement>
     <dependencies>
       <!-- Align the org.jacoco artifacts of io.quarkus:quarkus-jacoco with jacoco-maven-plugin.
-      quarkus-jacoco offline-instruments the app classes with its own org.jacoco, which is meant
-      to record @QuarkusTest coverage (unmeasured, #214); if that version differs from the
+      quarkus-jacoco offline-instruments the app classes with its own org.jacoco, which records
+      @QuarkusTest coverage into jacoco-maven-plugin's jacoco.exec (tests/run.sh's
+      quarkus_test_covered checks that it reaches the report); if that version differs from the
       plugin's, the plugin cannot map the exec data and coverage collapses. Managing them here
       lets JaCoCo update independently of the version the Quarkus BOM bundles. -->
       <dependency>
