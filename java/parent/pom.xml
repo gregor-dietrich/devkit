@@ -2,11 +2,12 @@
 <!-- devkit's parent POM: the shared Maven gate configuration (enforcer for the JDK and Maven
      versions, compiler with Error Prone and NullAway, surefire, failsafe, license,
      dependency-check, SpotBugs with find-sec-bugs, PMD, Checkstyle, JaCoCo, Spotless) with every
-     gate tool's version, and the resources plugin that makes PMD's filtered ruleset. A consumer's
+     gate tool's version, and the resources plugin that makes PMD's filtered rulesets. A consumer's
      root pom declares it as its <parent> with
      <relativePath>.devkit/java/parent/pom.xml</relativePath>, so Maven reads it through the link
-     devkitw creates, or declares java/quarkus/pom.xml, which derives from it. Its version is the
-     devkit release tag without the "v"; it is published to no repository. The interface is docs/contract.md ("Parent POM").
+     devkitw creates, or declares a parent derived from it (java/quarkus/pom.xml,
+     java/vaadin/pom.xml). Its version is the devkit release tag without the "v"; it is
+     published to no repository. The interface is docs/contract.md ("Parent POM").
 
      The version stays literal, never ${revision}: devkit's build scripts pass -Drevision for the
      consumer's own version. No description, url, licenses, scm, organization or developers:
@@ -79,6 +80,15 @@
     <nullaway.excluded.field.annotations>io.quarkus.test.InjectMock,io.quarkus.test.junit.mockito.InjectSpy</nullaway.excluded.field.annotations>
     <!-- Appended to the Error Prone argument, e.g. -XepExcludedPaths:.*/generated-sources/.* -->
     <error-prone.extra.args></error-prone.extra.args>
+
+    <!-- Hooks for devkit's derived parents, not override points for a consumer: a derived parent
+         owns them, and a hook renamed later would silently drop a consumer's override (a module
+         that wants other SpotBugs filters sets excludeFilterFile itself). devkit.spotbugs.filters:
+         entries appended to the baseline in excludeFilterFile, each with its leading comma.
+         devkit.pmd.ruleset: the file of java/config the PMD gate reads, which the pmd-ruleset
+         execution copies into target/devkit. -->
+    <devkit.spotbugs.filters></devkit.spotbugs.filters>
+    <devkit.pmd.ruleset>pmd-ruleset.xml</devkit.pmd.ruleset>
   </properties>
 
   <dependencyManagement>
@@ -435,7 +445,7 @@
             </dependency>
           </dependencies>
           <configuration>
-            <excludeFilterFile>${maven.multiModuleProjectDirectory}/.devkit/java/config/spotbugs-baseline.xml,${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+            <excludeFilterFile>${maven.multiModuleProjectDirectory}/.devkit/java/config/spotbugs-baseline.xml${devkit.spotbugs.filters},${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
             <effort>Max</effort>
             <threshold>Low</threshold>
             <!-- find-sec-bugs' detectors, under the same threshold and filters. SpotBugs resolves
@@ -482,8 +492,10 @@
           <artifactId>maven-resources-plugin</artifactId>
           <version>${resources-plugin.version}</version>
           <executions>
-            <!-- PMD cannot read a property into a ruleset, so the ruleset is copied into the
-                 build directory with ${pmd.extraAssertMethodNames} filled in. initialize
+            <!-- PMD cannot read a property into a ruleset, so pmd-ruleset.xml and the file
+                 devkit.pmd.ruleset names (in a derived parent, a ruleset that
+                 references the former) are copied into the build directory with
+                 ${pmd.extraAssertMethodNames} filled in. initialize
                  runs before PMD in make lint's goal list and in the lifecycle up to verify,
                  and needs no generated source. Only the ${*}
                  delimiter applies, so an @ an XPath rule may carry is never read as a
@@ -510,6 +522,7 @@
                     <directory>${maven.multiModuleProjectDirectory}/.devkit/java/config</directory>
                     <includes>
                       <include>pmd-ruleset.xml</include>
+                      <include>${devkit.pmd.ruleset}</include>
                     </includes>
                     <filtering>true</filtering>
                   </resource>
@@ -528,7 +541,7 @@
             <includeTests>true</includeTests>
             <linkXRef>false</linkXRef>
             <rulesets>
-              <ruleset>${project.build.directory}/devkit/pmd-ruleset.xml</ruleset>
+              <ruleset>${project.build.directory}/devkit/${devkit.pmd.ruleset}</ruleset>
             </rulesets>
             <failOnViolation>true</failOnViolation>
             <!-- Logs each failing violation, at WARN, which devkit's targets keep under -q

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs patterns devkit's Vaadin parent silences for every Vaadin module, read after
+     spotbugs-baseline.xml (devkit.spotbugs.filters in java/vaadin/pom.xml). The Match is
+     unscoped: a module whose sessions really are serialized sets excludeFilterFile itself.
+     Vaadin components are Serializable by inheritance, so a module's classes inherit the
+     serialization contract without wanting it: SE_NO_SERIALVERSIONID, SE_BAD_FIELD and
+     SE_TRANSIENT_FIELD_NOT_RESTORED report it on every view and component. Their constructors
+     build the UI, calling overridable methods such as add(...):
+     MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR. The same decision as -Xlint:-serial and
+     -Xlint:-this-escape in the Vaadin parent's compiler arguments. -->
+<FindBugsFilter xmlns="http://findbugs.sourceforge.net/filter/3.0.0">
+  <Match>
+    <Bug pattern="SE_NO_SERIALVERSIONID,SE_BAD_FIELD,SE_TRANSIENT_FIELD_NOT_RESTORED,MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR" />
+  </Match>
+</FindBugsFilter>

@@ -59,7 +59,8 @@ MAVEN_TIMEOUT = 600
 # Remedy printed when a @vaadin/* component has drifted off its manifest version.
 REGEN_HINT = (
     "Regenerate the committed frontend files at the pinned Vaadin version (a Vaadin build-frontend run), "
-    "or move <vaadin.version> to the version they were generated from."
+    "or set vaadin.version to the version they were generated from: in the project's pom, or, on "
+    "devkit's Vaadin parent, by pinning a devkit release that carries it."
 )
 
 

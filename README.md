@@ -5,7 +5,8 @@ projects would otherwise copy between each other: shared Make targets
 (`make/`), the scripts behind them (`scripts/`), the shared Maven gate
 configurations (`java/config/`) and a parent POM that applies them
 (`java/parent/`), with a parent derived from it for Quarkus projects
-(`java/quarkus/`).
+(`java/quarkus/`) and one derived from that for Vaadin UI modules
+(`java/vaadin/`).
 A project consumes one pinned release of it through a small committed
 wrapper, `devkitw`, on the pattern of the Maven wrapper: the wrapper fetches
 the pinned commit once per machine into a cache and links it into the
@@ -44,13 +45,18 @@ touches it. Once consumers adopt it, some things are hard to change: its
 coordinates, its path, the tag-to-version mapping, and the property names
 and execution ids consumers override, since a renamed one silently
 ignores the override.
-Its derivative, `java/quarkus/pom.xml`, also carries the framework version,
-Quarkus' platform: in one place, a version moves with a devkit release under
-the same 24-hour rule as the tools, and the Quarkus build extension and the
-BOM are checked against the plugin checksums at the pinned version. The cost
-is accepted: a framework patch reaches a consumer through a devkit release
-and a bump, ahead of one only through the unchecked command-line hatch
-([Quarkus parent](docs/contract.md#quarkus-parent)).
+Its two derivatives, `java/quarkus/pom.xml` and `java/vaadin/pom.xml`,
+also carry the framework versions, Quarkus' platform and Vaadin's with its
+Node: in one place, a version moves with a devkit release under the same
+24-hour rule as the tools, and what devkit loads from them (the Quarkus
+build extension and BOM, Vaadin's BOM, `vaadin-quarkus-extension` with its
+deployment modules, and `vaadin-maven-plugin`) is checked against the plugin
+checksums at exactly the version every consumer that inherits it runs. The
+cost is accepted: a framework patch reaches a consumer
+only through a devkit release and a bump, ahead of one only through the
+unchecked command-line hatch
+([Quarkus parent](docs/contract.md#quarkus-parent),
+[Vaadin parent](docs/contract.md#vaadin-parent)).
 
 **Rejected options:**
 
@@ -95,7 +101,7 @@ written against it. In short, a project:
    `.devkit/make/java-maven.mk` or `.devkit/make/python-uv.mk`, then its
    own targets; a rule line ending in `## description` is listed by
    `make help`;
-5. for Maven, inherits devkit's parent POM (or the Quarkus parent) in its
+5. for Maven, inherits devkit's parent POM (or a parent derived from it) in its
    root pom, as
    [the contract](docs/contract.md#parent-pom) shows, with a `<groupId>` of
    its own, and keeps only its own values there: overrides of the parent's
@@ -181,15 +187,15 @@ advisory, so a bump that fixes it forces its removal. Otherwise the fix is a
 bump of the closure.
 
 When a plugin's version, `eclipse-formatter.version`,
-`quarkus.platform.version`, or parent configuration that changes what a
-plugin resolves, changes in `java/parent/pom.xml` or `java/quarkus/pom.xml`,
-run
+`quarkus.platform.version`, `vaadin.version`, or parent configuration that
+changes what a plugin resolves, changes in `java/parent/pom.xml`,
+`java/quarkus/pom.xml` or `java/vaadin/pom.xml`, run
 `make maven-checksums` and commit `java/checksums/checksums.sha256` with the
 change; so does a bump of the Maven `scripts/lib/pinned_maven.sh` pins, and a
 change to a `java-*` fixture's dependencies. It records under that Maven, so it
 needs JDK 25, curl, tar, `sha256sum` or `shasum` and a direct route to
 Maven Central, but no Maven on `PATH`.
-`tests/run.sh shell` fails on a pinned jar, the imported BOM's `.pom` or a
+`tests/run.sh shell` fails on a pinned jar, every imported BOM's `.pom` or a
 build extension jar, or the pinned Maven distribution's line, that the file
 lacks, but not on a changed transitive
 closure, which only the re-record catches. The hashes are
@@ -212,8 +218,9 @@ without a re-record cannot land.
 A dependency pin bump in devkit takes only a release published at least 24
 hours before the bump's commit (the cutoff), so a compromised release is
 likelier to be caught and withdrawn before it ships: a plugin or tool version in
-`java/parent/pom.xml`, `quarkus.platform.version` in `java/quarkus/pom.xml`, the
-Maven `scripts/lib/pinned_maven.sh` pins, gitleaks
+`java/parent/pom.xml`, `quarkus.platform.version` in `java/quarkus/pom.xml`,
+`vaadin.version` and `vaadin.node.version` in `java/vaadin/pom.xml`, the Maven
+`scripts/lib/pinned_maven.sh` pins, gitleaks
 in `scripts/secrets.sh`, a closure in `markdown/` or `jscpd/`, an action's
 commit in `.gitea/workflows/`, and a fixture's `junit.version`,
 `assertj.version` or `uv.lock` in `tests/fixtures/`. A closure's lockfile is
@@ -236,7 +243,8 @@ waits.
 A bump of `quarkus.platform.version` also regenerates
 `java/config/findsecbugs-crlf-jboss-logging.txt`, as the comment in
 `java/parent/pom.xml` beside the sinks property describes, whenever the log
-types gained methods.
+types gained methods. A bump of `vaadin.version` also moves
+`vaadin.node.version` to the new release's `FrontendTools.DEFAULT_NODE_VERSION`.
 
 A bump of the `jscpd/` closure can change the tokens jscpd counts for a
 clone, and so push a consumer's accepted pair past its `max-tokens` without
@@ -252,21 +260,23 @@ commit is not on `main`. The last check relies on every commit on `main` having
 been reviewed, on devkit's remote and on the mirror a consumer may pin: `main`
 protected, and pull requests squash-merged. The release commit sets the
 version in `java/parent/pom.xml`, the `<parent><version>` of
-`java/quarkus/pom.xml`, the `<parent>` versions of the fixtures in
-`tests/fixtures/`, and in `docs/contract.md` the header, the TOML example's
-`version`, the version of both `<parent>` snippets and the tag-to-version
-example
+`java/quarkus/pom.xml` and of `java/vaadin/pom.xml`, the `<parent>` versions of
+the fixtures in `tests/fixtures/` (the `ui` module of `java-quarkus` included),
+and in `docs/contract.md` the header, the TOML example's `version`, the version
+of the three `<parent>` snippets and the tag-to-version example
 below it; the tag is `v` + that version, and `tests/run.sh` tags the tree
 under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
-Before tagging, review the parent's pins against the repositories
-`DEVKIT_MAVEN_MIRROR` lists, devkit's default list when it is unset, empty or
-blank (advisory, needs the network), and the Quarkus parent's the same way:
+Before tagging, review the parent's pins against
+the repositories `DEVKIT_MAVEN_MIRROR` lists, devkit's default list when it is
+unset, empty or blank (advisory, needs the network), and the Quarkus and Vaadin
+parents' the same way:
 
 ```sh
 PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
 PROJECT_ROOT=java/quarkus python3 scripts/java/version_check.py
+PROJECT_ROOT=java/vaadin python3 scripts/java/version_check.py
 ```
 
 Run `make audit` as well; unlike that check, it must pass: a release ships
@@ -383,6 +393,48 @@ and reports only what the run measured: a module the build did not reach is
 left out, with a warning, instead of contributing its last report
 ([Scripts](docs/contract.md#scripts)).
 
+A Vaadin UI module can now inherit `devkit-vaadin-parent`, which derives from
+the Quarkus parent ([Vaadin parent](docs/contract.md#vaadin-parent)). Adopting
+it:
+
+1. Inherit it: set the pom's `<parent>` artifactId and `<relativePath>`
+   (`.devkit/java/vaadin/pom.xml`, or `../.devkit/java/vaadin/pom.xml` in a
+   module one directory below the root), and keep the `<version>` in step with
+   `devkit.toml`.
+2. A UI module of a multi-module project inherits it directly, not through the
+   root: it declares its own `<groupId>` and restates the root's properties it
+   needs (contract, Vaadin parent). Before pinning a release older than this
+   one, move the project's poms back to `devkit-parent`, for the reason given
+   above.
+3. Delete from the project: the `vaadin.*` version properties, the
+   `vaadin-bom` import, `vaadin-quarkus-extension`, the
+   `-Xlint:-serial` and `-Xlint:-this-escape` appends, the Vaadin section
+   of `spotbugs-exclude.xml`, and a module `pmd-ruleset.xml` that only dropped
+   `ConstructorCallsOverridableMethod` together with the module pom's
+   `maven-pmd-plugin` `<rulesets>` redeclaration that names it. Delete the
+   `vaadin-maven-plugin` block of the `production` profile (the profile too if
+   nothing else is left in it). Adoption may silence more than the project's
+   own Vaadin section did: the parent's filter silences four patterns
+   (`SE_NO_SERIALVERSIONID`, `SE_BAD_FIELD`, `SE_TRANSIENT_FIELD_NOT_RESTORED`
+   and `MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR`), module-wide. A module
+   whose sessions are serialized sets `excludeFilterFile` itself.
+4. Remove the Vaadin entries from the project's dependency update bot, which
+   would propose a version the parent owns.
+5. Run `make clean` once after the bump: the compiler arguments changed.
+
+`check_frontend_deps` reads the parent's `vaadin.version` and compares the
+`@vaadin/*` versions of the frontend files with it, so a bump of devkit that
+moves it fails the check when they drift, until the project regenerates its
+frontend files.
+
+devkit's parent check now also refuses a pom that sets
+`devkit.spotbugs.filters` or `devkit.pmd.ruleset`, hooks of the derived
+parents, and a project path containing `&`, `<` or `"`, which the Vaadin
+parent's filtered PMD ruleset would carry unescaped into its XML (refused for
+every project, so a module that adopts the Vaadin parent later does not
+break): a consumer whose checkout path holds
+one of those characters moves it, and a pom that sets either hook drops it.
+
 `DEVKIT_MAVEN_MIRROR` is now an ordered list of base URLs, tried in turn
 ([Parent POM](docs/contract.md#parent-pom)). Unset, empty or blank, it no longer
 means Maven Central only: the pinned Maven's download and `make check`'s pin
@@ -455,8 +507,10 @@ the construct is pervasive, as in a framework such as Vaadin (components are
 `Serializable` by inheritance, and their constructors build the UI), or the code
 cannot be annotated (generated sources: javac has no path exclusion), does the
 module turn the lint off in its maven-compiler-plugin `<configuration>`, for the
-lint it needs and no other. A module that already excludes those SpotBugs
-patterns, as a Vaadin module does, keeps them:
+lint it needs and no other. A module on devkit-parent or the Quarkus parent that
+already excludes those SpotBugs patterns keeps them. A Vaadin module inherits
+the [Vaadin parent](docs/contract.md#vaadin-parent), which appends both flags
+(below) and excludes the patterns; any other module appends them itself:
 
 ```xml
 <compilerArgs combine.children="append">
@@ -493,11 +547,13 @@ cognitive complexity 15, cyclomatic complexity 10 per method and 80 per class,
 NPath 200 (PMD 7.17.0's defaults); TooManyMethods and TooManyFields keep their
 40. A violation is fixed, or silenced at its place with
 `@SuppressWarnings("PMD.<RuleName>")`. A Vaadin module, which calls setters
-while building a view in its constructor, drops
-ConstructorCallsOverridableMethod beside `-Xlint:-this-escape` (above) with the
-recipe in the [Parent POM](docs/contract.md#parent-pom) section: its own
-`pmd-ruleset.xml` references the parent's filtered copy of the kit's and
-excludes the rule, so every other rule stays.
+while building a view in its constructor, inherits the [Vaadin
+parent](docs/contract.md#vaadin-parent), whose PMD ruleset drops
+ConstructorCallsOverridableMethod beside the `-Xlint:-this-escape` it appends
+(above). Any other module that must drop a rule uses the recipe in the
+[Parent POM](docs/contract.md#parent-pom) section: its own `pmd-ruleset.xml`
+references the parent's filtered copy of the kit's and excludes the rule, so
+every other rule stays.
 
 `make rebase` no longer pushes: after it, review the rebase (and run the gates)
 and push with `git push --force-with-lease --force-if-includes` (if git

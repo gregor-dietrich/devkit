@@ -20,6 +20,9 @@ sys.exit("java/parent/pom.xml declares no <version>") if not version else print(
     "$1/java/parent/pom.xml"
 }
 
+# parent_property NAME [POM]: the value of POM's (default: $root's parent) property NAME, when on one line.
+parent_property() { sed -n "s|^ *<$1>\\(.*\\)</$1>.*|\\1|p" "${2:-$root/java/parent/pom.xml}"; }
+
 # frontend_plugins ROOT: the plugins check_frontend_deps.py of the devkit tree at ROOT runs through
 # MVN_CMD (HELP_EVALUATE, DEPENDENCY_GET), as groupId:artifactId:version, one per line
 frontend_plugins() {

@@ -10,7 +10,7 @@ devkit is written against this page; change it here first.
 | `devkitw` | Verbatim copy of devkit's `devkitw`; never edited in the project |
 | `devkit.toml` | The pin (`[devkit]`) and the project values devkit's scripts read (below) |
 | `Makefile` | Profile variables, the two includes, project-only targets |
-| `pom.xml` | Maven: the root pom inherits devkit's parent POM or its Quarkus parent, with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
+| `pom.xml` | Maven: the root pom inherits devkit's parent POM or a parent derived from it (Quarkus, Vaadin), with a `<groupId>` of its own and `maven.compiler.release` (see Parent POM) |
 | `.mvn/jvm.config` | Maven: the `jdk.compiler` exports and opens Error Prone needs |
 | `mvnw`, `.mvn/wrapper/maven-wrapper.properties` | Maven, optional: the Maven wrapper, of any distribution type, for an IDE or a bare build; no devkit target runs it (see Parent POM) |
 | `checkstyle-project.xml` | Maven: the project's own Checkstyle rules, at the root (see Maven configuration) |
@@ -851,16 +851,20 @@ one is missing or stale. A hook it did not write is never overwritten.
 
 Shared gate configs live in `java/config/` (`checkstyle.xml`, `pmd-ruleset.xml`,
 `eclipse-formatter.xml`, `spotbugs-baseline.xml`,
-`findsecbugs-crlf-jboss-logging.txt`). devkit's [parent POM](#parent-pom) reads
-them as `${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD
-reads a filtered copy of `pmd-ruleset.xml` (see [Parent POM](#parent-pom)).
+`findsecbugs-crlf-jboss-logging.txt`, and for the [Vaadin
+parent](#vaadin-parent) `spotbugs-vaadin.xml` and `pmd-ruleset-vaadin.xml`).
+devkit's [parent POM](#parent-pom) reads them as
+`${maven.multiModuleProjectDirectory}/.devkit/java/config/<file>`; PMD reads a
+filtered copy of `pmd-ruleset.xml`, or of `pmd-ruleset-vaadin.xml` in a Vaadin
+module (see [Parent POM](#parent-pom)).
 Project-specific files (`dependency-check-suppression.xml`,
 `spotbugs-exclude.xml`, `checkstyle-suppressions.xml`, `checkstyle-project.xml`,
 and a module's own optional PMD ruleset) stay in the project.
 
 SpotBugs runs at threshold `Low` with find-sec-bugs' security detectors
 (`com.h3xstream.findsecbugs:findsecbugs-plugin` at `findsecbugs.version`) beside
-its own, and reads devkit's `spotbugs-baseline.xml` and then the module's own
+its own, and reads devkit's `spotbugs-baseline.xml`, then a Vaadin module's
+`spotbugs-vaadin.xml`, then the module's own
 `spotbugs-exclude.xml`. devkit's excludes only
 `THROWS_METHOD_THROWS_RUNTIMEEXCEPTION`, which reports every rethrow of a caught
 `RuntimeException` (PMD's `AvoidThrowingRawExceptionTypes` still rejects a
@@ -871,8 +875,10 @@ reports a construct rather than a defect and fires at threshold `Low` on a
 construct the stack assumes. Every other finding, find-sec-bugs' included, is
 fixed, or excluded as narrowly as it stands: in the module's
 `spotbugs-exclude.xml` by pattern and class or method, or with
-`@SuppressFBWarnings`. A project that sets `excludeFilterFile` itself replaces
-both files, devkit's exclusions included. SpotBugs keeps the plugin's heap and
+`@SuppressFBWarnings`. A Vaadin module inherits the [Vaadin
+parent](#vaadin-parent), whose filter silences four more patterns. A project
+that sets `excludeFilterFile` itself replaces every file, devkit's exclusions
+included. SpotBugs keeps the plugin's heap and
 time limits (`maxHeap`, 512 MB, and `timeout`, 10 minutes); a project that needs
 more sets `<maxHeap>` or `<timeout>`.
 
@@ -949,8 +955,8 @@ when the file is missing.
 
 `java/parent/pom.xml` is `de.vptr.devkit:devkit-parent`, the shared gate
 configuration as a Maven parent. Since v0.2.0 a consumer's root pom must
-inherit it, or a parent derived from it ([Quarkus parent](#quarkus-parent)),
-and Maven reads it through the link:
+inherit it, or a parent derived from it ([Quarkus parent](#quarkus-parent),
+[Vaadin parent](#vaadin-parent)), and Maven reads it through the link:
 
 ```xml
 <parent>
@@ -1027,14 +1033,23 @@ and Maven reads it through the link:
   when
   - the project's path contains `:`, on which SpotBugs splits its plugin list,
     so find-sec-bugs would silently not load;
+  - the project's path contains `&`, `<` or `"`, which the resources
+    filtering of the Vaadin parent's PMD ruleset copy would write unescaped
+    into its XML (refused for every project, so a module that adopts the
+    Vaadin parent later does not break);
+  - the root pom or any module pom (`<modules>`, recursively, profiles
+    included) sets `devkit.spotbugs.filters` or `devkit.pmd.ruleset`, hooks of
+    the derived parents, not override points (a `-D` on the command line, in
+    `MAVEN_ARGS` or in `.mvn/maven.config` is not refused, as for the
+    versions);
   - the root pom's `<parent>` is none of devkit's parents;
   - the `<relativePath>` of the root pom, or of any module pom
     (`<modules>`, recursively, profiles included) whose `<parent>` is
     one of devkit's parents, is not exactly the path from that pom's directory
-    to that parent's file: `.devkit/java/parent/pom.xml` or
-    `.devkit/java/quarkus/pom.xml` for the root pom,
-    `../.devkit/java/quarkus/pom.xml` for an `api/pom.xml` that inherits
-    `devkit-quarkus-parent`;
+    to that parent's file: `.devkit/java/parent/pom.xml`,
+    `.devkit/java/quarkus/pom.xml` or `.devkit/java/vaadin/pom.xml` for the
+    root pom, `../.devkit/java/vaadin/pom.xml` for an `app-ui/pom.xml` that
+    inherits `devkit-vaadin-parent`;
   - the root's or any module pom's `<parent>` has the groupId `de.vptr.devkit`
     and an artifactId none of devkit's parents has: Maven would look it up
     remotely;
@@ -1096,8 +1111,9 @@ and Maven reads it through the link:
   `jacoco-plugin.version`, `license-plugin.version`, `nullaway.version`,
   `pmd-plugin.version`, `resources-plugin.version`,
   `spotbugs-plugin.version`, `spotbugs.version`, `spotless-plugin.version`,
-  `surefire-plugin.version`; and the Quarkus parent's
-  `quarkus.platform.version`), and manages the
+  `surefire-plugin.version`; and the derived parents': the Quarkus parent's
+  `quarkus.platform.version`, the Vaadin parent's `vaadin.version` and
+  `vaadin.node.version`), and manages the
   `org.jacoco` artifacts at the JaCoCo plugin's version, so Quarkus' own
   JaCoCo matches the plugin's. `spotbugs.version` is the analyzer
   `spotbugs-plugin.version` runs, which SpotBugs is told to use as a plugin
@@ -1129,7 +1145,8 @@ and Maven reads it through the link:
   `("this-escape")` silences one site, and a module where the construct is
   pervasive (a framework such as Vaadin) or cannot be annotated (generated
   sources) appends `-Xlint:-serial` or `-Xlint:-this-escape` to its
-  `<compilerArgs combine.children="append">`), surefire and
+  `<compilerArgs combine.children="append">`; a Vaadin module inherits the
+  [Vaadin parent](#vaadin-parent), which does), surefire and
   failsafe, and activates failsafe, license (`add-third-party`), SpotBugs,
   PMD (with CPD; `printFailingErrors` logs each failing violation), Checkstyle
   (the shared config and the execution `project`), JaCoCo (agent, report and
@@ -1214,6 +1231,8 @@ and Maven reads it through the link:
   | `pmd-cpd.minTokens` | `65` |
   | `pmd.extraAssertMethodNames` | empty; comma-separated names, without spaces, of the project's own assertion helpers, which UnitTestShouldIncludeAssert accepts besides PMD's defaults (`assert*`, `verify*`, ...), e.g. `statusCode,greetingIs` |
   | `skipITs` | `true` |
+  | `vaadin.require.home.node` | `true`; Vaadin parent only: whether the Vaadin build and dev mode require the Node of the user's home (see [Vaadin parent](#vaadin-parent)) |
+  | `vaadin.ci.build` | `true`; Vaadin parent only: Vaadin's `ci-build` for the Quarkus build step (see [Vaadin parent](#vaadin-parent)) |
   | `jvm.args` | empty; Quarkus parent only: Quarkus' own property, appended, space-separated, to the quarkus-maven-plugin's `<jvmArgs>` after the shared ones (see [Quarkus parent](#quarkus-parent)) |
   | `devkit.maven.range` | `[3.9.9,)`; the enforcer's Maven range for a bare or IDE build, which the pinned Maven under make meets at the default; an override is the project's call, lowering it at its own risk (Maven 3.9.8 built Quarkus projects that failed at runtime), and must still admit the pinned Maven |
   | `nullaway.annotated.packages` | `${project.groupId}`; comma-separated, without spaces |
@@ -1222,10 +1241,12 @@ and Maven reads it through the link:
 
 - PMD does not read `pmd.extraAssertMethodNames` itself: at `initialize` the
   parent's maven-resources-plugin execution `pmd-ruleset` copies
-  `pmd-ruleset.xml` to `target/devkit/` in each module, filling in
-  `${pmd.extraAssertMethodNames}` (the only placeholder the file carries; any
-  `${…}` added to it is expanded too), and PMD reads that copy. Every target
-  that runs PMD runs `initialize` first; a bare `mvn pmd:check` reads the
+  `pmd-ruleset.xml` and the file `devkit.pmd.ruleset` names (the same file
+  unless the Vaadin parent sets it) to `target/devkit/` in each module, filling
+  in `${pmd.extraAssertMethodNames}` (the only placeholder `pmd-ruleset.xml`
+  carries; the Vaadin file also carries `${project.build.directory}`; any
+  `${…}` added to either is expanded too), and PMD reads that copy. Every
+  target that runs PMD runs `initialize` first; a bare `mvn pmd:check` reads the
   previous build's copy, or fails after a `clean`. The CPD goals read no
   ruleset, so a bare `mvn pmd:cpd-check` needs no `initialize`. A project's
   plugin-level maven-resources-plugin configuration and its build filters do
@@ -1236,9 +1257,11 @@ and Maven reads it through the link:
   the filled-in `pmd.extraAssertMethodNames`, without copying the file. It
   redeclares PMD's `<rulesets>` with one entry, a `pmd-ruleset.xml` of its own,
   and that file references the filtered
-  copy, `target/devkit/pmd-ruleset.xml`, and excludes the rule. A Vaadin module,
-  whose constructors call setters while building the UI, drops
-  `ConstructorCallsOverridableMethod` this way. The module's pom:
+  copy, `target/devkit/pmd-ruleset.xml`, and excludes the rule. The example
+  drops `ConstructorCallsOverridableMethod`; a module that inherits the
+  [Vaadin parent](#vaadin-parent), whose constructors call setters while
+  building the UI, needs no recipe for that rule, which the parent's ruleset
+  drops, and uses it only for a further one. The module's pom:
 
   ```xml
   <plugin>
@@ -1274,7 +1297,13 @@ and Maven reads it through the link:
   `app/target/devkit/pmd-ruleset.xml` for the `MODULES` entry `app`. The bare
   `target/devkit/pmd-ruleset.xml` there reads the root's copy, if the last build
   left one, which holds the root's `pmd.extraAssertMethodNames`, not the
-  module's. From another directory
+  module's. A module on the Vaadin parent that drops a further rule references
+  that parent's copy instead,
+  `<module dir>/target/devkit/pmd-ruleset-vaadin.xml`
+  (`target/devkit/pmd-ruleset-vaadin.xml` in a single-module application;
+  `ui/target/devkit/pmd-ruleset-vaadin.xml` for the `MODULES` entry `ui`), not
+  `pmd-ruleset.xml`, which would bring `ConstructorCallsOverridableMethod`
+  back; only a module on the Vaadin parent has that copy. From another directory
   PMD fails where no file is at that path and reads whatever file is there
   otherwise: run a module from the root (`mvn -pl <module dir>`), not from
   inside it. The `<rulesets>` list carries no `combine.children="append"`: it
@@ -1336,13 +1365,23 @@ and Maven reads it through the link:
   `report` and `check` (JaCoCo), `pmd-check` and `cpd-check` (PMD),
   `checkstyle` and `project` (Checkstyle), `environment` (enforcer),
   `spotless-check` (Spotless), `spotbugs-check` (SpotBugs),
-  `add-third-party` (license), `default` (failsafe) and `pmd-ruleset`
-  (resources).
-- Never add a repository whose namespace ownership is unverified to the
-  root pom or to Maven's settings. Maven must find the parent only through
-  the link; a remote lookup of one of devkit's parents
-  (`de.vptr.devkit:devkit-parent`, `de.vptr.devkit:devkit-quarkus-parent`) is
-  the failure mode, and whatever serves it would configure the build.
+  `add-third-party` (license), `default` (failsafe), `pmd-ruleset`
+  (resources) and `vaadin-frontend` (Vaadin).
+- Two properties are hooks of devkit's derived parents, not override points
+  of a consumer: `devkit.spotbugs.filters` (empty; entries, each with its
+  leading comma, appended to the baseline in SpotBugs' `excludeFilterFile`
+  before the module's `spotbugs-exclude.xml`) and `devkit.pmd.ruleset`
+  (`pmd-ruleset.xml`; the file of devkit's `java/config` the PMD gate reads,
+  which the execution `pmd-ruleset` copies to `target/devkit/`). The Vaadin
+  parent sets them. `parent_check` refuses a consumer pom that sets either: a
+  derived parent owns them, and a hook renamed later would silently drop a
+  consumer's override. A module that wants other SpotBugs filters sets
+  `excludeFilterFile` itself.
+- Never add a repository whose namespace ownership is unverified to the root pom
+  or to Maven's settings. Maven must find the parent only through the link; a
+  remote lookup of one of devkit's parents (`de.vptr.devkit:devkit-parent`,
+  `de.vptr.devkit:devkit-quarkus-parent`, `de.vptr.devkit:devkit-vaadin-parent`)
+  is the failure mode, and whatever serves it would configure the build.
 
 ### Quarkus parent
 
@@ -1401,11 +1440,12 @@ the Quarkus parent rather than importing the BOM itself. A root that only
 aggregates may inherit the Quarkus parent: a module whose `<parent>` is the
 root inherits it through the root, and with it everything listed above.
 
-A module inherits one parent. One that inherits `devkit-parent` directly, as a
-module that is not a Quarkus application in a multi-module project whose root
-inherits the Quarkus parent does, inherits nothing from the project's root
-pom: it declares its own `<groupId>` and restates the root's properties and
-plugin configuration it needs.
+A module inherits one parent. One that inherits one of devkit's parents
+directly, as a module that is not a Quarkus application in a multi-module
+project whose root inherits the Quarkus parent does, or the Vaadin module of
+such a project, inherits nothing from the project's root pom: it declares its
+own `<groupId>` and restates the root's properties and plugin configuration it
+needs.
 
 `quarkus.platform.version` moves with a devkit release, so that the build
 extension and the BOM are checked against the plugin checksums at the pinned
@@ -1417,6 +1457,75 @@ through the command-line hatch described under Parent POM
 unrecorded and so unchecked, and defining the property in a pom is a partial
 migration.
 
+### Vaadin parent
+
+`java/vaadin/pom.xml` is `de.vptr.devkit:devkit-vaadin-parent`, the Quarkus
+parent plus what every Vaadin UI module shares. A Vaadin UI module inherits it
+in place of the Quarkus parent, directly: the root of a single-module
+application, or a module of a multi-module project, whose own root may inherit
+the Quarkus parent (it then inherits nothing from that root; see Quarkus
+parent):
+
+```xml
+<parent>
+  <groupId>de.vptr.devkit</groupId>
+  <artifactId>devkit-vaadin-parent</artifactId>
+  <version>0.8.0</version>
+  <relativePath>.devkit/java/vaadin/pom.xml</relativePath>
+</parent>
+```
+
+(`../.devkit/java/vaadin/pom.xml` in a module one directory below the root.)
+Its version is the Quarkus parent's, which it inherits through an explicit
+`<relativePath>`: the release tag without the `v`, literal, and the parent is
+published to no repository. Everything under Parent POM and Quarkus parent
+applies to a project that inherits it. It adds:
+
+- `vaadin.version` and `vaadin.node.version` (the Node that Vaadin's frontend
+  build installs), the import of `com.vaadin:vaadin-bom` at `vaadin.version`,
+  so a Vaadin artifact is declared without a `<version>`, and
+  `com.vaadin:vaadin-quarkus-extension` as a dependency.
+- The overridable defaults `vaadin.require.home.node` and `vaadin.ci.build`
+  (Parent POM), and the quarkus-maven-plugin `<systemProperties>` that hand
+  the Node settings to the Quarkus build step (`vaadin.build.*`) and to dev
+  mode's dev server (`vaadin.*`).
+- The `production` profile, with `com.vaadin:vaadin-maven-plugin` at
+  `vaadin.version` and its execution `vaadin-frontend`, which runs
+  `prepare-frontend` and `build-frontend` at `compile`.
+- `-Xlint:-serial` and `-Xlint:-this-escape` appended to the compiler's
+  `<compilerArgs>`: Vaadin components are `Serializable` by inheritance and
+  their constructors build the UI.
+- A SpotBugs filter, `java/config/spotbugs-vaadin.xml`, through
+  `devkit.spotbugs.filters`, and a PMD ruleset,
+  `java/config/pmd-ruleset-vaadin.xml`, through `devkit.pmd.ruleset` (the
+  hooks of Parent POM, not override points). The filter silences
+  `SE_NO_SERIALVERSIONID`, `SE_BAD_FIELD`, `SE_TRANSIENT_FIELD_NOT_RESTORED`
+  and `MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR` for every Vaadin module,
+  unscoped, so they apply to every class of the module, tests included, and
+  non-UI code belongs in a module on the Quarkus parent; a module whose
+  sessions really are serialized sets `excludeFilterFile` itself, which
+  replaces every shared filter. The ruleset is devkit's without
+  `ConstructorCallsOverridableMethod`. A module that drops a further rule
+  through its own `pmd-ruleset.xml` references the filtered copy
+  `<module dir>/target/devkit/pmd-ruleset-vaadin.xml`
+  (`target/devkit/pmd-ruleset-vaadin.xml` in a single-module application), e.g.
+  `ui/target/devkit/pmd-ruleset-vaadin.xml` for the `MODULES` entry `ui`, not
+  `pmd-ruleset.xml` (Parent POM).
+
+The effective `vaadin.version` is the parent's, and `check_frontend_deps.py`
+reads it from the frontend module (Scripts). It compares the `@vaadin/*`
+versions of the frontend files with it, so a devkit bump that moves
+`vaadin.version` fails `check_frontend_deps` when they drift, until the
+project regenerates its frontend files for the new release. Both properties
+move only with a devkit release, and a pom of a project that inherits the
+Vaadin parent that defines either is a partial migration. As for the
+Quarkus parent, a version passed through `-D` is unchecked.
+`vaadin.version` is checked against the plugin checksums at the pinned version
+(the BOM, `vaadin-quarkus-extension` with its deployment modules, which
+devkit's fixtures resolve by building a Vaadin module with packaging `quarkus`,
+and `vaadin-maven-plugin`); `vaadin.node.version` is held by the
+24-hour rule alone, because Vaadin downloads that Node itself, outside Maven.
+
 ### Plugin checksums
 
 `java/checksums/checksums.sha256` holds the SHA-256 of every artifact that
@@ -1424,16 +1533,18 @@ building devkit's `java-*` test fixtures through `make lint`, `test`,
 `coverage`, `install` and `format` resolves: the parent's plugins and their
 dependencies, the annotation processors (Error Prone, NullAway), find-sec-bugs'
 jar, which SpotBugs resolves through Maven's resolver, the Quarkus parent's
-build extension and BOM at its pinned `quarkus.platform.version` (a version
-passed through `-D` is unchecked), and the fixtures' dependencies, plus the
-closure of dependency-check's goals (recorded without an NVD key through the
-plugin's `help` goal; the closure its analysis downloads at run time, not
-through Maven, is not) and of the help and dependency plugins that
-`check_frontend_deps.py` runs. Each line is `<sha256>  <repository path>`.
-Maven's resolver checks every artifact it resolves against the file, from a
-download or from the local repository, and fails the build on a mismatch, so a
-repository or mirror that serves other bytes for a listed coordinate, or a jar
-altered in the local repository, fails the build with
+build extension and BOM at its pinned `quarkus.platform.version`, the Vaadin
+parent's BOM, `vaadin-quarkus-extension` with its deployment modules, and
+`vaadin-maven-plugin` at its pinned `vaadin.version` (a version passed through
+`-D` is unchecked), and the fixtures' dependencies, plus the closure of
+dependency-check's goals (recorded without an NVD key through the plugin's
+`help` goal; the closure its analysis downloads at run time, not through Maven,
+is not) and of the help and dependency plugins that `check_frontend_deps.py`
+runs. Each line is `<sha256>  <repository path>`. Maven's resolver checks every
+artifact it resolves against the file, from a download or from the local
+repository, and fails the build on a mismatch, so a repository or mirror that
+serves other bytes for a listed coordinate, or a jar altered in the local
+repository, fails the build with
 `Checksum validation failed … (Trusted Checksums Source: summaryFile)`.
 
 - The scripts behind `check`, `install`, `lint`, `format`, `test`, `coverage`,
@@ -1496,8 +1607,10 @@ altered in the local repository, fails the build with
   already malicious on Central. A re-record refuses to change the hash of a
   path already in the file.
 - A plain `mvn` outside the targets is not checked, and neither is anything
-  downloaded outside Maven (dependency-check's vulnerability data, and
-  `-Dnative`'s native-image toolchain or builder image). At the
+  downloaded outside Maven (dependency-check's vulnerability data,
+  `-Dnative`'s native-image toolchain or builder image, and a Vaadin module's
+  Node at `vaadin.node.version` with the npm packages its frontend build
+  installs). At the
   parent's `eclipse-formatter.version` and `spotless-plugin.version`, once
   `make maven-checksums` has recorded them (devkit's java tests fail when it
   has not), the Eclipse formatter's artifacts come through Maven and are
@@ -1518,11 +1631,12 @@ altered in the local repository, fails the build with
   and is recorded under that Maven, so the default lifecycle plugins it
   binds are checked.
 - The file is devkit's, regenerated by `make maven-checksums` in devkit
-  when a plugin version in either parent POM, `eclipse-formatter.version`,
-  `quarkus.platform.version`, or the pinned Maven, changes; devkit's
-  shell tests fail otherwise, but only for the top-level jar of every
-  plugin, plugin dependency and annotation processor the parents pin, the
-  imported BOM's `.pom` and the build extension jars, for
+  when a plugin version in a parent POM, `eclipse-formatter.version`,
+  `quarkus.platform.version`, `vaadin.version`, or the pinned Maven,
+  changes; devkit's shell tests fail otherwise, but only for the top-level
+  jar of every
+  plugin, plugin dependency and annotation processor the parents pin,
+  every imported BOM's `.pom` and the build extension jars, for
   the two plugins of `check_frontend_deps.py` and for the pinned Maven. It
   is no consumer's to edit.
 

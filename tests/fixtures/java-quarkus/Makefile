@@ -1,6 +1,6 @@
 PROJECT      := java-quarkus
 JAVA_VERSION := 25
-MODULES      := api                    # empty for a monolith
+MODULES      := api ui                 # empty for a monolith
 FRONTEND_DIR :=                       # optional; empty when there is none
 DEVKIT := $(shell ./devkitw path)
 ifeq ($(DEVKIT),)

@@ -47,13 +47,15 @@ derived() {
     "$(parent "$4" "$5" "$3")" >"$dk/java/$1/pom.xml"
   printf '<artifactId>%s</artifactId><properties>%s</properties></project>\n' "$2" "${6-}" >>"$dk/java/$1/pom.xml"
 }
-# fake_release: the fake devkit tree $dk with this checkout's parent and a Quarkus parent, consistent
+# fake_release: the fake devkit tree $dk with this checkout's parent and both derived parents, consistent
 fake_release() {
   rm -rf "$dk"
   mkdir -p "$dk/java/parent"
   cp "$root/java/parent/pom.xml" "$dk/java/parent/pom.xml"
   derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent "$version" ../parent/pom.xml \
     '<quarkus.platform.version>1</quarkus.platform.version>'
+  derived vaadin devkit-vaadin-parent de.vptr.devkit:devkit-quarkus-parent "$version" ../quarkus/pom.xml \
+    '<vaadin.version>1</vaadin.version><vaadin.node.version>1</vaadin.node.version>'
 }
 
 # module BODY: add module app-api, whose pom is BODY
@@ -90,7 +92,7 @@ expect() {
   fi
 }
 passed="devkit parent version check passed. ($version == v$version)"
-required="does not inherit a devkit parent (de.vptr.devkit:devkit-parent or devkit-quarkus-parent), which devkit requires since v0.2.0"
+required="does not inherit a devkit parent (de.vptr.devkit:devkit-parent, devkit-quarkus-parent or devkit-vaadin-parent), which devkit requires since v0.2.0"
 
 project "$(parent)$own"
 expect "devkit's parent at the pinned version passes" 0 "$passed"
@@ -114,6 +116,7 @@ mkdir -p "$work/devkit/java/parent"
 sed "s|^  <version>$version</version>$|  <version>0.0.0</version>|" "$root/java/parent/pom.xml" \
   >"$work/devkit/java/parent/pom.xml"
 dk=$work/devkit derived quarkus devkit-quarkus-parent de.vptr.devkit:devkit-parent 0.0.0 ../parent/pom.xml
+dk=$work/devkit derived vaadin devkit-vaadin-parent de.vptr.devkit:devkit-quarkus-parent 0.0.0 ../quarkus/pom.xml
 project "$(parent)$own"
 expect "a pin whose parent POM declares another version fails" 14 \
   "the pinned tag does not match its parent POM" "$work/devkit"
@@ -217,13 +220,20 @@ expect "SpotBugs <plugins> with combine.self=override fails" 14 \
   'pom.xml sets spotbugs-maven-plugin <plugins> with combine.self="override"'
 fake_release
 q=de.vptr.devkit:devkit-quarkus-parent
+v=de.vptr.devkit:devkit-vaadin-parent
 qpath=.devkit/java/quarkus/pom.xml
+vpath=.devkit/java/vaadin/pom.xml
 unknown="which is none of devkit's parents; Maven would look it up remotely."
 project "$(parent "$version" "$qpath" $q)$own"
 expect "a root inheriting the Quarkus parent passes" 0 "$passed" "$dk"
+project "$(parent "$version" "$vpath" $v)$own"
+expect "a root inheriting the Vaadin parent passes" 0 "$passed" "$dk"
 project "$(parent)$own"
 module "$(parent "$version" "../$qpath" $q)$own"
 expect "a module inheriting the Quarkus parent by its own path passes" 0 "$passed" "$dk"
+project "$(parent "$version" "$qpath" $q)$own"
+module "$(parent "$version" "../$vpath" $v)$own"
+expect "a module inheriting the Vaadin parent under a Quarkus root passes" 0 "$passed" "$dk"
 project "$(parent "$version" .devkit/java/parent/pom.xml $q)$own"
 expect "a root inheriting the Quarkus parent by the base parent's path fails" 14 \
   "pom.xml's <parent><relativePath> must be $qpath, not .devkit/java/parent/pom.xml" "$dk"
@@ -231,6 +241,13 @@ project "$(parent)$own"
 module "$(parent "$version" "$mpath" $q)$own"
 expect "a module inheriting the Quarkus parent by the base parent's path fails" 14 \
   "app-api/pom.xml's <parent><relativePath> must be ../$qpath, not $mpath" "$dk"
+project "$(parent "$version" "$qpath" $v)$own"
+expect "a root inheriting the Vaadin parent by the Quarkus parent's path fails" 14 \
+  "pom.xml's <parent><relativePath> must be $vpath, not $qpath" "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "../$vpath" $q)$own"
+expect "a module inheriting the Quarkus parent by the Vaadin parent's path fails" 14 \
+  "app-api/pom.xml's <parent><relativePath> must be ../$qpath, not ../$vpath" "$dk"
 project "$(parent 0.0.0 "$qpath" $q)$own"
 expect "a root inheriting the Quarkus parent off the pin fails" 14 \
   "pom.xml inherits $q 0.0.0, but devkit.toml pins v$version" "$dk"
@@ -238,6 +255,10 @@ project "$(parent)$own"
 module "$(parent 0.0.0 "../$qpath" $q)$own"
 expect "a module inheriting the Quarkus parent off the pin fails" 14 \
   "app-api/pom.xml inherits $q 0.0.0, but devkit.toml pins v$version" "$dk"
+project "$(parent)$own"
+module "$(parent 0.0.0 "../$vpath" $v)$own"
+expect "a module inheriting the Vaadin parent off the pin fails" 14 \
+  "app-api/pom.xml inherits $v 0.0.0, but devkit.toml pins v$version" "$dk"
 project "$(parent "$version" "$qpath" $q)<artifactId>my-app</artifactId>"
 expect "a root inheriting the Quarkus parent without its own groupId fails" 14 "has no <groupId> of its own" "$dk"
 project "$(parent "$version" "$qpath" de.vptr.devkit:devkit-nope)$own"
@@ -249,7 +270,7 @@ expect "a module inheriting an unknown de.vptr.devkit artifact fails" 14 \
   "app-api/pom.xml's <parent> names de.vptr.devkit:devkit-nope, $unknown" "$dk"
 project "$own"
 expect "a root without <parent> fails, naming the shipped parents" 14 \
-  "does not inherit a devkit parent (de.vptr.devkit:devkit-parent or devkit-quarkus-parent)" "$dk"
+  "does not inherit a devkit parent (de.vptr.devkit:devkit-parent, devkit-quarkus-parent or devkit-vaadin-parent)" "$dk"
 rm "$dk/java/quarkus/pom.xml"
 expect "a release without its Quarkus parent fails" 14 \
   "devkit's java/quarkus/pom.xml is missing: a defective devkit release; pin another one." "$dk"
@@ -273,6 +294,19 @@ derived quarkus devkit-quarkus-parent org.example:other "$version" ../parent/pom
 defective "a Quarkus parent that inherits another parent fails" \
   "java/quarkus/pom.xml does not inherit de.vptr.devkit:devkit-parent $version through ../parent/pom.xml"
 fake_release
+derived vaadin devkit-vaadin-parent de.vptr.devkit:devkit-parent "$version" ../parent/pom.xml
+defective "a Vaadin parent that skips the Quarkus parent fails" \
+  "java/vaadin/pom.xml does not inherit $q $version through ../quarkus/pom.xml"
+fake_release
+derived vaadin devkit-vaadin-parent $q 0.0.0 ../quarkus/pom.xml
+defective "a Vaadin parent off the pin fails" \
+  "java/vaadin/pom.xml does not inherit $q $version through ../quarkus/pom.xml"
+fake_release
+sed 's|<parent>.*</parent>||' "$dk/java/vaadin/pom.xml" >"$dk/java/vaadin/pom.xml.new"
+mv "$dk/java/vaadin/pom.xml.new" "$dk/java/vaadin/pom.xml"
+defective "a Vaadin parent without a <parent> fails" \
+  "java/vaadin/pom.xml does not inherit $q $version through ../quarkus/pom.xml"
+fake_release
 sed 's|</parent>|</parent><version>1</version>|' "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
 mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
 defective "a Quarkus parent declaring its own <version> fails" "java/quarkus/pom.xml declares a <version> of its own"
@@ -295,6 +329,12 @@ sed "s|<compilerArgs>|<compilerArgs combine.children=\"append\">|" "$dk/java/qua
 mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
 expect "a Quarkus parent setting <compilerArgs> with append passes" 0 "$passed" "$dk"
 fake_release
+sed "s|</project>|$(compiler_args '')</project>|" "$dk/java/vaadin/pom.xml" >"$dk/java/vaadin/pom.xml.new"
+mv "$dk/java/vaadin/pom.xml.new" "$dk/java/vaadin/pom.xml"
+project "$(parent)$own"
+expect "a Vaadin parent setting <compilerArgs> without append fails" 14 \
+  'java/vaadin/pom.xml sets maven-compiler-plugin <compilerArgs> without combine.children="append"' "$dk"
+fake_release
 sed "s|</project>|$(spotbugs '<jvmArgs>-Xss4m</jvmArgs>' | sed 's|<configuration>|<configuration combine.self="override">|')</project>|" \
   "$dk/java/quarkus/pom.xml" >"$dk/java/quarkus/pom.xml.new"
 mv "$dk/java/quarkus/pom.xml.new" "$dk/java/quarkus/pom.xml"
@@ -303,8 +343,9 @@ expect "a Quarkus parent overriding SpotBugs' <configuration> fails" 14 \
 
 fake_release
 owned_qv='<quarkus.platform.version>2</quarkus.platform.version>'
-project "$(parent)$own<properties>$owned_qv</properties>"
-expect "a project on the base parent alone may define quarkus.platform.version" 0 "$passed" "$dk"
+owned_vv='<vaadin.version>2</vaadin.version>'
+project "$(parent)$own<properties>$owned_qv$owned_vv</properties>"
+expect "a project on the base parent alone may define the derived parents' versions" 0 "$passed" "$dk"
 project "$(parent "$version" "$qpath" $q)$own<properties>$owned_qv</properties>"
 expect "a root inheriting the Quarkus parent defining quarkus.platform.version fails" 14 \
   "partial migration: remove <quarkus.platform.version> from pom.xml; the parent owns it" "$dk"
@@ -312,9 +353,53 @@ project "$(parent)$own<properties>$owned_qv</properties>"
 module "$(parent "$version" "../$qpath" $q)$own"
 expect "a base root defining quarkus.platform.version beside a Quarkus module fails" 14 \
   "partial migration: remove <quarkus.platform.version> from pom.xml" "$dk"
+project "$(parent "$version" "$qpath" $q)$own<properties>$owned_vv</properties>"
+expect "a root inheriting the Quarkus parent may define vaadin.version" 0 "$passed" "$dk"
+project "$(parent "$version" "$vpath" $v)$own<properties>$owned_vv</properties>"
+expect "a root inheriting the Vaadin parent defining vaadin.version fails" 14 \
+  "partial migration: remove <vaadin.version> from pom.xml; the parent owns it" "$dk"
+owned_nv='<vaadin.node.version>2</vaadin.node.version>'
+project "$(parent "$version" "$vpath" $v)$own<properties>$owned_nv</properties>"
+expect "a root inheriting the Vaadin parent defining vaadin.node.version fails" 14 \
+  "partial migration: remove <vaadin.node.version> from pom.xml; the parent owns it" "$dk"
+project "$(parent "$version" "$qpath" $q)$own<properties>$owned_vv</properties>"
+module "$(parent "$version" "../$vpath" $v)$own"
+expect "a root on the Quarkus parent defining vaadin.version beside a Vaadin module fails" 14 \
+  "partial migration: remove <vaadin.version> from pom.xml" "$dk"
+project "$(parent)$own<properties>$owned_vv</properties>"
+module "$(parent "$version" "../$vpath" $v)$own"
+expect "a base root defining vaadin.version beside a Vaadin module fails" 14 \
+  "partial migration: remove <vaadin.version> from pom.xml" "$dk"
+project "$(parent "$version" "$vpath" $v)$own<properties>$owned_qv</properties>"
+expect "a root inheriting the Vaadin parent defining quarkus.platform.version fails" 14 \
+  "partial migration: remove <quarkus.platform.version> from pom.xml; the parent owns it" "$dk"
+project "$(parent)$own<properties>$owned_qv</properties>"
+module "$(parent "$version" "../$vpath" $v)$own"
+expect "a root defining quarkus.platform.version beside a Vaadin module fails" 14 \
+  "partial migration: remove <quarkus.platform.version> from pom.xml" "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "$mpath")$own<properties>$owned_vv</properties>"
+expect "a module on the base parent alone may define vaadin.version" 0 "$passed" "$dk"
+project "$(parent)$own<properties><devkit.pmd.ruleset>x.xml</devkit.pmd.ruleset></properties>"
+expect "a root on the base parent setting devkit.pmd.ruleset fails" 14 \
+  "<devkit.pmd.ruleset> in pom.xml is a hook of devkit's derived parents, not an override point; remove it." "$dk"
+project "$(parent)$own"
+module "$(parent "$version" "../$vpath" $v)$own<properties><devkit.spotbugs.filters>,x.xml</devkit.spotbugs.filters></properties>"
+expect "a module on the Vaadin parent setting devkit.spotbugs.filters fails" 14 \
+  "<devkit.spotbugs.filters> in app-api/pom.xml is a hook of devkit's derived parents, not an override point; remove it." "$dk"
 proj=$work/co:lon project "$(parent)$own"
 proj=$work/co:lon expect "a project path with ':' fails, as find-sec-bugs would silently not load" 14 \
   "the project path $work/co:lon contains ':'"
+proj="$work/am&p" project "$(parent)$own"
+proj="$work/am&p" expect "a project path with '&' fails, as the Vaadin parent's filtered PMD ruleset would be malformed XML" 14 \
+  "the project path $work/am&p contains '&'"
+proj="$work/lt<x" project "$(parent)$own"
+proj="$work/lt<x" expect "a project path with '<' fails" 14 "the project path $work/lt<x contains '<'"
+proj="$work/q\"x" project "$(parent)$own"
+proj="$work/q\"x" expect "a project path with '\"' fails" 14 "the project path $work/q\"x contains '\"'"
+project "$(parent)$own<profiles><profile><id>p</id><properties><devkit.pmd.ruleset>x.xml</devkit.pmd.ruleset></properties></profile></profiles>"
+expect "a root profile setting devkit.pmd.ruleset fails" 14 \
+  "<devkit.pmd.ruleset> in pom.xml is a hook of devkit's derived parents, not an override point; remove it." "$dk"
 project "$(parent)$own"
 rm "$proj/pom.xml"
 expect "a missing pom.xml fails" 14 "cannot read pom.xml"

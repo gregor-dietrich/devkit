@@ -7,7 +7,9 @@
 # and put through the Maven goals of lint, test, coverage, install and format against a fresh,
 # empty local repository (no read-through), with the resolver recording what it resolves; so is the
 # dependency-check plugin's help goal, which resolves its closure without an NVD key, and so are
-# the help and dependency plugins check_frontend_deps.py pins (read from it). The result replaces
+# the help and dependency plugins check_frontend_deps.py pins (read from it), and so is the Vaadin
+# parent's vaadin-maven-plugin (its version read from java/vaadin/pom.xml), which only the
+# production profile declares and no fixture target runs. The result replaces
 # the file, sorted by path, and nothing else stays behind; one path recorded with two hashes
 # fails the run, and so does a path the committed file lists with another hash (a release path on
 # Central never changes: delete that line from the file to accept the new bytes, then re-run).
@@ -45,6 +47,14 @@ frontend=$(frontend_plugins "$root")
     exit 1
 }
 
+# The vaadin-maven-plugin of the Vaadin parent's production profile, as groupId:artifactId:version: its
+# help goal resolves the plugin and its dependencies without a frontend build.
+vaadin=com.vaadin:vaadin-maven-plugin:$(parent_property vaadin.version "$root/java/vaadin/pom.xml")
+[[ $vaadin =~ ^com\.vaadin:vaadin-maven-plugin:[0-9][0-9A-Za-z.-]*$ ]] || {
+    echo "ERROR: java/vaadin/pom.xml declares no vaadin.version on one line." >&2
+    exit 1
+}
+
 # No user or system settings (profile repositories, proxy) steer what is recorded, and the global
 # settings mirror every repository to Central over https, so that is the only place a transitive
 # POM's <repository> can resolve from (an empty global settings would drop Maven's http blocker).
@@ -74,7 +84,7 @@ chmod +x "$shim"
 cat >"$tmp/record.mk" <<'MK'
 record:
 	@set -e; for t in lint test coverage install format; do "$(DEVKIT)/scripts/java/$$t.sh"; done; \
-		for p in org.owasp:dependency-check-maven $(FRONTEND); do \
+		for p in org.owasp:dependency-check-maven $(FRONTEND) $(VAADIN); do \
 			"$(DEVKIT)/scripts/lib/mvn_checked.sh" -B -q -N "$$p:help"; done
 MK
 
@@ -92,7 +102,7 @@ for fixture in "$root"/tests/fixtures/java-*/; do
     printf '[devkit]\nversion = "v%s"\n' "$version" >"$proj/devkit.toml"
     echo "Recording $name..."
     env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKELEVEL -u MAKEFILES \
-        make --no-print-directory -C "$proj" DEVKIT="$root" FRONTEND="${frontend//$'\n'/ }" -f Makefile -f "$tmp/record.mk" record
+        make --no-print-directory -C "$proj" DEVKIT="$root" FRONTEND="${frontend//$'\n'/ }" VAADIN="$vaadin" -f Makefile -f "$tmp/record.mk" record
 done
 
 [[ -s $tmp/basedir/checksums.sha256 ]] || {

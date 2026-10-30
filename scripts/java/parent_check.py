@@ -21,8 +21,10 @@ DEVKIT: Path = Path(os.environ.get("DEVKIT", Path(__file__).resolve().parents[2]
 # devkit's parent POMs, each inheriting the one before it; paths inside the devkit checkout.
 # Each release runs its own copy of this script, so the table only names that release's own files:
 # a missing one is a defective release.
-PARENTS = ("java/parent/pom.xml", "java/quarkus/pom.xml")
+PARENTS = ("java/parent/pom.xml", "java/quarkus/pom.xml", "java/vaadin/pom.xml")
 DEVKIT_GROUP = "de.vptr.devkit"
+# Properties of the base parent that its derived parents own: a consumer sets neither.
+HOOKS = {"devkit.spotbugs.filters", "devkit.pmd.ruleset"}
 UPGRADE_HINT = 'see "Upgrading from v0.1.x" in .devkit/README.md'
 # Maven merges these lists with the parent's by position unless the consumer appends; what a
 # merge drops is the message's tail.
@@ -189,6 +191,13 @@ def check() -> str:
             f"the project path {REPO_ROOT} contains '{os.pathsep}', on which SpotBugs splits its plugin "
             "list: find-sec-bugs would silently not load; move the checkout to a path without it."
         )
+    # maven-resources-plugin writes ${project.build.directory} unescaped into the PMD ruleset copy's XML.
+    if bad := next((c for c in '&<"' if c in str(REPO_ROOT)), None):
+        raise Failure(
+            f"the project path {REPO_ROOT} contains '{bad}', which the Vaadin parent's filtered PMD ruleset "
+            "would carry unescaped into its XML (refused for every project, so a module that adopts the "
+            "Vaadin parent later does not break); move the checkout to a path without it."
+        )
     shipped = shipped_parents()
     base = shipped[0]
     poms = project_poms(REPO_ROOT / "pom.xml")
@@ -286,6 +295,11 @@ def check() -> str:
             if local_name(prop) in owned:
                 raise Failure(
                     f"partial migration: remove <{local_name(prop)}> from {shown(path)}; the parent owns it."
+                )
+            if local_name(prop) in HOOKS:
+                raise Failure(
+                    f"<{local_name(prop)}> in {shown(path)} is a hook of devkit's derived parents, "
+                    "not an override point; remove it."
                 )
         check_lists(path, pom, sinks)
     for entry in shipped[1:]:

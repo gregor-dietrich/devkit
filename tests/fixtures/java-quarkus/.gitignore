@@ -1,3 +1,4 @@
 /.devkit
 /.coverage.md
 target/
+ui/src/main/frontend/generated/

@@ -58,14 +58,22 @@
 #          slots instead of the format's, that java/config/pmd-ruleset.xml
 #          sets no property but the ones devkit means to and that the check
 #          rejects a raised complexity threshold and an extra property,
+#          that java/config/pmd-ruleset-vaadin.xml is one rule referencing
+#          the filtered pmd-ruleset.xml that excludes only
+#          ConstructorCallsOverridableMethod and sets no property, and
+#          java/config/spotbugs-vaadin.xml exactly one unscoped Match of exactly
+#          the four serialization and constructor patterns, and that each
+#          check rejects an extra exclude and an extra pattern,
 #          and that java/checksums/checksums.sha256 lists the jar of every
 #          plugin (find-sec-bugs' detector included), plugin dependency and
 #          annotation processor the parents pin, the .pom of every imported
 #          BOM (scope import, type pom), the jar of every build extension
 #          and the jars of the plugins check_frontend_deps.py runs, and that
 #          a file without one is rejected, naming it and make
-#          maven-checksums, that a derived parent redefining an earlier
-#          parent's property is rejected (its ${...} resolve against the
+#          maven-checksums (the Vaadin BOM's .pom and plugin jar included),
+#          that a derived parent redefining any property of an earlier
+#          parent but the two hooks (devkit.spotbugs.filters and
+#          devkit.pmd.ruleset) is rejected (its ${...} resolve against the
 #          properties before them), that a profile setting a property a
 #          collected coordinate references or one a parent sets at top level
 #          (skipITs aside) is rejected (the check reads top-level properties
@@ -197,7 +205,22 @@
 #          PreserveStackTrace and CyclomaticComplexity. Expect imports
 #          of java, org and jakarta in the order from before jakarta joined
 #          the import order to fail lint, and make format to put jakarta
-#          after java and before org. Expect the
+#          after java and before org. Expect java-quarkus' ui, which inherits
+#          the Vaadin parent and has packaging quarkus (the Quarkus build step
+#          runs, the frontend build does not), to pass every target with a
+#          component without a serialVersionUID whose constructor calls an
+#          overridable method, and a raw type there to fail lint on javac's
+#          rawtypes lint alone, an unused private field on PMD's
+#          UnusedPrivateField and an exposed array field on SpotBugs'
+#          EI_EXPOSE_REP; with the SpotBugs hook (devkit.spotbugs.filters)
+#          reset on the command line, ui to fail on SE_NO_SERIALVERSIONID and
+#          MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR, and with the PMD hook
+#          (devkit.pmd.ruleset) reset, on ConstructorCallsOverridableMethod
+#          (those two lint runs use ONLY=ui, as the other ui ones); ui on the
+#          Quarkus parent instead to fail on the serial lint; and a ui
+#          pmd-ruleset.xml referencing ui/target/devkit/pmd-ruleset-vaadin.xml
+#          to drop a further rule while ConstructorCallsOverridableMethod
+#          stays dropped and PMD's other rules stay in force. Expect the
 #          committed java/checksums/checksums.sha256 to list every artifact
 #          of the formatter version the parent pins, whose lockfile
 #          spotless-lib-extra (from ~/.m2, after the fixtures ran) embeds
@@ -357,6 +380,18 @@ shell_part() {
     ruleset_thresholds_reject 's|<rule ref="category/java/design.xml/TooManyFields">|<rule ref="category/java/design.xml/CyclomaticComplexity">\n        <properties><property name="methodReportLevel" value="30" /></properties>\n    </rule>\n    &|'
   check "pmd-ruleset.xml: the property check rejects reportLevel on a rule that may set another property" \
     ruleset_thresholds_reject 's|<property name="maxmethods" value="40" />|&<property name="reportLevel" value="60" />|'
+  check "pmd-ruleset-vaadin.xml: one rule referencing the filtered pmd-ruleset.xml that excludes only ConstructorCallsOverridableMethod and sets no property" \
+    vaadin_pmd_shape "$root/java/config/pmd-ruleset-vaadin.xml"
+  check "pmd-ruleset-vaadin.xml: the shape check rejects a ruleset-level exclude-pattern" \
+    vaadin_file_reject pmd-ruleset-vaadin.xml vaadin_pmd_shape 's|</description>|&<exclude-pattern>.*</exclude-pattern>|' "pmd-ruleset-vaadin.xml deviates"
+  check "pmd-ruleset-vaadin.xml: the shape check rejects an extra exclude" \
+    vaadin_file_reject pmd-ruleset-vaadin.xml vaadin_pmd_shape 's|<exclude name="ConstructorCallsOverridableMethod" />|&<exclude name="UnusedPrivateField" />|' "pmd-ruleset-vaadin.xml deviates"
+  check "spotbugs-vaadin.xml: exactly one Match, unscoped, of a Bug with only a pattern attribute listing exactly SE_NO_SERIALVERSIONID, SE_BAD_FIELD, SE_TRANSIENT_FIELD_NOT_RESTORED and MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR" \
+    vaadin_spotbugs_shape "$root/java/config/spotbugs-vaadin.xml"
+  check "spotbugs-vaadin.xml: the shape check rejects a category attribute beside the pattern" \
+    vaadin_file_reject spotbugs-vaadin.xml vaadin_spotbugs_shape 's|<Bug pattern=|<Bug category="SECURITY" pattern=|' "spotbugs-vaadin.xml deviates"
+  check "spotbugs-vaadin.xml: the shape check rejects an extra pattern" \
+    vaadin_file_reject spotbugs-vaadin.xml vaadin_spotbugs_shape 's|MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR|&,EI_EXPOSE_REP|' "spotbugs-vaadin.xml deviates"
   check "parent: spotbugs-plugin.version is spotbugs.version plus a fourth component" spotbugs_versions_match
   check "parent: the SpotBugs analyzer dependency excludes log4j-core, as the plugin's own declaration does" \
     spotbugs_log4j_excluded "$root/java/parent/pom.xml"
@@ -420,13 +455,21 @@ shell_part() {
     checksums_reject '/\/platform\/quarkus-bom\/.*\.pom$/d' "io/quarkus/platform/quarkus-bom/3.40.1.1/quarkus-bom-3.40.1.1.pom" "make maven-checksums"
   check "parent: the checksums check rejects a file without a build extension's jar, naming it" \
     checksums_reject '/\/quarkus-maven-plugin\/.*\.jar$/d' "io/quarkus/platform/quarkus-maven-plugin/3.40.1.1/quarkus-maven-plugin-3.40.1.1.jar" "make maven-checksums"
+  check "parent: the checksums check rejects a file without the Vaadin BOM's .pom, naming it" \
+    checksums_reject '/\/vaadin-bom\/.*\.pom$/d' "com/vaadin/vaadin-bom/25.3.3/vaadin-bom-25.3.3.pom" "make maven-checksums"
+  check "parent: the checksums check rejects a file without the Vaadin plugin's jar, naming it" \
+    checksums_reject '/\/vaadin-maven-plugin\/.*\.jar$/d' "com/vaadin/vaadin-maven-plugin/25.3.3/vaadin-maven-plugin-25.3.3.jar" "make maven-checksums"
   check "scripts: MVN_LAUNCHER, which skips the checksums check, is used only by get_maven.sh, mvn_checked.sh and maven_checksums.sh" \
     launcher_uses scripts/lib/get_maven.sh scripts/lib/mvn_checked.sh scripts/maven_checksums.sh
   check "parent: the checksums check rejects a file without the plugins check_frontend_deps.py runs" \
     checksums_reject '/\/maven-help-plugin\/.*\.jar$/d;/\/maven-dependency-plugin\/.*\.jar$/d' \
     "maven-help-plugin-" "maven-dependency-plugin-" "make maven-checksums"
-  check "parent: the checksums check rejects a derived parent that redefines an earlier parent's property" \
+  check "parent: the checksums check rejects a derived parent that redefines an earlier parent's property, but for the two hooks" \
     checksums_cover_reject 's|<quarkus.platform.version>|<eclipse-formatter.version>1</eclipse-formatter.version>&|' "redefines the property eclipse-formatter.version"
+  check "parent: the checksums check rejects a derived parent that redefines a property a collected coordinate references" \
+    checksums_cover_reject 's|<quarkus.platform.version>|<compiler-plugin.version>1</compiler-plugin.version>&|' "redefines the property compiler-plugin.version"
+  check "parent: the checksums check rejects a derived parent that redefines a gate setting that is not a hook" \
+    checksums_cover_reject 's|<quarkus.platform.version>|<jacoco.check.lineMinimum>0.1</jacoco.check.lineMinimum>&|' "redefines the property jacoco.check.lineMinimum"
   check "parent: the checksums check rejects a profile that sets a property a parent sets at top level, naming the profile and the property" \
     checksums_cover_reject 's|<skipITs>false</skipITs>|&<eclipse-formatter.version>1</eclipse-formatter.version>|' "profile native sets eclipse-formatter.version"
   # shellcheck disable=SC2016 # ${ext.v} is a Maven property, not a shell expansion
@@ -473,6 +516,15 @@ parent_poms() {
   ((n >= 2)) || { echo "parent_poms: PARENTS in scripts/java/parent_check.py parsed to $n paths, not the 2 or more it lists" >&2; return 1; }
 }
 
+# hook_names: the property names of HOOKS in scripts/java/parent_check.py, space-separated; fails unless
+# it parses to exactly the two hooks (read as parent_poms reads PARENTS).
+hook_names() {
+  local names
+  names=$(sed -nE 's/^HOOKS = \{(.*)\}$/\1/p' "$root/scripts/java/parent_check.py" | grep -oE '"[^"]+"' | tr -d '"' | sort | tr '\n' ' ')
+  [[ $names == "devkit.pmd.ruleset devkit.spotbugs.filters " ]] || { echo "hook_names: HOOKS in scripts/java/parent_check.py parsed to '$names', not the two hooks devkit.pmd.ruleset and devkit.spotbugs.filters" >&2; return 1; }
+  printf '%s' "${names% }"
+}
+
 # parent_poms_parse: parent_poms succeeds (its callers read it through a process substitution, which hides its status).
 parent_poms_parse() { parent_poms >/dev/null; }
 
@@ -485,15 +537,18 @@ parent_poms_parse() { parent_poms >/dev/null; }
 # it into the build before any gate runs), the jar of every <build><extensions><extension> and the .pom of every scope=import, type=pom dependency (a BOM,
 # which Maven reads as a descriptor), and holds the line DIST (maven_pin of tree.sh: the pinned Maven, whose
 # default lifecycle plugins the file records). A ${...} resolves against the POM's own properties and those
-# of the POMs before it (a POM that redefines a property of an earlier one is refused: the effective version
-# would go unrequired; so is a profile that sets a property a collected coordinate references or one a parent
+# of the POMs before it (a POM that redefines a property of an earlier one is refused, but for the two hooks
+# devkit.spotbugs.filters and devkit.pmd.ruleset: the effective version or gate setting would go unrequired;
+# so is a profile that sets a property a collected coordinate references or one a parent
 # sets at top level, skipITs aside, since profile properties are not resolved). Only top-level artifacts are checked, not their transitive
 # closure. A bump of a plugin, plugin dependency, processor, BOM or Maven version without
 # scripts/maven_checksums.sh leaves an entry out and fails; the formatter's artifacts are not in the
 # POMs' declarations, and formatter_lockfile.py covers them (the java part's check of the committed file).
 checksums_cover() {
+  local hooks
+  hooks=$(hook_names) || return 1
   # shellcheck disable=SC2016 # the program's ${...} is a Maven property, not a shell expansion
-  python3 -c 'import re, sys, xml.etree.ElementTree as ET
+  HOOKS=$hooks python3 -c 'import os, re, sys, xml.etree.ElementTree as ET
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 props = {}
 used = set()
@@ -509,7 +564,8 @@ pinned = set()
 for path in sys.argv[4:]:
     root = ET.parse(path).getroot()
     own = {p.tag.split("}")[1]: (p.text or "").strip() for p in root.iterfind("m:properties/*", ns)}
-    sys.exit(path + " redefines the property " + ", ".join(sorted(props.keys() & own.keys())) + " of an earlier parent POM: this check resolves ${...} against the earlier value, so rename it or teach this check") if props.keys() & own.keys() else None
+    clash = (props.keys() & own.keys()) - set(os.environ["HOOKS"].split())
+    sys.exit(path + " redefines the property " + ", ".join(sorted(clash)) + " of an earlier parent POM (the two hooks aside): this check resolves ${...} against the earlier value, so rename it or teach this check") if clash else None
     props.update(own)
     profiled += [(path, profile.findtext("m:id", "", ns).strip(), p.tag.split("}")[1])
                  for profile in root.iterfind("m:profiles/m:profile", ns) for p in profile.iterfind("m:properties/*", ns)]
@@ -682,6 +738,43 @@ ruleset_thresholds_reject() {
   copy=$(mktemp) && sed "$1" "$file" >"$copy" && ! cmp -s "$copy" "$file" &&
     ! err=$(ruleset_thresholds_default "$copy" 2>&1) && [[ $err == *"sets properties devkit does not"* ]]
   local status=$?
+  rm -f "$copy"
+  return $status
+}
+
+# vaadin_pmd_shape FILE: the Vaadin PMD ruleset FILE is exactly one rule referencing the filtered copy of
+# the shared ruleset, excluding only ConstructorCallsOverridableMethod and setting no property.
+vaadin_pmd_shape() {
+  # shellcheck disable=SC2016 # the program's ${...} is a Maven property, not a shell expansion
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"p": "http://pmd.sourceforge.net/ruleset/2.0.0"}
+root = ET.parse(sys.argv[1]).getroot()
+rules = root.findall("p:rule", ns)
+shape = [(r.get("ref"), [e.get("name") for e in r.findall("p:exclude", ns)], len(list(r))) for r in rules]
+tags = [c.tag.split("}")[-1] for c in root]
+sys.exit(sys.argv[1] + " deviates from the expected shape: " + repr((tags, shape))) if tags != ["description", "rule"] or root.find(".//p:properties", ns) is not None or shape != [("${project.build.directory}/devkit/pmd-ruleset.xml", ["ConstructorCallsOverridableMethod"], 1)] else None' "$1"
+}
+
+# vaadin_spotbugs_shape FILE: the Vaadin SpotBugs filter FILE holds exactly one Match, of a Bug with only
+# a pattern attribute (SpotBugs also matches on code and category) and nothing else (no Class, Package,
+# Method or Source), the patterns exactly the four devkit means to silence.
+vaadin_spotbugs_shape() {
+  python3 -I -c 'import sys, xml.etree.ElementTree as ET
+ns = {"f": "http://findbugs.sourceforge.net/filter/3.0.0"}
+root = ET.parse(sys.argv[1]).getroot()
+children = [[c.tag.split("}")[-1] for c in m] for m in root]
+patterns = {p for m in root.iterfind("f:Match/f:Bug", ns) for p in m.get("pattern", "").split(",")}
+want = {"SE_NO_SERIALVERSIONID", "SE_BAD_FIELD", "SE_TRANSIENT_FIELD_NOT_RESTORED", "MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR"}
+sys.exit(sys.argv[1] + " deviates from the expected shape: " + repr((children, sorted(patterns)))) if not children or any(c != ["Bug"] for c in children) or len(root) != 1 or any(m.attrib for m in root) or any(b.attrib.keys() != {"pattern"} for b in root.iterfind("f:Match/f:Bug", ns)) or {m.tag for m in root} != {"{" + ns["f"] + "}Match"} or patterns != want else None' "$1"
+}
+
+# vaadin_file_reject FILE CHECK SED TEXT: CHECK fails on a copy of java/config/FILE run through SED (which
+# must change it), saying TEXT.
+vaadin_file_reject() {
+  local file=$root/java/config/$1 copy err status
+  copy=$(mktemp) && sed "$3" "$file" >"$copy" && ! cmp -s "$copy" "$file" &&
+    ! err=$("$2" "$copy" 2>&1) && [[ ${err//$copy/${1}} == *"$4"* ]]
+  status=$?
   rm -f "$copy"
   return $status
 }
@@ -1228,16 +1321,78 @@ quarkus_serial() {
     make_says fail "$dir" lint "-Werror" "Parity.java:["
 }
 
+# ui_break NAME SED TEXT...: Banner, the Vaadin component of java-quarkus' ui, run through SED in a
+# copy of the fixture fails make lint ONLY=ui saying each TEXT. ui inherits the Vaadin parent directly.
+ui_break() {
+  local dir=$work/ui-$1
+  setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    sed_into "$dir/ui/src/main/java/devkit/fixture/ui/Banner.java" "$2" &&
+    ONLY=ui make_says fail "$dir" lint "${@:3}"
+}
+
+# ui_rawtypes: a raw type in Banner fails make lint ONLY=ui on javac's rawtypes lint under -Werror
+# (English messages: "found raw type"), naming the file and position, without Error Prone's
+# UnusedVariable or NullAway (the unused field must trip neither).
+ui_rawtypes() {
+  local dir=$work/ui-rawtypes out
+  setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    sed_into "$dir/ui/src/main/java/devkit/fixture/ui/Banner.java" 's/^import com.*/import java.util.List;\n\n&/; s/^public class Banner extends Div {/&\n\n    private List items;/' || return
+  if out=$(MAVEN_OPTS="-Duser.language=en -Duser.country=US" ONLY=ui make --no-print-directory -C "$dir" lint 2>&1) ||
+    [[ $out != *"-Werror"* || $out != *"Banner.java:["* || $out != *"found raw type: java.util.List"* || $out == *UnusedVariable* || $out == *NullAway* ]]; then
+    printf '%s\n' "$out"
+    return 1
+  fi
+}
+
+# ui_hook_off NAME PROPERTY TEXT...: with PROPERTY (-D<name>=<value>) reset on Maven's command line to
+# the base parent's value, which makes the Vaadin parent's hook a no-op, ui fails make lint ONLY=ui
+# saying each TEXT: the Banner constructs the Vaadin relaxation silences are really there, and the
+# hook is what lets them pass. A user property overrides the pom's own in interpolation.
+ui_hook_off() {
+  local dir=$work/ui-hook-$1
+  setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    MAVEN_ARGS="-D$2" ONLY=ui make_says fail "$dir" lint "${@:3}"
+}
+
+# ui_pmd_recipe: in java-quarkus' ui, a pmd-ruleset.xml referencing ui/target/devkit/pmd-ruleset-vaadin.xml
+# (the module path of the Vaadin ruleset) and excluding UnusedPrivateField drops that rule from make
+# lint ONLY=ui, while ConstructorCallsOverridableMethod (Banner's constructor) stays dropped and
+# another rule (PreserveStackTrace) still fails it.
+ui_pmd_recipe() {
+  local dir=$work/ui-pmd-recipe banner=$work/ui-pmd-recipe/ui/src/main/java/devkit/fixture/ui/Banner.java
+  setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    sed_into "$banner" 's/^public class Banner extends Div {/&\n\n    private int unused;/' &&
+    ONLY=ui make_says fail "$dir" lint "Rule:UnusedPrivateField" &&
+    pmd_without "$dir/ui" UnusedPrivateField ui/target/devkit/pmd-ruleset-vaadin.xml &&
+    ONLY=ui make_says pass "$dir" lint "Lint checks completed." &&
+    sed_into "$banner" 's/^public class Banner extends Div {/&\n\n    \/** Rethrows without the cause. *\/\n    void rethrow() {\n        try {\n            add(new Div("x"));\n        } catch (IllegalStateException e) {\n            throw new IllegalArgumentException("x");\n        }\n    }/' &&
+    ONLY=ui make_says fail "$dir" lint "Rule:PreserveStackTrace"
+}
+
+# ui_on_quarkus_parent: ui inheriting the Quarkus parent instead (with the Vaadin version its BOM
+# no longer manages, and without the versionless dependency it manages) fails make lint ONLY=ui on javac's serial lint under -Werror: the Vaadin
+# parent's -Xlint:-serial is what lets ui's Banner pass javac (the SpotBugs and PMD hooks are
+# proven by ui_hook_off).
+ui_on_quarkus_parent() {
+  local dir=$work/ui-quarkus-parent version
+  version=$(parent_property vaadin.version "$root/java/vaadin/pom.xml") && [[ -n $version ]] &&
+    setup "$root/tests/fixtures/java-quarkus" "$dir" &&
+    sed_into "$dir/ui/pom.xml" "/<!-- Versionless/,/^    <\\/dependency>/d; s|devkit-vaadin-parent|devkit-quarkus-parent|; s|/java/vaadin/pom.xml|/java/quarkus/pom.xml|; s|^  <dependencies>|&\\n    <dependency>\\n      <groupId>com.vaadin</groupId>\\n      <artifactId>vaadin-quarkus-extension</artifactId>\\n      <version>$version</version>\\n    </dependency>|" &&
+    ONLY=ui make_says fail "$dir" lint "-Werror" "Banner.java:[" "serialVersionUID"
+}
+
 # pmd_without DIR RULE [REF]: the project or module DIR drops RULE of devkit's PMD ruleset, as
 # docs/contract.md teaches: its pom redeclares PMD's <rulesets> with its own pmd-ruleset.xml, which
 # references the filtered copy of the kit's at REF (default target/devkit/pmd-ruleset.xml, relative
 # to Maven's directory) and excludes RULE. The pom holds a <build> with <plugins> (javac_lint's
-# does) or none at all.
+# does), one with only <pluginManagement> (java-quarkus' ui), or none at all.
 pmd_without() {
   # shellcheck disable=SC2016 # the literal ${project.basedir} is for Maven
   local plugin='      <plugin>\n        <artifactId>maven-pmd-plugin</artifactId>\n        <configuration>\n          <rulesets>\n            <ruleset>${project.basedir}/pmd-ruleset.xml</ruleset>\n          </rulesets>\n        </configuration>\n      </plugin>\n'
   if grep -q '^    </plugins>' "$1/pom.xml"; then
     sed_into "$1/pom.xml" "s|^    </plugins>|$plugin&|"
+  elif grep -q '^    </pluginManagement>' "$1/pom.xml"; then # a <build> with only pluginManagement
+    sed_into "$1/pom.xml" "s|^    </pluginManagement>|&\\n    <plugins>\\n$plugin    </plugins>|"
   else
     sed_into "$1/pom.xml" "s|^</project>|  <build>\\n    <plugins>\\n$plugin    </plugins>\\n  </build>\\n&|"
   fi || return
@@ -1484,6 +1639,20 @@ negatives() {
     SE_NO_SERIALVERSIONID
   check "java-quarkus: a Serializable class without a serialVersionUID in api fails make lint, the Quarkus parent keeping the lints on" \
     quarkus_serial
+  check "java-quarkus: a raw type in ui, whose Banner (a Vaadin component without a serialVersionUID and with a constructor calling an overridable method) passes make lint ONLY=ui on the Vaadin parent, fails it on javac's rawtypes lint under -Werror alone, naming the file and position" \
+    ui_rawtypes
+  check "java-quarkus: an unused private field in ui still fails make lint ONLY=ui on PMD's UnusedPrivateField, the Vaadin ruleset keeping the kit's other rules" \
+    ui_break pmd 's/^public class Banner extends Div {/&\n\n    private int unused;/' "Rule:UnusedPrivateField"
+  check "java-quarkus: a method exposing an array field in ui still fails make lint ONLY=ui on SpotBugs' EI_EXPOSE_REP, which the Vaadin filter does not silence" \
+    ui_break spotbugs 's/^public class Banner extends Div {/&\n\n    private final int[] sizes = { 1 };/; $ s/^}$/\n    \/**\n     * Returns the sizes.\n     *\n     * @return the sizes\n     *\/\n    public int[] sizes() {\n        return sizes;\n    }\n}/' "EI_EXPOSE_REP"
+  check "java-quarkus: ui with devkit.spotbugs.filters reset fails make lint ONLY=ui on SpotBugs' SE_NO_SERIALVERSIONID and MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR, which the Vaadin filter silences" \
+    ui_hook_off spotbugs devkit.spotbugs.filters= "SE_NO_SERIALVERSIONID" "MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR"
+  check "java-quarkus: ui with devkit.pmd.ruleset reset to the kit's ruleset fails make lint ONLY=ui on PMD's ConstructorCallsOverridableMethod, which the Vaadin ruleset drops" \
+    ui_hook_off pmd devkit.pmd.ruleset=pmd-ruleset.xml "Rule:ConstructorCallsOverridableMethod"
+  check "java-quarkus: ui's own pmd-ruleset.xml referencing ui/target/devkit/pmd-ruleset-vaadin.xml drops a further PMD rule from make lint ONLY=ui, ConstructorCallsOverridableMethod staying dropped and the other rules in force" \
+    ui_pmd_recipe
+  check "java-quarkus: ui on the Quarkus parent instead of the Vaadin one fails make lint ONLY=ui on javac's serial lint" \
+    ui_on_quarkus_parent
   check "java-monolith: a constructor calling an overridable method fails make lint, until the module appends -Xlint:-this-escape, excludes SpotBugs' MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR and drops PMD's ConstructorCallsOverridableMethod through its own pmd-ruleset.xml" \
     javac_lint this-escape 's/^public final class Greeter {/public class Greeter {\n\n    \/** Greets once on construction. *\/\n    public Greeter() {\n        greet("x");\n    }/' \
     MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR "" ConstructorCallsOverridableMethod
@@ -1782,9 +1951,6 @@ isolated() { # isolated COMMAND...: run COMMAND in a subshell, so that no later 
   fails=$(<"$work/fails")
 }
 
-# parent_property NAME [POM]: the value of POM's (default: the parent under test) property NAME, when on one line.
-parent_property() { sed -n "s|^ *<$1>\\(.*\\)</$1>.*|\\1|p" "${2:-$root/java/parent/pom.xml}"; }
-
 # spotbugs_version [POM]: the spotbugs.version property of the parent under test.
 spotbugs_version() { parent_property spotbugs.version "$@"; }
 
@@ -1955,7 +2121,9 @@ java_part() {
     run_fixture "${fixture%/}" "check lint test coverage format"
     check "$(basename "$fixture"): passing Maven targets print no [WARNING] line" \
       no_warning_lines "$work/$(basename "$fixture")" lint test coverage
-    unchanged "${fixture%/}" target .coverage.md
+    quarkus_extra=()
+    [[ ${fixture%/} == */java-quarkus ]] && quarkus_extra=(frontend)
+    unchanged "${fixture%/}" target .coverage.md "${quarkus_extra[@]}" # frontend: java-quarkus' ui, packaging quarkus, generates ui/src/main/frontend/generated
   done
   check "java-monolith: the first make target downloads devkit's Maven" \
     grep -q "Downloading Maven $(maven_version "$root") from" "$work/java-monolith.check.log"

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- devkit's Vaadin parent POM: devkit's Quarkus parent plus what every Vaadin UI module shares:
+     the Vaadin version and BOM, the Quarkus extension, the frontend build of the production
+     profile, the Node settings of the Quarkus build and dev mode, and the lint and static-analysis
+     relaxations Vaadin components need (-Xlint:-serial, -Xlint:-this-escape, and through the hooks
+     of devkit's parent POM a SpotBugs filter and a PMD ruleset). A Vaadin UI module declares it as
+     its <parent> with <relativePath>.devkit/java/vaadin/pom.xml</relativePath> (the path from that
+     pom's directory), so Maven reads it through the link devkitw creates. It is published to no
+     repository and has no <version> of its own: it takes devkit-quarkus-parent's, which is the
+     devkit release tag without the "v" and stays literal here. The interface is docs/contract.md
+     ("Vaadin parent").
+
+     vaadin.version moves with a devkit release, so the BOM, vaadin-quarkus-extension with its
+     deployment modules, and vaadin-maven-plugin are checked against the plugin checksums at the
+     pinned version.
+     No <repositories>. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>de.vptr.devkit</groupId>
+    <artifactId>devkit-quarkus-parent</artifactId>
+    <version>0.8.0</version>
+    <relativePath>../quarkus/pom.xml</relativePath>
+  </parent>
+
+  <groupId>de.vptr.devkit</groupId>
+  <artifactId>devkit-vaadin-parent</artifactId>
+  <packaging>pom</packaging>
+
+  <properties>
+    <vaadin.version>25.3.3</vaadin.version>
+    <!-- Bump together with vaadin.version, to the new release's FrontendTools.DEFAULT_NODE_VERSION. -->
+    <vaadin.node.version>v24.21.0</vaadin.node.version>
+    <!-- Defaults a module overrides in its own <properties>. -->
+    <vaadin.require.home.node>true</vaadin.require.home.node>
+    <vaadin.ci.build>true</vaadin.ci.build>
+    <!-- The hooks of devkit's parent POM, not override points for a module: the SpotBugs filter
+         devkit.spotbugs.filters appends (java/config/spotbugs-vaadin.xml) and the PMD ruleset
+         the PMD gate reads (java/config/pmd-ruleset-vaadin.xml). -->
+    <devkit.spotbugs.filters>,${maven.multiModuleProjectDirectory}/.devkit/java/config/spotbugs-vaadin.xml</devkit.spotbugs.filters>
+    <devkit.pmd.ruleset>pmd-ruleset-vaadin.xml</devkit.pmd.ruleset>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.vaadin</groupId>
+        <artifactId>vaadin-bom</artifactId>
+        <version>${vaadin.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.vaadin</groupId>
+      <artifactId>vaadin-quarkus-extension</artifactId>
+      <version>${vaadin.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- Vaadin components are Serializable by inheritance, and their constructors build the UI. -->
+          <compilerArgs combine.children="append">
+            <arg>-Xlint:-serial</arg>
+            <arg>-Xlint:-this-escape</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>io.quarkus.platform</groupId>
+        <artifactId>quarkus-maven-plugin</artifactId>
+        <configuration>
+          <systemProperties>
+            <!-- vaadin.build.*: Quarkus build step; vaadin.*: dev mode's runtime dev server -->
+            <vaadin.build.node-version>${vaadin.node.version}</vaadin.build.node-version>
+            <vaadin.build.require-home-node-exec>${vaadin.require.home.node}</vaadin.build.require-home-node-exec>
+            <vaadin.build.ci-build>${vaadin.ci.build}</vaadin.build.ci-build>
+            <vaadin.node.version>${vaadin.node.version}</vaadin.node.version>
+            <vaadin.require.home.node>${vaadin.require.home.node}</vaadin.require.home.node>
+          </systemProperties>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>production</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.vaadin</groupId>
+            <artifactId>vaadin-maven-plugin</artifactId>
+            <version>${vaadin.version}</version>
+            <executions>
+              <execution>
+                <id>vaadin-frontend</id>
+                <phase>compile</phase>
+                <goals>
+                  <goal>prepare-frontend</goal>
+                  <goal>build-frontend</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

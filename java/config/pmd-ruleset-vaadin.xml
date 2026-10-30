@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Shared PMD Rules for Vaadin modules"
+    xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>The shared PMD rules minus ConstructorCallsOverridableMethod: a Vaadin
+        component's constructor builds the UI by calling overridable methods such as add(...),
+        the same decision as -Xlint:-this-escape in the Vaadin parent. The reference is
+        absolute because the pmd-ruleset execution of java/parent/pom.xml expands ${...}
+        in both files when it copies them into target/devkit.</description>
+
+    <rule ref="${project.build.directory}/devkit/pmd-ruleset.xml">
+        <exclude name="ConstructorCallsOverridableMethod" />
+    </rule>
+</ruleset>

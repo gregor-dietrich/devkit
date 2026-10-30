@@ -66,7 +66,7 @@ done
 # The parent POM check, with the real python3: exit 14, also before any download.
 mkdir "$work/nostub" "$work/noparent"
 echo '<project xmlns="http://maven.apache.org/POM/4.0.0"><groupId>g</groupId><artifactId>a</artifactId><version>1</version></project>' >"$work/noparent/pom.xml"
-want="ERROR: pom.xml does not inherit a devkit parent (de.vptr.devkit:devkit-parent or devkit-quarkus-parent), which devkit requires since v0.2.0; see \"Upgrading from v0.1.x\" in .devkit/README.md."
+want="ERROR: pom.xml does not inherit a devkit parent (de.vptr.devkit:devkit-parent, devkit-quarkus-parent or devkit-vaadin-parent), which devkit requires since v0.2.0; see \"Upgrading from v0.1.x\" in .devkit/README.md."
 # shellcheck disable=SC2016 # expanded by the inner bash
 FLOOR_PYBIN=$work/nostub FLOOR_PROJECT=$work/noparent expect "get_maven.sh stops at the parent POM check, before any download" 14 \
   bash -c 'cd "$PROJECT_ROOT" && . "$DEVKIT/scripts/lib/get_maven.sh"'
