@@ -105,10 +105,13 @@ break a gate silently.
 - `make hooks` once per clone; `make gate` runs `make lint-repo test` and
   records a passing clean HEAD, so `pre-push` skips it. Commit first, then
   run `make gate`, then push.
-- `make check` applies to `GATES=release` only. `GATES=release`
-  `lint-repo` fails when `./devkitw` differs from the pinned release's copy
-  without a higher `# devkitw revision`: a change to `devkitw` raises that
-  line once per release. Never copy the old wrapper over devkit's own.
+- `make check` applies to `GATES=release` only, which it defaults to when
+  run on its own (or with `check-devkit`), and runs `make check-versions`:
+  the working tree's `version_check.py` over every parent POM in `java/`
+  (advisory, needs the network). `GATES=release` `lint-repo` fails when
+  `./devkitw` differs from the pinned release's copy without a higher
+  `# devkitw revision`: a change to `devkitw` raises that line once per
+  release. Never copy the old wrapper over devkit's own.
 
 ## Releasing
 

@@ -152,23 +152,28 @@ another pin: run `make check`.
 devkit is its own consumer: `make lint-repo`, `make hooks` and `make gate`
 work here as in a project, and `make test` runs all of `tests/run.sh`, so
 the push gate needs what its java, python and floor parts need. By default
-(`GATES=tree`) the targets run the working tree's own scripts, so each
-change is gated by itself. With `GATES=release` they run the release
-`devkit.toml` pins, fetched by `devkitw` as a consumer's is, so a change
-that accidentally breaks a gate script does not pass on that gate alone;
-`devkitw`, the `Makefile`, `devkit.toml` and the workflow stay the
-change's own. CI runs `make lint-repo` both ways. `make gate` records
-HEAD whichever way it ran, and `pre-push` then skips either.
+(`GATES=tree`, which `make check` and `make check-devkit` are the exceptions
+to) the targets run the working tree's own scripts, so each change is gated
+by itself. With `GATES=release` they run the release `devkit.toml` pins,
+fetched by `devkitw` as a consumer's is, so a change that accidentally
+breaks a gate script does not pass on that gate alone; `devkitw`, the
+`Makefile` and the targets it defines itself, `devkit.toml` and the workflow
+stay the change's own. CI runs `make lint-repo` both ways. `make gate`
+records HEAD whichever way it ran, and `pre-push` then skips either.
 
 `make check` applies to `GATES=release` only, since it requires `.devkit`
-to resolve to the pin; run it once per clone, which also quiets the hooks'
+to resolve to the pin, so run on its own (or with `check-devkit`) it
+defaults to that mode; run it once per clone, which also quiets the hooks'
 notice that `.devkit` points at nothing. It compares the clone against the
 pin, so while the tree has changed `devkitw` or the hooks since that release
 it warns that they differ; that is expected here, and `make hooks` stays in
-tree mode. `GATES=release` `lint-repo` fails when `./devkitw` differs from
-the pinned release's copy without a higher `# devkitw revision` line, so a
-change to `devkitw` raises the line once per release. Never copy the old
-wrapper over devkit's own.
+tree mode. It also runs `make check-versions`, which reports newer releases
+of the pins of every parent POM in `java/` with the working tree's
+`version_check.py`, whichever `GATES` is set (advisory, needs the network).
+`GATES=release` `lint-repo` fails when `./devkitw` differs from the pinned
+release's copy without a higher `# devkitw revision` line, so a change to
+`devkitw` raises the line once per release. Never copy the old wrapper over
+devkit's own.
 
 `make audit` runs `npm audit` over the lockfiles of the closures in
 `markdown/` and `jscpd/`, so consumers need not audit them themselves: any
@@ -268,16 +273,10 @@ below it; the tag is `v` + that version, and `tests/run.sh` tags the tree
 under test under the same name.
 A release whose `devkitw` changed since the previous release has raised its
 `# devkitw revision` line.
-Before tagging, review the parent's pins against
+Before tagging, review every parent POM's pins against
 the repositories `DEVKIT_MAVEN_MIRROR` lists, devkit's default list when it is
-unset, empty or blank (advisory, needs the network), and the Quarkus and Vaadin
-parents' the same way:
-
-```sh
-PROJECT_ROOT=java/parent python3 scripts/java/version_check.py
-PROJECT_ROOT=java/quarkus python3 scripts/java/version_check.py
-PROJECT_ROOT=java/vaadin python3 scripts/java/version_check.py
-```
+unset, empty or blank, with `make check-versions` (advisory, needs the
+network; `make check` runs it too).
 
 Run `make audit` as well; unlike that check, it must pass: a release ships
 its closures to every consumer that bumps to it, so a failing advisory is

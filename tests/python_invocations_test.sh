@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for the rule of docs/contract.md ("every helper runs with python3 -I"):
-# every command that runs python3 or a venv's python in scripts/, make/ and
-# devkitw (python3 SCRIPT, python3 -m, python3 -c, "$VENV/bin/python" ...) has -I
-# as its first argument, so that no PYTHON* variable, user site or working
+# every command that runs python3 or a venv's python in scripts/, make/, devkitw
+# and the Makefile (python3 SCRIPT, python3 -m, python3 -c, "$VENV/bin/python"
+# ...) has -I as its first argument, so that no PYTHON* variable, user site or working
 # directory reaches it. A call without it must fail, naming file:line; the check
 # is shown to see each shape on scratch copies of the tree. Prints PASS/FAIL per
 # case. No network.
@@ -13,13 +13,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fails=0
 
-# calls DIR: every python invocation under DIR (scripts, make, devkitw), as file:line:text. A
-# command is python3 or a path ending /bin/python, quoted or not, at the start of a line or after
-# | ; & ( ! exec then do else, so that a word in an echoed message is not one.
+# calls DIR: every python invocation under DIR (scripts, make, devkitw, Makefile), as
+# file:line:text. A command is python3 or a path ending /bin/python, quoted or not, at the start of a line or after
+# | ; & ( ! exec then do else, so that a word in an echoed message is not one, and after any
+# NAME=value prefixes there.
 calls() {
   (cd "$1" && grep -rnE --exclude-dir=__pycache__ --exclude='*.py' \
-    "(^[[:space:]]*|[|;&(!][[:space:]]*|(exec|then|do|else)[[:space:]]+)(python3|\"?[^[:space:]\"]*/bin/python\"?)([[:space:]]|\$)" \
-    scripts make devkitw)
+    "(^[[:space:]]*|[|;&(!][[:space:]]*|(exec|then|do|else)[[:space:]]+)([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(python3|\"?[^[:space:]\"]*/bin/python\"?)([[:space:]]|\$)" \
+    scripts make devkitw Makefile)
 }
 
 # unisolated DIR: the invocations under DIR whose first argument is not -I, one per line; fails
@@ -51,7 +52,7 @@ result() {
 broken() {
   local copy=$work/copy-${1//[^a-z]/-} line
   mkdir -p "$copy"
-  cp -R "$root/scripts" "$root/make" "$root/devkitw" "$copy/"
+  cp -R "$root/scripts" "$root/make" "$root/devkitw" "$root/Makefile" "$copy/"
   sed "$3" "$copy/$2" >"$copy/$2.new"
   if cmp -s "$copy/$2" "$copy/$2.new"; then
     echo "FAIL $1: the sed changed nothing in $2"
@@ -64,13 +65,14 @@ broken() {
   result "$1" 1 "$2:$line:" "$copy"
 }
 
-result "every python invocation of scripts/, make/ and devkitw has -I" 0 "" "$root"
+result "every python invocation of scripts/, make/, devkitw and the Makefile has -I" 0 "" "$root"
 broken "a python3 SCRIPT call without -I fails" scripts/pins.sh 's/python3 -I /python3 /' 'python3 '
 broken "a python3 -c call without -I fails" scripts/lib/node_closure.sh 's/python3 -I -c/python3 -c/' 'python3 -c'
 broken "a python3 -m call without -I fails" scripts/lib/get_uv.sh 's/python3 -I -m venv/python3 -m venv/' 'python3 -m venv'
 broken "a venv python call without -I fails" scripts/python/lint.sh 's|bin/python" -I -S|bin/python" -S|' 'bin/python" -S'
 broken "a venv python -m call without -I fails" scripts/lib/get_uv.sh 's|venv/bin/python" -I -m|venv/bin/python" -m|' 'venv/bin/python" -m'
 broken "a call after a pipe without -I fails" scripts/markdown.sh 's/| python3 -I /| python3 /' '| python3 '
+broken "a call after a NAME=value prefix without -I fails" scripts/pins.sh 's/exec python3 -I /CHECK=1 python3 /' 'CHECK=1 python3 '
 # shellcheck disable=SC2016 # the $( is literal
 broken "a call in a command substitution without -I fails" scripts/python/check.sh 's/members=[$](python3 -I /members=$(python3 /' 'members=$(python3'
 

@@ -9,6 +9,7 @@
 #   shell  that PARENTS (scripts/java/parent_check.py) lists two or more
 #          existing files, shellcheck every script, then tests/devkitw_test.sh,
 #          tests/select_modules_test.sh, tests/make_test.sh,
+#          tests/devkit_makefile_test.sh,
 #          tests/kill_test.sh, tests/check_frontend_deps_test.sh,
 #          tests/parent_check_test.sh, tests/check_pins_test.sh,
 #          tests/check_decisions_test.sh, tests/devkitw_lint_test.sh,
@@ -322,6 +323,7 @@ shell_tests() { # every test file of the shell part, run again by the floor part
   check "devkitw tests" "$root/tests/devkitw_test.sh"
   check "select_modules tests" "$root/tests/select_modules_test.sh"
   check "make tests" "$root/tests/make_test.sh"
+  check "devkit Makefile tests" "$root/tests/devkit_makefile_test.sh"
   check "kill tests" "$root/tests/kill_test.sh"
   check "check_frontend_deps tests" "$root/tests/check_frontend_deps_test.sh"
   check "formatter_lockfile tests" "$root/tests/formatter_lockfile_test.sh"
