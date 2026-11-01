@@ -458,9 +458,9 @@ shell_part() {
   check "parent: the checksums check rejects a file without a build extension's jar, naming it" \
     checksums_reject '/\/quarkus-maven-plugin\/.*\.jar$/d' "io/quarkus/platform/quarkus-maven-plugin/3.40.1.1/quarkus-maven-plugin-3.40.1.1.jar" "make maven-checksums"
   check "parent: the checksums check rejects a file without the Vaadin BOM's .pom, naming it" \
-    checksums_reject '/\/vaadin-bom\/.*\.pom$/d' "com/vaadin/vaadin-bom/25.3.3/vaadin-bom-25.3.3.pom" "make maven-checksums"
+    checksums_reject '/\/vaadin-bom\/.*\.pom$/d' "com/vaadin/vaadin-bom/25.3.4/vaadin-bom-25.3.4.pom" "make maven-checksums"
   check "parent: the checksums check rejects a file without the Vaadin plugin's jar, naming it" \
-    checksums_reject '/\/vaadin-maven-plugin\/.*\.jar$/d' "com/vaadin/vaadin-maven-plugin/25.3.3/vaadin-maven-plugin-25.3.3.jar" "make maven-checksums"
+    checksums_reject '/\/vaadin-maven-plugin\/.*\.jar$/d' "com/vaadin/vaadin-maven-plugin/25.3.4/vaadin-maven-plugin-25.3.4.jar" "make maven-checksums"
   check "scripts: MVN_LAUNCHER, which skips the checksums check, is used only by get_maven.sh, mvn_checked.sh and maven_checksums.sh" \
     launcher_uses scripts/lib/get_maven.sh scripts/lib/mvn_checked.sh scripts/maven_checksums.sh
   check "parent: the checksums check rejects a file without the plugins check_frontend_deps.py runs" \

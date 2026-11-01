@@ -708,6 +708,15 @@ lock --upgrade-package certifi` and `make install`, with that uv or later (`uv
 --version`): one older than 0.13.5 lacks some or all of uv's CA protections
 above, and that one relock answers both the uv floor and the certifi floor.
 
+The parent now runs Checkstyle 14.4.0 rather than 14.3.0,
+maven-enforcer-plugin 3.7.0 rather than 3.6.3, JaCoCo 0.8.16 rather than
+0.8.15, and Surefire and Failsafe 3.6.1 rather than 3.6.0. A check Checkstyle
+14.4.0 tightens fails the build on code that passed before: a new finding is
+fixed with the bump, or suppressed where the contract allows it. The Vaadin
+parent pins Vaadin 25.3.4 and its default Node, v24.22.1, so a project that
+generated its frontend files at 25.3.3 regenerates them (`check_frontend_deps`
+fails until it does), and its frontend build installs that Node.
+
 ### Upgrading from v0.7.x
 
 `devkitw` (revision 3) carries devkit's release key,

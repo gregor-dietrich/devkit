@@ -21,7 +21,7 @@
 
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-parent</artifactId>
-  <version>0.8.0</version>
+  <version>0.9.0</version>
   <packaging>pom</packaging>
 
   <properties>
@@ -29,12 +29,12 @@
          <properties> override them. -->
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-    <checkstyle.version>14.3.0</checkstyle.version>
+    <checkstyle.version>14.4.0</checkstyle.version>
     <checkstyle-plugin.version>3.6.0</checkstyle-plugin.version>
     <compiler-plugin.version>3.16.0</compiler-plugin.version>
     <dependency-check-plugin.version>13.0.0</dependency-check-plugin.version>
     <eclipse-formatter.version>4.41</eclipse-formatter.version>
-    <enforcer-plugin.version>3.6.3</enforcer-plugin.version>
+    <enforcer-plugin.version>3.7.0</enforcer-plugin.version>
     <error-prone.version>2.51.0</error-prone.version>
     <!-- find-sec-bugs, the security detectors SpotBugs loads beside its own. It builds against
          SpotBugs' plugin API, not the analyzer spotbugs.version names, so a bump of either is
@@ -43,7 +43,7 @@
     <findsecbugs.version>1.14.0</findsecbugs.version>
     <flatten-plugin.version>1.8.0</flatten-plugin.version>
     <!-- Also drives the org.jacoco artifacts quarkus-jacoco uses. See dependencyManagement. -->
-    <jacoco-plugin.version>0.8.15</jacoco-plugin.version>
+    <jacoco-plugin.version>0.8.16</jacoco-plugin.version>
     <license-plugin.version>2.7.1</license-plugin.version>
     <nullaway.version>0.14.3</nullaway.version>
     <pmd-plugin.version>3.28.0</pmd-plugin.version>
@@ -54,7 +54,7 @@
          plugin bumps this too. Also drives spotbugs-annotations. See dependencyManagement. -->
     <spotbugs.version>4.10.5</spotbugs.version>
     <spotless-plugin.version>3.10.4</spotless-plugin.version>
-    <surefire-plugin.version>3.6.0</surefire-plugin.version>
+    <surefire-plugin.version>3.6.1</surefire-plugin.version>
 
     <!-- The JDK and Maven versions the enforcer accepts. make passes the JDK range of
          JAVA_VERSION on the command line; a build outside make (an IDE) has none, so any JDK

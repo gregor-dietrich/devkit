@@ -1,4 +1,4 @@
-# devkit consumer contract (v0.8.0)
+# devkit consumer contract (v0.9.0)
 
 The interface between devkit and a project that uses it. Every file in
 devkit is written against this page; change it here first.
@@ -33,7 +33,7 @@ devkit is written against this page; change it here first.
 [devkit]
 url = "https://git.vptr.de/gregor/devkit.git"
 # mirror = "https://github.com/<owner>/devkit.git"   # optional, when url is unreachable
-version = "v0.8.0"
+version = "v0.9.0"
 commit = "<40-hex commit the tag resolves to>"
 
 # Required when FRONTEND_DIR is set; an empty table declares none.
@@ -962,12 +962,12 @@ inherit it, or a parent derived from it ([Quarkus parent](#quarkus-parent),
 <parent>
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-parent</artifactId>
-  <version>0.8.0</version>
+  <version>0.9.0</version>
   <relativePath>.devkit/java/parent/pom.xml</relativePath>
 </parent>
 ```
 
-- Its version is the release tag without the `v` (`v0.8.0` → `0.8.0`),
+- Its version is the release tag without the `v` (`v0.9.0` → `0.9.0`),
   literal, never a property. A bump edits it together with `version` and
   `commit` in `devkit.toml`. The parent is published to no repository: the
   link is the only way to reach it.
@@ -1394,7 +1394,7 @@ Quarkus project, or of a multi-module one, inherits it in place of
 <parent>
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-quarkus-parent</artifactId>
-  <version>0.8.0</version>
+  <version>0.9.0</version>
   <relativePath>.devkit/java/quarkus/pom.xml</relativePath>
 </parent>
 ```
@@ -1470,7 +1470,7 @@ parent):
 <parent>
   <groupId>de.vptr.devkit</groupId>
   <artifactId>devkit-vaadin-parent</artifactId>
-  <version>0.8.0</version>
+  <version>0.9.0</version>
   <relativePath>.devkit/java/vaadin/pom.xml</relativePath>
 </parent>
 ```

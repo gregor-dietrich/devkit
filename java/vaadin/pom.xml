@@ -22,7 +22,7 @@
   <parent>
     <groupId>de.vptr.devkit</groupId>
     <artifactId>devkit-quarkus-parent</artifactId>
-    <version>0.8.0</version>
+    <version>0.9.0</version>
     <relativePath>../quarkus/pom.xml</relativePath>
   </parent>
 
@@ -31,9 +31,9 @@
   <packaging>pom</packaging>
 
   <properties>
-    <vaadin.version>25.3.3</vaadin.version>
+    <vaadin.version>25.3.4</vaadin.version>
     <!-- Bump together with vaadin.version, to the new release's FrontendTools.DEFAULT_NODE_VERSION. -->
-    <vaadin.node.version>v24.21.0</vaadin.node.version>
+    <vaadin.node.version>v24.22.1</vaadin.node.version>
     <!-- Defaults a module overrides in its own <properties>. -->
     <vaadin.require.home.node>true</vaadin.require.home.node>
     <vaadin.ci.build>true</vaadin.ci.build>
